@@ -15,6 +15,10 @@ public class ItemBatchesController : ControllerBase
 
     public ItemBatchesController(IItemBatchService batches) => _batches = batches;
 
+    [HttpGet]
+    public async Task<IActionResult> GetAll()
+        => Ok(await _batches.GetAllAsync());
+
     [HttpGet("by-item/{inventoryItemId}")]
     public async Task<IActionResult> GetByItem(int inventoryItemId)
         => Ok(await _batches.GetByItemAsync(inventoryItemId));
