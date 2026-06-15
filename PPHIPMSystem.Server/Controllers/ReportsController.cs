@@ -7,7 +7,7 @@ namespace PPHIPMSystem.Server.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize(Roles = "HospitalAdministrator,ProcurementStaff,InventoryOfficer")]
+[Authorize(Roles = "SuperAdmin,HospitalAdministrator,ProcurementStaff,InventoryOfficer")]
 public class ReportsController : ControllerBase
 {
     private readonly IReportService _reports;
