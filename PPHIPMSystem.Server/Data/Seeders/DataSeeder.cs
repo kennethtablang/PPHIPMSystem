@@ -17,6 +17,7 @@ public static class DataSeeder
 
         await SeedDepartments(db);
         await SeedCategories(db);
+        await SeedSuperAdmin(db, userManager);
         await SeedUsers(db, userManager);
         await SeedSuppliers(db);
     }
@@ -63,9 +64,34 @@ public static class DataSeeder
         await db.SaveChangesAsync();
     }
 
+    private static async Task SeedSuperAdmin(ApplicationDbContext db, UserManager<ApplicationUser> userManager)
+    {
+        if (await db.Users.AnyAsync(u => u.UserName == "superadmin")) return;
+
+        var adminDept = await db.Departments.FirstAsync(d => d.Name == "Administration");
+
+        var superAdmin = new ApplicationUser
+        {
+            EmployeeId = "SA-001",
+            FirstName = "System",
+            LastName = "Administrator",
+            UserName = "superadmin",
+            Email = "superadmin@pph.gov.ph",
+            Role = UserRole.SuperAdmin,
+            DepartmentId = adminDept.Id
+        };
+
+        var result = await userManager.CreateAsync(superAdmin, "PPHipm@2025!");
+        if (!result.Succeeded)
+        {
+            var errors = string.Join("; ", result.Errors.Select(e => e.Description));
+            throw new Exception($"Failed to seed SuperAdmin: {errors}");
+        }
+    }
+
     private static async Task SeedUsers(ApplicationDbContext db, UserManager<ApplicationUser> userManager)
     {
-        if (await db.Users.AnyAsync()) return;
+        if (await db.Users.AnyAsync(u => u.UserName == "admin.santos")) return;
 
         var adminDept = await db.Departments.FirstAsync(d => d.Name == "Administration");
         var pharmacyDept = await db.Departments.FirstAsync(d => d.Name == "Pharmacy");
@@ -128,7 +154,7 @@ public static class DataSeeder
 
         foreach (var user in users)
         {
-            var result = await userManager.CreateAsync(user, "PPH@2025!");
+            var result = await userManager.CreateAsync(user, "PPHipm@2025!");
             if (!result.Succeeded)
             {
                 var errors = string.Join("; ", result.Errors.Select(e => e.Description));
