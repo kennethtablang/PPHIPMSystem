@@ -1,0 +1,8 @@
+import api from './axios';
+export const getUsers = (p = {}) => api.get('/users', { params: p });
+export const getUser = id => api.get(`/users/${id}`);
+export const createUser = d => api.post('/users', d);
+export const updateUser = (id, d) => api.put(`/users/${id}`, d);
+export const resetPassword = (id, newPassword) => api.patch(`/users/${id}/reset-password`, { newPassword });
+export const deactivateUser = id => api.patch(`/users/${id}/deactivate`);
+export const deleteUser = id => api.delete(`/users/${id}`);

@@ -1,0 +1,9 @@
+import api from './axios';
+export const getRequests = (p = {}) => api.get('/procurement', { params: p });
+export const getRequest = id => api.get(`/procurement/${id}`);
+export const createRequest = d => api.post('/procurement', d);
+export const approveRequest = (id, d) => api.patch(`/procurement/${id}/approve`, d);
+export const generatePO = (id, d) => api.post(`/procurement/${id}/purchase-order`, d);
+export const getPurchaseOrders = () => api.get('/procurement/purchase-orders');
+export const getPurchaseOrder = id => api.get(`/procurement/purchase-orders/${id}`);
+export const confirmDelivery = id => api.patch(`/procurement/purchase-orders/${id}/confirm-delivery`);

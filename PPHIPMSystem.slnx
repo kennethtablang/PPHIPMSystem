@@ -1,0 +1,7 @@
+<Solution>
+  <Project Path="pphipmsystem.client/pphipmsystem.client.esproj">
+    <Build />
+    <Deploy />
+  </Project>
+  <Project Path="PPHIPMSystem.Server/PPHIPMSystem.Server.csproj" />
+</Solution>

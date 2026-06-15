@@ -1,0 +1,13 @@
+using PPHIPMSystem.Server.DTOs.User;
+
+namespace PPHIPMSystem.Server.Interfaces;
+
+public interface IUserService
+{
+    Task<IEnumerable<UserDto>> GetAllAsync();
+    Task<UserDto?> GetByIdAsync(string id);
+    Task<UserDto> CreateAsync(CreateUserDto dto);
+    Task<UserDto?> UpdateAsync(string id, UpdateUserDto dto);
+    Task<bool> DeactivateAsync(string id);
+    Task<bool> DeleteAsync(string id);
+}

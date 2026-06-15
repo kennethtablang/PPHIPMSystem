@@ -1,0 +1,6 @@
+@PPHIPMSystem.Server_HostAddress = http://localhost:5241
+
+GET {{PPHIPMSystem.Server_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
