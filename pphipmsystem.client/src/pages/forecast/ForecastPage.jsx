@@ -1,23 +1,28 @@
 import { useEffect, useState } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, BarChart, Bar } from 'recharts';
-import { MdAutoGraph, MdRefresh } from 'react-icons/md';
-import { getForecasts, generateForecast, getConsumptionRecords } from '../../api/forecast';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { MdAutoGraph, MdRefresh, MdAdd } from 'react-icons/md';
+import { getForecasts, generateForecast, getConsumptionRecords, upsertConsumption } from '../../api/forecast';
 import { getItems } from '../../api/inventory';
 import { toast } from '../../components/common/Toast';
 import { useAuth } from '../../context/AuthContext';
+import Modal from '../../components/common/Modal';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 export default function ForecastPage() {
   const { user } = useAuth();
-  const canGenerate = ['HospitalAdministrator', 'InventoryOfficer'].includes(user?.role);
+  const canGenerate = ['SuperAdmin', 'HospitalAdministrator', 'InventoryOfficer'].includes(user?.role);
 
+  const now = new Date();
   const [items, setItems] = useState([]);
   const [selectedItem, setSelectedItem] = useState('');
   const [forecasts, setForecasts] = useState([]);
   const [consumption, setConsumption] = useState([]);
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [consumptionModal, setConsumptionModal] = useState(false);
+  const [consumptionForm, setConsumptionForm] = useState({ month: now.getMonth() + 1, year: now.getFullYear(), quantity: '' });
+  const [savingConsumption, setSavingConsumption] = useState(false);
 
   useEffect(() => { getItems().then(r => setItems(r.data)); }, []);
 
@@ -52,6 +57,18 @@ export default function ForecastPage() {
     finally { setGenerating(false); }
   };
 
+  const saveConsumption = async () => {
+    if (!consumptionForm.quantity || +consumptionForm.quantity < 0) return;
+    setSavingConsumption(true);
+    try {
+      await upsertConsumption({ inventoryItemId: +selectedItem, month: +consumptionForm.month, year: +consumptionForm.year, quantity: +consumptionForm.quantity });
+      toast.success('Consumption record saved.');
+      setConsumptionModal(false);
+      load(selectedItem);
+    } catch (e) { toast.error(e.response?.data?.message ?? 'Failed to save consumption.'); }
+    finally { setSavingConsumption(false); }
+  };
+
   const chartData = (() => {
     const map = {};
     consumption.forEach(c => { const k = `${c.year}-${String(c.month).padStart(2, '0')}`; map[k] = { period: `${MONTHS[c.month - 1]} ${c.year}`, consumption: c.quantity }; });
@@ -69,10 +86,19 @@ export default function ForecastPage() {
           <h1 className="page-title">Demand Forecasting</h1>
           <p className="page-subtitle">Moving average and exponential smoothing forecasts based on consumption history</p>
         </div>
-        {canGenerate && selectedItem && (
-          <button className="btn btn-primary" onClick={generate} disabled={generating}>
-            <MdAutoGraph size={16} /> {generating ? 'Generating…' : 'Generate Forecast'}
-          </button>
+        {selectedItem && (
+          <div style={{ display: 'flex', gap: 8 }}>
+            {canGenerate && (
+              <button className="btn btn-secondary" onClick={() => setConsumptionModal(true)}>
+                <MdAdd size={16} /> Add Consumption
+              </button>
+            )}
+            {canGenerate && (
+              <button className="btn btn-primary" onClick={generate} disabled={generating}>
+                <MdAutoGraph size={16} /> {generating ? 'Generating…' : 'Generate Forecast'}
+              </button>
+            )}
+          </div>
         )}
       </div>
 
@@ -210,6 +236,41 @@ export default function ForecastPage() {
             </div>
           )}
         </>
+      )}
+
+      {consumptionModal && (
+        <Modal
+          title={`Add Consumption — ${currentItem?.name ?? ''}`}
+          onClose={() => setConsumptionModal(false)}
+          footer={
+            <>
+              <button className="btn btn-secondary" onClick={() => setConsumptionModal(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={saveConsumption} disabled={savingConsumption}>
+                {savingConsumption ? 'Saving…' : 'Save'}
+              </button>
+            </>
+          }
+        >
+          <div className="grid-2">
+            <div className="form-group">
+              <label className="form-label">Month *</label>
+              <select className="form-control" value={consumptionForm.month} onChange={e => setConsumptionForm(p => ({ ...p, month: +e.target.value }))}>
+                {MONTHS.map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Year *</label>
+              <input className="form-control" type="number" min="2020" max={now.getFullYear()} value={consumptionForm.year} onChange={e => setConsumptionForm(p => ({ ...p, year: +e.target.value }))} />
+            </div>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Quantity Consumed *</label>
+            <input className="form-control" type="number" min="0" step="0.01" value={consumptionForm.quantity} onChange={e => setConsumptionForm(p => ({ ...p, quantity: e.target.value }))} placeholder="0.00" />
+          </div>
+          <div className="alert alert-info">
+            Saving will overwrite any existing record for the same month/year. Used to calculate demand forecasts.
+          </div>
+        </Modal>
       )}
     </div>
   );

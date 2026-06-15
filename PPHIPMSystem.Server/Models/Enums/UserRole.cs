@@ -5,5 +5,6 @@ public enum UserRole
     InventoryOfficer,
     ProcurementStaff,
     DepartmentHead,
-    HospitalAdministrator
+    HospitalAdministrator,
+    SuperAdmin
 }

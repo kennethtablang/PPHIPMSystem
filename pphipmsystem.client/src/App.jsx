@@ -32,7 +32,7 @@ function PrivateRoute({ children, roles }) {
 }
 
 function AdminRoute({ children }) {
-  return <PrivateRoute roles={['HospitalAdministrator']}>{children}</PrivateRoute>;
+  return <PrivateRoute roles={['SuperAdmin', 'HospitalAdministrator']}>{children}</PrivateRoute>;
 }
 
 export default function App() {
@@ -46,23 +46,23 @@ export default function App() {
           <Route path="dashboard" element={<Dashboard />} />
 
           <Route path="inventory" element={<InventoryList />} />
-          <Route path="inventory/batches" element={<ItemBatches />} />
+          <Route path="batches" element={<ItemBatches />} />
 
-          <Route path="stock/movements" element={<StockMovements />} />
-          <Route path="stock/adjustments" element={<StockAdjustments />} />
+          <Route path="stock-movements" element={<StockMovements />} />
+          <Route path="stock-adjustments" element={<StockAdjustments />} />
 
           <Route path="suppliers" element={<SupplierList />} />
-          <Route path="procurement/requests" element={<ProcurementList />} />
-          <Route path="procurement/purchase-orders" element={<PurchaseOrders />} />
+          <Route path="procurement" element={<ProcurementList />} />
+          <Route path="purchase-orders" element={<PurchaseOrders />} />
 
           <Route path="forecast" element={<ForecastPage />} />
           <Route path="reports" element={<ReportsPage />} />
           <Route path="notifications" element={<NotificationsPage />} />
 
-          <Route path="admin/users" element={<AdminRoute><UsersPage /></AdminRoute>} />
-          <Route path="admin/departments" element={<AdminRoute><DepartmentsPage /></AdminRoute>} />
-          <Route path="admin/categories" element={<AdminRoute><CategoriesPage /></AdminRoute>} />
-          <Route path="audit" element={<AdminRoute><AuditLogPage /></AdminRoute>} />
+          <Route path="users" element={<AdminRoute><UsersPage /></AdminRoute>} />
+          <Route path="departments" element={<AdminRoute><DepartmentsPage /></AdminRoute>} />
+          <Route path="categories" element={<AdminRoute><CategoriesPage /></AdminRoute>} />
+          <Route path="audit-logs" element={<AdminRoute><AuditLogPage /></AdminRoute>} />
         </Route>
 
         <Route path="*" element={<Navigate to="/dashboard" replace />} />

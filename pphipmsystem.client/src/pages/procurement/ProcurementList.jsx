@@ -9,8 +9,8 @@ import { useAuth } from '../../context/AuthContext';
 
 export default function ProcurementList() {
   const { user } = useAuth();
-  const canCreate = ['HospitalAdministrator', 'DepartmentHead'].includes(user?.role);
-  const canApprove = ['HospitalAdministrator', 'ProcurementStaff', 'InventoryOfficer'].includes(user?.role);
+  const canCreate = ['SuperAdmin', 'HospitalAdministrator', 'DepartmentHead'].includes(user?.role);
+  const canApprove = ['SuperAdmin', 'HospitalAdministrator', 'ProcurementStaff', 'InventoryOfficer'].includes(user?.role);
 
   const [requests, setRequests] = useState([]);
   const [items, setItems] = useState([]);
@@ -125,7 +125,7 @@ export default function ProcurementList() {
                           Review
                         </button>
                       )}
-                      {canApprove && r.status === 'ApprovedByProcurement' && user?.role === 'HospitalAdministrator' && (
+                      {canApprove && r.status === 'ApprovedByProcurement' && ['SuperAdmin', 'HospitalAdministrator'].includes(user?.role) && (
                         <button className="btn btn-primary btn-sm" onClick={() => { setApproveModal(r); setApproveForm({ action: 'Approve', remarks: '' }); }}>
                           Final Approve
                         </button>

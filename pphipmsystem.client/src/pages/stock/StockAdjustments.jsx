@@ -11,8 +11,8 @@ const BLANK = { inventoryItemId: '', physicalCount: '', reason: '' };
 
 export default function StockAdjustments() {
   const { user } = useAuth();
-  const canCreate = ['HospitalAdministrator', 'InventoryOfficer'].includes(user?.role);
-  const canApprove = user?.role === 'HospitalAdministrator';
+  const canCreate = ['SuperAdmin', 'HospitalAdministrator', 'InventoryOfficer'].includes(user?.role);
+  const canApprove = ['SuperAdmin', 'HospitalAdministrator'].includes(user?.role);
 
   const [list, setList] = useState([]);
   const [items, setItems] = useState([]);

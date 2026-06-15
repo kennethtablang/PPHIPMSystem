@@ -23,6 +23,17 @@ public class ItemBatchService : IItemBatchService
         _audit = audit;
     }
 
+    public async Task<IEnumerable<ItemBatchDto>> GetAllAsync()
+    {
+        var batches = await _db.ItemBatches
+            .Include(b => b.InventoryItem)
+            .Include(b => b.PurchaseOrder)
+            .Where(b => b.RemainingQuantity > 0)
+            .OrderBy(b => b.ExpirationDate)
+            .ToListAsync();
+        return _mapper.Map<IEnumerable<ItemBatchDto>>(batches);
+    }
+
     public async Task<IEnumerable<ItemBatchDto>> GetByItemAsync(int inventoryItemId)
     {
         var batches = await _db.ItemBatches

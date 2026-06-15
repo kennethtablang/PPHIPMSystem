@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { MdAdd, MdDelete, MdWarning } from 'react-icons/md';
-import { getExpiringBatches, getBatchesByItem, createBatch, disposeBatch } from '../../api/batches';
+import { MdAdd, MdWarning } from 'react-icons/md';
+import { getAllBatches, getExpiringBatches, createBatch, disposeBatch } from '../../api/batches';
 import { getItems } from '../../api/inventory';
 import Modal from '../../components/common/Modal';
 import { toast } from '../../components/common/Toast';
@@ -10,11 +10,12 @@ const BLANK = { inventoryItemId: '', lotNumber: '', quantity: '', expirationDate
 
 export default function ItemBatches() {
   const { user } = useAuth();
-  const canEdit = ['HospitalAdministrator', 'InventoryOfficer'].includes(user?.role);
+  const canEdit = ['SuperAdmin', 'HospitalAdministrator', 'InventoryOfficer'].includes(user?.role);
 
   const [batches, setBatches] = useState([]);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [view, setView] = useState('expiring');
   const [warningDays, setWarningDays] = useState(90);
   const [modal, setModal] = useState(false);
   const [form, setForm] = useState(BLANK);
@@ -22,11 +23,12 @@ export default function ItemBatches() {
 
   const load = () => {
     setLoading(true);
-    getExpiringBatches(warningDays).then(r => setBatches(r.data)).finally(() => setLoading(false));
+    const req = view === 'all' ? getAllBatches() : getExpiringBatches(warningDays);
+    req.then(r => setBatches(r.data)).finally(() => setLoading(false));
   };
 
   useEffect(() => { getItems().then(r => setItems(r.data)); }, []);
-  useEffect(() => { load(); }, [warningDays]);
+  useEffect(() => { load(); }, [view, warningDays]);
 
   const set = k => e => setForm(p => ({ ...p, [k]: e.target.value }));
 
@@ -65,14 +67,17 @@ export default function ItemBatches() {
       </div>
 
       <div className="filter-bar">
-        <label style={{ fontSize: 13, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Show expiring within:</label>
-        {[30, 60, 90, 180].map(d => (
-          <button
-            key={d}
-            className={`btn ${warningDays === d ? 'btn-primary' : 'btn-secondary'} btn-sm`}
-            onClick={() => setWarningDays(d)}
-          >{d} days</button>
-        ))}
+        <button className={`btn btn-sm ${view === 'expiring' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setView('expiring')}>Expiring Soon</button>
+        <button className={`btn btn-sm ${view === 'all' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setView('all')}>All Batches</button>
+        {view === 'expiring' && (
+          <>
+            <div style={{ width: 1, background: 'var(--border)', margin: '0 4px' }} />
+            <label style={{ fontSize: 13, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>Within:</label>
+            {[30, 60, 90, 180].map(d => (
+              <button key={d} className={`btn ${warningDays === d ? 'btn-primary' : 'btn-secondary'} btn-sm`} onClick={() => setWarningDays(d)}>{d}d</button>
+            ))}
+          </>
+        )}
       </div>
 
       {loading ? (
@@ -95,7 +100,7 @@ export default function ItemBatches() {
             <tbody>
               {batches.length === 0 ? (
                 <tr><td colSpan={8} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
-                  No batches expiring within {warningDays} days.
+                  {view === 'all' ? 'No active batches found.' : `No batches expiring within ${warningDays} days.`}
                 </td></tr>
               ) : batches.map(b => (
                 <tr key={b.id}>

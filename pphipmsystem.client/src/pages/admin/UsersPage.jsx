@@ -5,7 +5,7 @@ import { getDepartments } from '../../api/departments';
 import Modal from '../../components/common/Modal';
 import { toast } from '../../components/common/Toast';
 
-const ROLES = ['HospitalAdministrator', 'InventoryOfficer', 'ProcurementStaff', 'DepartmentHead'];
+const ROLES = ['SuperAdmin', 'HospitalAdministrator', 'InventoryOfficer', 'ProcurementStaff', 'DepartmentHead'];
 const BLANK = { username: '', password: '', firstName: '', lastName: '', employeeId: '', role: 'InventoryOfficer', departmentId: '', email: '', phoneNumber: '' };
 
 export default function UsersPage() {
@@ -53,8 +53,8 @@ export default function UsersPage() {
     finally { setSaving(false); }
   };
 
-  const roleColor = r => ({ HospitalAdministrator: 'badge-purple', InventoryOfficer: 'badge-green', ProcurementStaff: 'badge-blue', DepartmentHead: 'badge-teal' }[r] ?? 'badge-gray');
-  const roleLabel = r => ({ HospitalAdministrator: 'Admin', InventoryOfficer: 'Inv. Officer', ProcurementStaff: 'Procurement', DepartmentHead: 'Dept Head' }[r] ?? r);
+  const roleColor = r => ({ SuperAdmin: 'badge-red', HospitalAdministrator: 'badge-purple', InventoryOfficer: 'badge-green', ProcurementStaff: 'badge-blue', DepartmentHead: 'badge-teal' }[r] ?? 'badge-gray');
+  const roleLabel = r => ({ SuperAdmin: 'Super Admin', HospitalAdministrator: 'Admin', InventoryOfficer: 'Inv. Officer', ProcurementStaff: 'Procurement', DepartmentHead: 'Dept Head' }[r] ?? r);
 
   return (
     <div>

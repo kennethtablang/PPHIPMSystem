@@ -4,7 +4,7 @@ namespace PPHIPMSystem.Server.Interfaces;
 
 public interface IReportService
 {
-    Task<IEnumerable<ConsumptionReportDto>> GetConsumptionReportAsync(ReportFilterDto filter);
-    Task<IEnumerable<ProcurementReportDto>> GetProcurementReportAsync(ReportFilterDto filter);
-    Task<IEnumerable<ForecastAccuracyReportDto>> GetForecastAccuracyReportAsync(ReportFilterDto filter);
+    Task<ConsumptionSummaryDto> GetConsumptionReportAsync(ReportFilterDto filter);
+    Task<ProcurementSummaryDto> GetProcurementReportAsync(ReportFilterDto filter);
+    Task<ForecastSummaryDto> GetForecastAccuracyReportAsync(ReportFilterDto filter);
 }

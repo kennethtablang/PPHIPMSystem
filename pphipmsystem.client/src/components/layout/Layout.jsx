@@ -8,7 +8,11 @@ export default function Layout() {
       <Sidebar />
       <div style={{
         marginLeft: 'var(--sidebar-width)',
-        flex: 1, display: 'flex', flexDirection: 'column', minHeight: '100vh',
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
+        minHeight: '100vh',
+        transition: 'margin-left 0.22s ease',
       }}>
         <Topbar />
         <main style={{ flex: 1, padding: '24px', overflow: 'auto' }}>

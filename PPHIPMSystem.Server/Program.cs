@@ -1,4 +1,5 @@
 using System.Text;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -57,6 +58,7 @@ namespace PPHIPMSystem.Server
             });
 
             builder.Services.AddAuthorization();
+            builder.Services.AddScoped<IClaimsTransformation, SuperAdminClaimsTransformation>();
 
             // AutoMapper
             builder.Services.AddAutoMapper(typeof(Program));
