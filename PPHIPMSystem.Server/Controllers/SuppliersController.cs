@@ -26,7 +26,7 @@ public class SuppliersController : ControllerBase
     }
 
     [HttpPost]
-    [Authorize(Roles = "HospitalAdministrator,ProcurementStaff")]
+    [Authorize(Roles = "SuperAdmin,HospitalAdministrator,ProcurementStaff")]
     public async Task<IActionResult> Create([FromBody] CreateSupplierDto dto)
     {
         var result = await _suppliers.CreateAsync(dto);
@@ -34,7 +34,7 @@ public class SuppliersController : ControllerBase
     }
 
     [HttpPut("{id}")]
-    [Authorize(Roles = "HospitalAdministrator,ProcurementStaff")]
+    [Authorize(Roles = "SuperAdmin,HospitalAdministrator,ProcurementStaff")]
     public async Task<IActionResult> Update(int id, [FromBody] CreateSupplierDto dto)
     {
         var result = await _suppliers.UpdateAsync(id, dto);
@@ -42,15 +42,20 @@ public class SuppliersController : ControllerBase
     }
 
     [HttpPatch("{id}/accreditation")]
-    [Authorize(Roles = "HospitalAdministrator,ProcurementStaff")]
+    [Authorize(Roles = "SuperAdmin,HospitalAdministrator,ProcurementStaff")]
     public async Task<IActionResult> UpdateAccreditation(int id, [FromBody] AccreditationUpdateDto dto)
     {
         var ok = await _suppliers.UpdateAccreditationAsync(id, dto.IsAccredited, dto.AccreditationExpiry);
         return ok ? NoContent() : NotFound();
     }
 
+    [HttpGet("{id}/orders")]
+    [Authorize(Roles = "SuperAdmin,HospitalAdministrator,ProcurementStaff,InventoryOfficer")]
+    public async Task<IActionResult> GetOrders(int id)
+        => Ok(await _suppliers.GetOrdersAsync(id));
+
     [HttpDelete("{id}")]
-    [Authorize(Roles = "HospitalAdministrator")]
+    [Authorize(Roles = "SuperAdmin,HospitalAdministrator")]
     public async Task<IActionResult> Delete(int id)
     {
         var ok = await _suppliers.DeleteAsync(id);

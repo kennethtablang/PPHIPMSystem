@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { MdAdd, MdWarning } from 'react-icons/md';
+import { MdAdd, MdWarning, MdDeleteForever } from 'react-icons/md';
 import { getAllBatches, getExpiringBatches, createBatch, disposeBatch } from '../../api/batches';
 import { getItems } from '../../api/inventory';
 import Modal from '../../components/common/Modal';
@@ -7,6 +7,13 @@ import { toast } from '../../components/common/Toast';
 import { useAuth } from '../../context/AuthContext';
 
 const BLANK = { inventoryItemId: '', lotNumber: '', quantity: '', expirationDate: '' };
+const DISPOSE_REASONS = [
+  'Expired — past expiration date',
+  'Damaged / contaminated',
+  'Quality failure',
+  'Recall by manufacturer',
+  'Other',
+];
 
 export default function ItemBatches() {
   const { user } = useAuth();
@@ -20,6 +27,9 @@ export default function ItemBatches() {
   const [modal, setModal] = useState(false);
   const [form, setForm] = useState(BLANK);
   const [saving, setSaving] = useState(false);
+  const [disposeModal, setDisposeModal] = useState(null); // batch to dispose
+  const [disposeReason, setDisposeReason] = useState(DISPOSE_REASONS[0]);
+  const [disposeCustom, setDisposeCustom] = useState('');
 
   const load = () => {
     setLoading(true);
@@ -44,10 +54,24 @@ export default function ItemBatches() {
     } finally { setSaving(false); }
   };
 
-  const dispose = async id => {
-    if (!confirm('Mark this batch as disposed? This will reduce stock quantity.')) return;
-    try { await disposeBatch(id); toast.success('Batch disposed.'); load(); }
-    catch { toast.error('Failed to dispose batch.'); }
+  const openDispose = batch => {
+    setDisposeModal(batch);
+    setDisposeReason(DISPOSE_REASONS[0]);
+    setDisposeCustom('');
+  };
+
+  const confirmDispose = async () => {
+    const reason = disposeReason === 'Other' ? disposeCustom.trim() : disposeReason;
+    if (!reason) { toast.error('Please enter a disposal reason.'); return; }
+    setSaving(true);
+    try {
+      await disposeBatch(disposeModal.id, reason);
+      toast.success('Batch marked for disposal. Stock reduced and audit logged.');
+      setDisposeModal(null);
+      load();
+    } catch (e) {
+      toast.error(e.response?.data?.message ?? 'Failed to dispose batch.');
+    } finally { setSaving(false); }
   };
 
   const daysColor = d => d < 0 ? '#b91c1c' : d <= 30 ? '#dc2626' : d <= 60 ? '#d97706' : '#059669';
@@ -127,8 +151,8 @@ export default function ItemBatches() {
                   {canEdit && (
                     <td>
                       {b.remainingQuantity > 0 && (
-                        <button className="btn btn-danger btn-sm" onClick={() => dispose(b.id)}>
-                          Dispose
+                        <button className="btn btn-danger btn-sm" onClick={() => openDispose(b)} title="Mark for disposal / write-off">
+                          <MdDeleteForever size={14} /> Dispose
                         </button>
                       )}
                     </td>
@@ -138,6 +162,53 @@ export default function ItemBatches() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {disposeModal && (
+        <Modal
+          title="Mark Batch for Disposal / Write-Off"
+          onClose={() => setDisposeModal(null)}
+          footer={
+            <>
+              <button className="btn btn-secondary" onClick={() => setDisposeModal(null)}>Cancel</button>
+              <button className="btn btn-danger" onClick={confirmDispose} disabled={saving}>
+                {saving ? 'Processing…' : 'Confirm Disposal'}
+              </button>
+            </>
+          }
+        >
+          <div style={{ background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: 12, padding: '12px 16px', fontSize: 13, color: '#b91c1c', marginBottom: 4 }}>
+            <strong>Item:</strong> {disposeModal.itemName}<br />
+            <strong>Lot:</strong> {disposeModal.lotNumber ?? 'N/A'} &nbsp;·&nbsp;
+            <strong>Quantity to dispose:</strong> {disposeModal.remainingQuantity} units<br />
+            <strong>Expires:</strong> {disposeModal.expirationDate ? new Date(disposeModal.expirationDate).toLocaleDateString('en-PH') : 'N/A'}
+          </div>
+          <div className="form-group">
+            <label className="form-label">Disposal Reason *</label>
+            <select
+              className="form-control"
+              value={disposeReason}
+              onChange={e => setDisposeReason(e.target.value)}
+            >
+              {DISPOSE_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+            </select>
+          </div>
+          {disposeReason === 'Other' && (
+            <div className="form-group">
+              <label className="form-label">Specify Reason *</label>
+              <textarea
+                className="form-control"
+                value={disposeCustom}
+                onChange={e => setDisposeCustom(e.target.value)}
+                placeholder="Describe the reason for disposal…"
+                rows={3}
+              />
+            </div>
+          )}
+          <div className="alert alert-warning" style={{ fontSize: 12 }}>
+            This action will reduce stock on hand by {disposeModal.remainingQuantity} units, create a Disposal stock movement, and record an audit log entry. This cannot be undone.
+          </div>
+        </Modal>
       )}
 
       {modal && (

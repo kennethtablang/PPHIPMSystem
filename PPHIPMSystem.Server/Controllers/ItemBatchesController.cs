@@ -37,11 +37,13 @@ public class ItemBatchesController : ControllerBase
     }
 
     [HttpPatch("{id}/dispose")]
-    [Authorize(Roles = "HospitalAdministrator,InventoryOfficer")]
-    public async Task<IActionResult> Dispose(int id)
+    [Authorize(Roles = "SuperAdmin,HospitalAdministrator,InventoryOfficer")]
+    public async Task<IActionResult> Dispose(int id, [FromBody] string reason)
     {
+        if (string.IsNullOrWhiteSpace(reason))
+            return BadRequest(new { message = "Disposal reason is required." });
         var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
-        var ok = await _batches.MarkExpiredForDisposalAsync(id, userId);
+        var ok = await _batches.MarkExpiredForDisposalAsync(id, userId, reason);
         return ok ? NoContent() : NotFound();
     }
 }

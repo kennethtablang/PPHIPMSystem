@@ -91,7 +91,7 @@ public class ItemBatchService : IItemBatchService
         return _mapper.Map<ItemBatchDto>(entity);
     }
 
-    public async Task<bool> MarkExpiredForDisposalAsync(int batchId, string userId)
+    public async Task<bool> MarkExpiredForDisposalAsync(int batchId, string userId, string reason)
     {
         var batch = await _db.ItemBatches.Include(b => b.InventoryItem).FirstOrDefaultAsync(b => b.Id == batchId);
         if (batch is null) return false;
@@ -110,12 +110,13 @@ public class ItemBatchService : IItemBatchService
             Quantity = disposalQty,
             QuantityBeforeMovement = item.QuantityOnHand + disposalQty,
             QuantityAfterMovement = item.QuantityOnHand,
-            Remarks = $"Expired batch {batch.LotNumber ?? batchId.ToString()} disposed",
+            Remarks = $"Disposal — {reason}. Batch: {batch.LotNumber ?? batchId.ToString()}",
             PerformedByUserId = userId
         });
 
         await _db.SaveChangesAsync();
-        await _audit.LogAsync(userId, "BatchDisposed", "ItemBatch", batchId, $"Disposed {disposalQty} of {item.Name}");
+        await _audit.LogAsync(userId, "BatchDisposed", "ItemBatch", batchId,
+            $"Disposed {disposalQty} of {item.Name}. Reason: {reason}. Batch: {batch.LotNumber ?? batchId.ToString()}");
         return true;
     }
 }

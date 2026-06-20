@@ -1,6 +1,7 @@
 using AutoMapper;
 using Microsoft.EntityFrameworkCore;
 using PPHIPMSystem.Server.Data;
+using PPHIPMSystem.Server.DTOs.Procurement;
 using PPHIPMSystem.Server.DTOs.Supplier;
 using PPHIPMSystem.Server.Interfaces;
 using PPHIPMSystem.Server.Models;
@@ -68,5 +69,18 @@ public class SupplierService : ISupplierService
         entity.IsActive = false;
         await _db.SaveChangesAsync();
         return true;
+    }
+
+    public async Task<IEnumerable<PurchaseOrderDto>> GetOrdersAsync(int supplierId)
+    {
+        var orders = await _db.PurchaseOrders
+            .Include(po => po.ProcurementRequest)
+            .Include(po => po.GeneratedByUser)
+            .Include(po => po.Items).ThenInclude(i => i.InventoryItem)
+            .Where(po => po.SupplierId == supplierId)
+            .OrderByDescending(po => po.GeneratedAt)
+            .ToListAsync();
+
+        return _mapper.Map<IEnumerable<PurchaseOrderDto>>(orders);
     }
 }

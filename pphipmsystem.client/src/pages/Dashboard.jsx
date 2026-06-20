@@ -1,14 +1,15 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getDashboard } from '../api/inventory';
+import { createMovement } from '../api/stockMovements';
 import { useAuth } from '../context/AuthContext';
 import {
   MdInventory, MdWarning, MdEvent, MdShoppingCart,
-  MdTune, MdNotifications, MdArrowForward, MdCircle
+  MdTune, MdNotifications, MdArrowForward, MdCircle, MdRepeat,
+  MdAddShoppingCart, MdFilterList,
 } from 'react-icons/md';
-import {
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer
-} from 'recharts';
+import Modal from '../components/common/Modal';
+import { toast } from '../components/common/Toast';
 
 function StatCard({ label, value, icon: Icon, color, onClick }) {
   return (
@@ -22,36 +23,49 @@ function StatCard({ label, value, icon: Icon, color, onClick }) {
   );
 }
 
-function AlertRow({ label, sub, color, onClick }) {
+function AlertRow({ label, sub, color, onClick, action }) {
   return (
     <div
-      onClick={onClick}
       style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '10px 14px', borderRadius: 'var(--radius-sm)',
-        cursor: 'pointer', transition: 'background .12s',
+        transition: 'background .12s',
         borderBottom: '1px solid var(--border)',
       }}
       onMouseEnter={e => e.currentTarget.style.background = 'var(--green-50)'}
       onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <div
+        style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, cursor: 'pointer' }}
+        onClick={onClick}
+      >
         <MdCircle size={8} color={color} />
         <div>
           <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)' }}>{label}</div>
           <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{sub}</div>
         </div>
       </div>
-      <MdArrowForward size={14} color="var(--text-muted)" />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        {action}
+        <MdArrowForward size={14} color="var(--text-muted)" style={{ cursor: 'pointer' }} onClick={onClick} />
+      </div>
     </div>
   );
 }
+
+const REPEATABLE = ['Receipt', 'Issuance'];
+const CAN_CREATE_PR = ['SuperAdmin', 'HospitalAdministrator', 'DepartmentHead'];
 
 export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [catFilter, setCatFilter] = useState('');
+  const [repeatTx, setRepeatTx] = useState(null);
+  const [repeatQty, setRepeatQty] = useState('');
+  const [repeatRemarks, setRepeatRemarks] = useState('');
+  const [repeating, setRepeating] = useState(false);
 
   useEffect(() => {
     getDashboard()
@@ -60,16 +74,36 @@ export default function Dashboard() {
       .finally(() => setLoading(false));
   }, []);
 
+  const openRepeat = tx => {
+    setRepeatTx(tx);
+    setRepeatQty(String(tx.quantity ?? ''));
+    setRepeatRemarks('');
+  };
+
+  const submitRepeat = async () => {
+    if (!repeatQty || +repeatQty <= 0) { toast.error('Quantity must be greater than 0.'); return; }
+    setRepeating(true);
+    try {
+      await createMovement({
+        inventoryItemId: repeatTx.inventoryItemId,
+        movementType: repeatTx.transactionType,
+        quantity: +repeatQty,
+        remarks: repeatRemarks || `Repeated from transaction #${repeatTx.referenceId}`,
+      });
+      toast.success(`${repeatTx.transactionType} repeated successfully.`);
+      setRepeatTx(null);
+      getDashboard().then(r => setData(r.data)).catch(() => {});
+    } catch (e) {
+      toast.error(e.response?.data?.message ?? 'Failed to repeat transaction.');
+    } finally { setRepeating(false); }
+  };
+
   if (loading) return (
     <div className="loading-center">
       <div className="spinner" />
       <span>Loading dashboard…</span>
     </div>
   );
-
-  const recentForChart = (data?.recentTransactions ?? [])
-    .slice(0, 7)
-    .map((t, i) => ({ name: `T${i + 1}`, value: 1, type: t.transactionType }));
 
   return (
     <div>
@@ -106,6 +140,21 @@ export default function Dashboard() {
         <StatCard label="Unread Notifications" value={data?.unreadNotifications ?? 0} icon={MdNotifications} color="teal" onClick={() => navigate('/notifications')} />
       </div>
 
+      {/* FR-2.4: Category filter */}
+      {(() => {
+        const cats = [...new Set((data?.lowStockItems ?? []).map(i => i.categoryName).filter(Boolean))];
+        if (cats.length < 2) return null;
+        return (
+          <div className="filter-bar" style={{ marginBottom: 16 }}>
+            <MdFilterList size={15} style={{ color: 'var(--text-muted)' }} />
+            <button className={`btn btn-sm ${catFilter === '' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setCatFilter('')}>All Categories</button>
+            {cats.map(c => (
+              <button key={c} className={`btn btn-sm ${catFilter === c ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setCatFilter(c)}>{c}</button>
+            ))}
+          </div>
+        );
+      })()}
+
       <div className="grid-2" style={{ gap: 20 }}>
         {/* Low Stock Alerts */}
         <div className="card">
@@ -118,21 +167,32 @@ export default function Dashboard() {
             </button>
           </div>
           <div>
-            {(data?.lowStockItems ?? []).length === 0 ? (
-              <div className="empty-state">
-                <h3>No low stock items</h3>
-              </div>
-            ) : (
-              (data.lowStockItems).slice(0, 6).map(item => (
+            {(() => {
+              const filtered = (data?.lowStockItems ?? []).filter(i => !catFilter || i.categoryName === catFilter);
+              if (filtered.length === 0) return <div className="empty-state"><h3>No low stock items</h3></div>;
+              return filtered.slice(0, 6).map(item => (
                 <AlertRow
                   key={item.itemId}
                   label={item.itemName}
-                  sub={`${item.quantityOnHand} ${item.unit} remaining · Reorder at ${item.reorderThreshold}`}
+                  sub={`${item.quantityOnHand} ${item.unit} remaining · Reorder at ${item.reorderThreshold} · ${item.categoryName}`}
                   color="#f59e0b"
                   onClick={() => navigate('/inventory')}
+                  action={CAN_CREATE_PR.includes(user?.role) ? (
+                    <button
+                      className="btn btn-secondary btn-sm"
+                      title="Create procurement request for this item"
+                      style={{ fontSize: 11, gap: 4, flexShrink: 0 }}
+                      onClick={e => {
+                        e.stopPropagation();
+                        navigate('/procurement', { state: { prefillItem: { id: item.itemId, name: item.itemName, unit: item.unit } } });
+                      }}
+                    >
+                      <MdAddShoppingCart size={13} /> Create PR
+                    </button>
+                  ) : null}
                 />
-              ))
-            )}
+              ));
+            })()}
           </div>
         </div>
 
@@ -184,11 +244,12 @@ export default function Dashboard() {
                     <th>Description</th>
                     <th>Performed By</th>
                     <th>Date & Time</th>
+                    <th></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {(data.recentTransactions).slice(0, 8).map((t, i) => (
-                    <tr key={i}>
+                  {(data.recentTransactions).slice(0, 8).map(t => (
+                    <tr key={t.referenceId ?? `${t.transactionType}-${t.timestamp}`}>
                       <td>
                         <span className={`badge badge-${
                           t.transactionType === 'Receipt' ? 'green'
@@ -202,6 +263,18 @@ export default function Dashboard() {
                       <td style={{ color: 'var(--text-muted)', fontSize: 12 }}>
                         {new Date(t.timestamp).toLocaleString('en-PH')}
                       </td>
+                      <td>
+                        {REPEATABLE.includes(t.transactionType) && t.inventoryItemId && (
+                          <button
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => openRepeat(t)}
+                            title="Repeat this transaction"
+                            style={{ fontSize: 11, gap: 4 }}
+                          >
+                            <MdRepeat size={13} /> Repeat
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -210,6 +283,46 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {repeatTx && (
+        <Modal
+          title={`Repeat ${repeatTx.transactionType} — ${repeatTx.inventoryItemName}`}
+          onClose={() => setRepeatTx(null)}
+          footer={
+            <>
+              <button className="btn btn-secondary" onClick={() => setRepeatTx(null)}>Cancel</button>
+              <button className="btn btn-primary" onClick={submitRepeat} disabled={repeating}>
+                {repeating ? 'Saving…' : `Confirm ${repeatTx.transactionType}`}
+              </button>
+            </>
+          }
+        >
+          <div style={{ background: 'var(--green-50)', border: '1px solid var(--green-200)', borderRadius: 12, padding: '10px 14px', fontSize: 13, marginBottom: 4 }}>
+            <strong>Item:</strong> {repeatTx.inventoryItemName} &nbsp;·&nbsp;
+            <strong>Original qty:</strong> {repeatTx.quantity} {repeatTx.unit}
+          </div>
+          <div className="form-group">
+            <label className="form-label">Quantity ({repeatTx.unit}) *</label>
+            <input
+              className="form-control"
+              type="number"
+              min="0.01"
+              step="0.01"
+              value={repeatQty}
+              onChange={e => setRepeatQty(e.target.value)}
+            />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Remarks</label>
+            <input
+              className="form-control"
+              value={repeatRemarks}
+              onChange={e => setRepeatRemarks(e.target.value)}
+              placeholder={`Repeated ${repeatTx.transactionType} — ${repeatTx.inventoryItemName}`}
+            />
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

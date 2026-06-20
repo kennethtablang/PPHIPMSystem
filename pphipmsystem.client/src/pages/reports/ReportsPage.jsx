@@ -1,12 +1,98 @@
 import { useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { MdFileDownload, MdBarChart, MdShowChart, MdPieChart } from 'react-icons/md';
+import { MdFileDownload, MdBarChart, MdShowChart, MdPieChart, MdPrint } from 'react-icons/md';
 import { getConsumptionReport, getProcurementReport, getForecastAccuracyReport } from '../../api/reports';
 import { toast } from '../../components/common/Toast';
 
 const COLORS = ['#1a6a36', '#2d9b5a', '#3bb870', '#5ece8a', '#82e8a8', '#a7f3c5', '#3b82f6', '#60a5fa', '#f59e0b', '#fcd34d'];
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+const TAB_LABELS = {
+  consumption: 'Consumption Report',
+  procurement: 'Procurement Report',
+  forecast: 'Forecast Accuracy Report',
+};
+
+const PRINT_CSS = `
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, sans-serif; font-size: 12px; color: #111; background: #fff; }
+  .print-header { border-bottom: 2px solid #1a6a36; padding-bottom: 12px; margin-bottom: 20px; }
+  .print-header h1 { font-size: 18px; font-weight: 700; color: #1a6a36; }
+  .print-header p { font-size: 11px; color: #555; margin-top: 3px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+  thead th { background: #1a6a36; color: #fff; padding: 8px 10px; font-size: 10px; font-weight: 600; text-align: left; text-transform: uppercase; letter-spacing: .04em; }
+  tbody td { padding: 7px 10px; border-bottom: 1px solid #ddd; font-size: 11px; }
+  tbody tr:nth-child(even) { background: #f5fbf7; }
+  .grid-stat { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+  .stat-card { border: 1px solid #d1e8d8; border-radius: 8px; padding: 12px; }
+  .stat-label { font-size: 10px; color: #555; text-transform: uppercase; letter-spacing: .05em; font-weight: 600; }
+  .stat-value { font-size: 20px; font-weight: 700; color: #1a6a36; margin-top: 4px; }
+  .stat-sub { font-size: 10px; color: #888; margin-top: 2px; }
+  .card { border: 1px solid #d1e8d8; border-radius: 8px; margin-bottom: 16px; }
+  .card-header { padding: 10px 14px; border-bottom: 1px solid #d1e8d8; }
+  .card-title { font-size: 13px; font-weight: 700; color: #111; }
+  .card-body { padding: 14px; }
+  .table-wrap { overflow: visible; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 10px; font-weight: 600; }
+  .badge-green { background: #d1fae5; color: #065f46; }
+  .badge-blue  { background: #dbeafe; color: #1e40af; }
+  .badge-red   { background: #fee2e2; color: #991b1b; }
+  .badge-amber { background: #fef9c3; color: #78350f; }
+  .print-footer { margin-top: 24px; padding-top: 10px; border-top: 1px solid #ddd; font-size: 10px; color: #888; display: flex; justify-content: space-between; }
+  @media print {
+    body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    @page { margin: 1.5cm; }
+  }
+`;
+
+function printReport(tab) {
+  const printArea = document.getElementById('report-print-area');
+  if (!printArea) return;
+
+  const win = window.open('', '_blank');
+  if (!win) { alert('Pop-up blocked. Please allow pop-ups for this site to export reports.'); return; }
+
+  const doc = win.document;
+
+  doc.title = TAB_LABELS[tab];
+
+  const style = doc.createElement('style');
+  style.textContent = PRINT_CSS;
+  doc.head.appendChild(style);
+
+  const header = doc.createElement('div');
+  header.className = 'print-header';
+
+  const h1 = doc.createElement('h1');
+  h1.textContent = 'Pangasinan Provincial Hospital — IPMS';
+  header.appendChild(h1);
+
+  const meta = doc.createElement('p');
+  meta.textContent = `${TAB_LABELS[tab]}  ·  Generated: ${new Date().toLocaleString('en-PH')}`;
+  header.appendChild(meta);
+
+  doc.body.appendChild(header);
+
+  // Clone the already-rendered report DOM (React-sanitized content)
+  doc.body.appendChild(printArea.cloneNode(true));
+
+  const footer = doc.createElement('div');
+  footer.className = 'print-footer';
+
+  const footerLeft = doc.createElement('span');
+  footerLeft.textContent = 'Pangasinan Provincial Hospital — Inventory & Procurement Management System';
+  footer.appendChild(footerLeft);
+
+  const footerRight = doc.createElement('span');
+  footerRight.textContent = `Printed: ${new Date().toLocaleString('en-PH')}`;
+  footer.appendChild(footerRight);
+
+  doc.body.appendChild(footer);
+
+  win.focus();
+  setTimeout(() => { win.print(); win.close(); }, 500);
+}
 
 export default function ReportsPage() {
   const now = new Date();
@@ -47,6 +133,11 @@ export default function ReportsPage() {
           <h1 className="page-title">Reports & Analytics</h1>
           <p className="page-subtitle">Generate consumption, procurement, and forecast accuracy reports</p>
         </div>
+        {data && (
+          <button className="btn btn-secondary" onClick={() => printReport(tab)}>
+            <MdPrint size={16} /> Export / Print
+          </button>
+        )}
       </div>
 
       <div className="filter-bar" style={{ marginBottom: 16 }}>
@@ -87,9 +178,11 @@ export default function ReportsPage() {
 
       {loading && <div className="loading-center"><div className="spinner" /></div>}
 
-      {data && tab === 'consumption' && <ConsumptionReport data={data} year={params.year} />}
-      {data && tab === 'procurement' && <ProcurementReport data={data} />}
-      {data && tab === 'forecast' && <ForecastAccuracyReport data={data} year={params.year} />}
+      <div id="report-print-area">
+        {data && tab === 'consumption' && <ConsumptionReport data={data} year={params.year} />}
+        {data && tab === 'procurement' && <ProcurementReport data={data} />}
+        {data && tab === 'forecast' && <ForecastAccuracyReport data={data} year={params.year} />}
+      </div>
     </div>
   );
 }

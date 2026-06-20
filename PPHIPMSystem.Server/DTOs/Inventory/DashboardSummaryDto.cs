@@ -43,4 +43,8 @@ public class RecentTransactionDto
     public string PerformedBy { get; set; } = string.Empty;
     public DateTime Timestamp { get; set; }
     public int? ReferenceId { get; set; }
+    public int? InventoryItemId { get; set; }
+    public string? InventoryItemName { get; set; }
+    public decimal? Quantity { get; set; }
+    public string? Unit { get; set; }
 }

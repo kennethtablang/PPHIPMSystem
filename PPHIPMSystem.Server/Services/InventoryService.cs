@@ -158,7 +158,11 @@ public class InventoryService : IInventoryService
                 Description = $"{m.MovementType} of {m.Quantity} {m.InventoryItem?.Name}",
                 PerformedBy = $"{m.PerformedByUser?.FirstName} {m.PerformedByUser?.LastName}",
                 Timestamp = m.MovementDate,
-                ReferenceId = m.Id
+                ReferenceId = m.Id,
+                InventoryItemId = m.InventoryItemId,
+                InventoryItemName = m.InventoryItem?.Name,
+                Quantity = m.Quantity,
+                Unit = m.InventoryItem?.Unit
             })
         };
     }

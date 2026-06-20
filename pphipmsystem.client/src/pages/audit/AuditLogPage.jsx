@@ -1,7 +1,31 @@
 import { useEffect, useState } from 'react';
-import { MdSearch, MdFilterList } from 'react-icons/md';
+import { MdSearch, MdFilterList, MdDownload } from 'react-icons/md';
 import { getAuditLogs } from '../../api/auditLogs';
 import { toast } from '../../components/common/Toast';
+
+function exportCSV(logs) {
+  const headers = ['Timestamp', 'User', 'Username', 'Action', 'Table', 'Record ID', 'Details', 'IP Address'];
+  const rows = logs.map(l => [
+    new Date(l.timestamp).toLocaleString('en-PH'),
+    l.userFullName ?? '',
+    l.username ?? '',
+    l.action ?? '',
+    l.tableName ?? '',
+    l.recordId ?? '',
+    (l.details ?? '').replace(/"/g, '""'),
+    l.ipAddress ?? '',
+  ]);
+  const csv = [headers, ...rows].map(r => r.map(v => `"${v}"`).join(',')).join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `audit-log-${new Date().toISOString().split('T')[0]}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
 
 const ACTIONS = ['', 'Login', 'Create', 'Update', 'Delete', 'Approve', 'Reject', 'Generate'];
 
@@ -54,6 +78,11 @@ export default function AuditLogPage() {
           <h1 className="page-title">Audit Log</h1>
           <p className="page-subtitle">Read-only record of all system actions and changes</p>
         </div>
+        {logs.length > 0 && (
+          <button className="btn btn-secondary" onClick={() => exportCSV(logs)}>
+            <MdDownload size={16} /> Export CSV
+          </button>
+        )}
       </div>
 
       <div className="card" style={{ marginBottom: 20 }}>

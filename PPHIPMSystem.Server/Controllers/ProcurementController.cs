@@ -27,7 +27,7 @@ public class ProcurementController : ControllerBase
     }
 
     [HttpPost]
-    [Authorize(Roles = "HospitalAdministrator,DepartmentHead")]
+    [Authorize(Roles = "SuperAdmin,HospitalAdministrator,DepartmentHead")]
     public async Task<IActionResult> Create([FromBody] CreateProcurementRequestDto dto)
     {
         var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
@@ -47,7 +47,7 @@ public class ProcurementController : ControllerBase
     }
 
     [HttpPatch("{id}/approve")]
-    [Authorize(Roles = "HospitalAdministrator,ProcurementStaff,InventoryOfficer")]
+    [Authorize(Roles = "SuperAdmin,HospitalAdministrator,ProcurementStaff,InventoryOfficer")]
     public async Task<IActionResult> Approve(int id, [FromBody] ApproveProcurementDto dto)
     {
         var approverId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
@@ -63,7 +63,7 @@ public class ProcurementController : ControllerBase
     }
 
     [HttpPost("{id}/purchase-order")]
-    [Authorize(Roles = "HospitalAdministrator,ProcurementStaff")]
+    [Authorize(Roles = "SuperAdmin,HospitalAdministrator,ProcurementStaff")]
     public async Task<IActionResult> GeneratePO(int id, [FromBody] GeneratePurchaseOrderDto dto)
     {
         var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
@@ -90,7 +90,7 @@ public class ProcurementController : ControllerBase
     }
 
     [HttpPatch("purchase-orders/{id}/confirm-delivery")]
-    [Authorize(Roles = "HospitalAdministrator,InventoryOfficer")]
+    [Authorize(Roles = "SuperAdmin,HospitalAdministrator,InventoryOfficer")]
     public async Task<IActionResult> ConfirmDelivery(int id)
     {
         var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { MdAdd, MdVisibility, MdCheckCircle, MdArrowForward } from 'react-icons/md';
 import { getRequests, createRequest, approveRequest } from '../../api/procurement';
 import { getItems } from '../../api/inventory';
@@ -7,8 +8,12 @@ import StatusBadge from '../../components/common/StatusBadge';
 import { toast } from '../../components/common/Toast';
 import { useAuth } from '../../context/AuthContext';
 
+const BLANK_FORM = { justification: '', items: [{ inventoryItemId: '', quantityRequested: '', estimatedUnitCost: '', remarks: '' }] };
+
 export default function ProcurementList() {
   const { user } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
   const canCreate = ['SuperAdmin', 'HospitalAdministrator', 'DepartmentHead'].includes(user?.role);
   const canApprove = ['SuperAdmin', 'HospitalAdministrator', 'ProcurementStaff', 'InventoryOfficer'].includes(user?.role);
 
@@ -19,7 +24,7 @@ export default function ProcurementList() {
   const [createModal, setCreateModal] = useState(false);
   const [viewModal, setViewModal] = useState(null);
   const [approveModal, setApproveModal] = useState(null);
-  const [form, setForm] = useState({ justification: '', items: [{ inventoryItemId: '', quantityRequested: '', estimatedUnitCost: '', remarks: '' }] });
+  const [form, setForm] = useState(BLANK_FORM);
   const [approveForm, setApproveForm] = useState({ action: 'Approve', remarks: '' });
   const [saving, setSaving] = useState(false);
 
@@ -30,6 +35,19 @@ export default function ProcurementList() {
 
   useEffect(() => { getItems().then(r => setItems(r.data)); }, []);
   useEffect(() => { load(); }, [statusFilter]);
+
+  // FR-3.4: pre-fill from Dashboard "Create PR" navigation
+  useEffect(() => {
+    const prefill = location.state?.prefillItem;
+    if (prefill && canCreate) {
+      setForm({
+        justification: `Reorder request for low-stock item: ${prefill.name}`,
+        items: [{ inventoryItemId: String(prefill.id), quantityRequested: '', estimatedUnitCost: '', remarks: `Low stock alert — ${prefill.name}` }],
+      });
+      setCreateModal(true);
+      navigate(location.pathname, { replace: true, state: null }); // clear state so refresh doesn't re-open
+    }
+  }, [location.state]);
 
   const addLine = () => setForm(p => ({ ...p, items: [...p.items, { inventoryItemId: '', quantityRequested: '', estimatedUnitCost: '', remarks: '' }] }));
   const removeLine = i => setForm(p => ({ ...p, items: p.items.filter((_, j) => j !== i) }));
@@ -57,7 +75,8 @@ export default function ProcurementList() {
     setSaving(true);
     try {
       await approveRequest(approveModal.id, { action: approveForm.action, remarks: approveForm.remarks });
-      toast.success(`Request ${approveForm.action}d.`);
+      const pastTense = { Approve: 'Approved', Reject: 'Rejected', Return: 'Returned' };
+      toast.success(`Request ${pastTense[approveForm.action] ?? approveForm.action + 'd'}.`);
       setApproveModal(null);
       load();
     } catch (e) { toast.error(e.response?.data?.message ?? 'Failed.'); }

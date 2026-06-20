@@ -32,7 +32,7 @@ public class AuthController : ControllerBase
         return ok ? Ok(new { message = "Password changed." }) : BadRequest(new { message = "Current password is incorrect." });
     }
 
-    [Authorize(Roles = "HospitalAdministrator")]
+    [Authorize(Roles = "SuperAdmin,HospitalAdministrator")]
     [HttpPost("reset-password/{userId}")]
     public async Task<IActionResult> ResetPassword(string userId, [FromBody] string newPassword)
     {

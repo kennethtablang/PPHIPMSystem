@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { MdAdd, MdEdit, MdDelete, MdSearch, MdVerified, MdCancel } from 'react-icons/md';
-import { getSuppliers, createSupplier, updateSupplier, deleteSupplier, updateAccreditation } from '../../api/suppliers';
+import { MdAdd, MdEdit, MdDelete, MdSearch, MdVerified, MdCancel, MdHistory } from 'react-icons/md';
+import { getSuppliers, createSupplier, updateSupplier, deleteSupplier, getSupplierOrders } from '../../api/suppliers';
 import Modal from '../../components/common/Modal';
 import { toast } from '../../components/common/Toast';
 import { useAuth } from '../../context/AuthContext';
@@ -9,7 +9,8 @@ const BLANK = { name: '', contactPerson: '', email: '', phone: '', address: '', 
 
 export default function SupplierList() {
   const { user } = useAuth();
-  const canEdit = ['HospitalAdministrator', 'ProcurementStaff'].includes(user?.role);
+  const canEdit = ['SuperAdmin', 'HospitalAdministrator', 'ProcurementStaff'].includes(user?.role);
+  const canDelete = ['SuperAdmin', 'HospitalAdministrator'].includes(user?.role);
 
   const [suppliers, setSuppliers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -17,6 +18,10 @@ export default function SupplierList() {
   const [modal, setModal] = useState(null);
   const [form, setForm] = useState(BLANK);
   const [saving, setSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [ordersModal, setOrdersModal] = useState(null);
+  const [orders, setOrders] = useState([]);
+  const [ordersLoading, setOrdersLoading] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -29,6 +34,17 @@ export default function SupplierList() {
   const openEdit = s => {
     setForm({ name: s.name, contactPerson: s.contactPerson ?? '', email: s.email ?? '', phone: s.phone ?? '', address: s.address ?? '', accreditationNumber: s.accreditationNumber ?? '', isAccredited: s.isAccredited, accreditationExpiry: s.accreditationExpiry ? s.accreditationExpiry.split('T')[0] : '' });
     setModal(s);
+  };
+
+  const openOrders = async s => {
+    setOrdersModal(s);
+    setOrders([]);
+    setOrdersLoading(true);
+    try {
+      const { data } = await getSupplierOrders(s.id);
+      setOrders(data);
+    } catch { toast.error('Failed to load supplier orders.'); }
+    finally { setOrdersLoading(false); }
   };
 
   const set = k => e => setForm(p => ({ ...p, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value }));
@@ -44,9 +60,8 @@ export default function SupplierList() {
     finally { setSaving(false); }
   };
 
-  const remove = async id => {
-    if (!confirm('Remove this supplier?')) return;
-    try { await deleteSupplier(id); toast.success('Supplier removed.'); load(); }
+  const confirmDelete = async () => {
+    try { await deleteSupplier(deleteTarget.id); toast.success('Supplier removed.'); setDeleteTarget(null); load(); }
     catch { toast.error('Failed to remove supplier.'); }
   };
 
@@ -83,7 +98,7 @@ export default function SupplierList() {
                 <th>Accreditation</th>
                 <th>Expiry</th>
                 <th>Total Orders</th>
-                {canEdit && <th>Actions</th>}
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -107,15 +122,22 @@ export default function SupplierList() {
                     </span>
                   </td>
                   <td style={{ fontSize: 12 }}>{s.accreditationExpiry ? new Date(s.accreditationExpiry).toLocaleDateString('en-PH') : '—'}</td>
-                  <td><span className="badge badge-blue">{s.totalOrders}</span></td>
-                  {canEdit && (
-                    <td>
-                      <div style={{ display: 'flex', gap: 4 }}>
-                        <button className="btn btn-ghost btn-icon btn-sm" onClick={() => openEdit(s)} title="Edit"><MdEdit size={15} /></button>
-                        <button className="btn btn-danger btn-icon btn-sm" onClick={() => remove(s.id)} title="Remove"><MdDelete size={15} /></button>
-                      </div>
-                    </td>
-                  )}
+                  <td>
+                    <button
+                      className="btn btn-ghost btn-sm"
+                      onClick={() => openOrders(s)}
+                      style={{ fontSize: 11 }}
+                      title="View purchase orders"
+                    >
+                      <MdHistory size={13} /> {s.totalOrders}
+                    </button>
+                  </td>
+                  <td>
+                    <div style={{ display: 'flex', gap: 4 }}>
+                      {canEdit && <button className="btn btn-ghost btn-icon btn-sm" onClick={() => openEdit(s)} title="Edit"><MdEdit size={15} /></button>}
+                      {canDelete && <button className="btn btn-danger btn-icon btn-sm" onClick={() => setDeleteTarget(s)} title="Remove"><MdDelete size={15} /></button>}
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -123,6 +145,7 @@ export default function SupplierList() {
         </div>
       )}
 
+      {/* Create / Edit Modal */}
       {modal && (
         <Modal
           title={modal === 'create' ? 'Register Supplier' : `Edit: ${modal.name}`}
@@ -171,6 +194,106 @@ export default function SupplierList() {
             <label className="form-label">Address</label>
             <textarea className="form-control" value={form.address} onChange={set('address')} rows={2} />
           </div>
+        </Modal>
+      )}
+
+      {/* Delete Confirm Modal */}
+      {deleteTarget && (
+        <Modal
+          title="Remove Supplier"
+          onClose={() => setDeleteTarget(null)}
+          footer={
+            <>
+              <button className="btn btn-secondary" onClick={() => setDeleteTarget(null)}>Cancel</button>
+              <button className="btn btn-danger" onClick={confirmDelete}>Remove Supplier</button>
+            </>
+          }
+        >
+          <p style={{ fontSize: 14, color: 'var(--text-primary)' }}>
+            Are you sure you want to remove <strong>{deleteTarget.name}</strong>?
+          </p>
+          {deleteTarget.totalOrders > 0 && (
+            <div className="alert alert-warning" style={{ marginTop: 8 }}>
+              This supplier has {deleteTarget.totalOrders} associated purchase order{deleteTarget.totalOrders !== 1 ? 's' : ''}. The supplier record will be deactivated but historical records will be preserved.
+            </div>
+          )}
+        </Modal>
+      )}
+
+      {/* Transaction History Modal (FR-7.2 / FR-7.4) */}
+      {ordersModal && (
+        <Modal
+          title={`Purchase Order History — ${ordersModal.name}`}
+          onClose={() => setOrdersModal(null)}
+          size="modal-xl"
+          footer={<button className="btn btn-secondary" onClick={() => setOrdersModal(null)}>Close</button>}
+        >
+          {ordersLoading ? (
+            <div className="loading-center"><div className="spinner" /></div>
+          ) : orders.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted)' }}>
+              No purchase orders found for this supplier.
+            </div>
+          ) : (
+            <>
+              {/* Performance summary */}
+              <div className="grid-stat" style={{ marginBottom: 20 }}>
+                <div className="stat-card blue">
+                  <div className="stat-label">Total POs</div>
+                  <div className="stat-value">{orders.length}</div>
+                </div>
+                <div className="stat-card green">
+                  <div className="stat-label">Delivered</div>
+                  <div className="stat-value">{orders.filter(o => o.isDelivered).length}</div>
+                </div>
+                <div className="stat-card amber">
+                  <div className="stat-label">Pending</div>
+                  <div className="stat-value">{orders.filter(o => !o.isDelivered).length}</div>
+                </div>
+                <div className="stat-card teal">
+                  <div className="stat-label">Total Amount</div>
+                  <div className="stat-value" style={{ fontSize: 16 }}>
+                    ₱{orders.reduce((s, o) => s + (o.totalAmount ?? 0), 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                  </div>
+                </div>
+              </div>
+
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>PO Number</th>
+                      <th>PR Reference</th>
+                      <th>Generated By</th>
+                      <th>Total Amount</th>
+                      <th>Status</th>
+                      <th>Generated</th>
+                      <th>Delivered</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {orders.map(o => (
+                      <tr key={o.id}>
+                        <td style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: 12 }}>{o.pONumber}</td>
+                        <td style={{ fontFamily: 'monospace', fontSize: 12, color: 'var(--text-muted)' }}>{o.requestNumber}</td>
+                        <td style={{ fontSize: 12 }}>{o.generatedByFullName}</td>
+                        <td style={{ fontWeight: 600, color: 'var(--green-700)' }}>
+                          ₱{(o.totalAmount ?? 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                        </td>
+                        <td>
+                          <span className={`badge ${o.isDelivered ? 'badge-green' : 'badge-amber'}`}>
+                            {o.isDelivered ? 'Delivered' : 'Pending Delivery'}
+                          </span>
+                        </td>
+                        <td style={{ fontSize: 11, color: 'var(--text-muted)' }}>{new Date(o.generatedAt).toLocaleDateString('en-PH')}</td>
+                        <td style={{ fontSize: 11, color: 'var(--text-muted)' }}>{o.deliveredAt ? new Date(o.deliveredAt).toLocaleDateString('en-PH') : '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
         </Modal>
       )}
     </div>
