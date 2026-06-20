@@ -3,6 +3,7 @@ import Sidebar from './Sidebar';
 import Topbar from './Topbar';
 import { Outlet } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { MdLogout } from 'react-icons/md';
 
 const IDLE_MS    = 30 * 60 * 1000;
 const WARNING_MS =  2 * 60 * 1000;
@@ -12,6 +13,7 @@ export default function Layout() {
   const { logout } = useAuth();
   const [warning, setWarning] = useState(false);
   const [countdown, setCountdown] = useState(WARNING_MS / 1000);
+  const [confirmLogout, setConfirmLogout] = useState(false);
   const idleTimer    = useRef(null);
   const warnTimer    = useRef(null);
   const countdownRef = useRef(null);
@@ -56,7 +58,7 @@ export default function Layout() {
 
   return (
     <div style={{ display: 'flex', minHeight: '100vh' }}>
-      <Sidebar />
+      <Sidebar onRequestLogout={() => setConfirmLogout(true)} />
       <div style={{
         marginLeft: 'var(--sidebar-width)',
         flex: 1,
@@ -70,6 +72,50 @@ export default function Layout() {
           <Outlet />
         </main>
       </div>
+
+      {confirmLogout && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 9999,
+          background: 'rgba(5,46,16,.55)',
+          backdropFilter: 'blur(4px)', WebkitBackdropFilter: 'blur(4px)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          padding: 20,
+        }}>
+          <div style={{
+            background: 'rgba(255,255,255,0.97)',
+            backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
+            borderRadius: 'var(--radius-lg)',
+            border: '1px solid rgba(255,255,255,.6)',
+            boxShadow: '0 20px 60px rgba(5,46,16,.25)',
+            padding: '36px 40px',
+            maxWidth: 400, width: '100%',
+            textAlign: 'center',
+          }}>
+            <div style={{
+              width: 60, height: 60, borderRadius: '50%', margin: '0 auto 20px',
+              background: 'linear-gradient(135deg, #fee2e2, #fecaca)',
+              border: '2px solid #fca5a5',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <MdLogout size={26} color="#ef4444" />
+            </div>
+            <h2 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>
+              Sign Out
+            </h2>
+            <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 28 }}>
+              Are you sure you want to sign out? Any unsaved changes will be lost.
+            </p>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'center' }}>
+              <button className="btn btn-secondary" onClick={() => setConfirmLogout(false)}>
+                Cancel
+              </button>
+              <button className="btn btn-danger" onClick={logout}>
+                <MdLogout size={15} /> Sign Out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {warning && (
         <div style={{
