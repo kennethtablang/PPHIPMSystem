@@ -123,7 +123,7 @@ export default function ItemBatches() {
             </thead>
             <tbody>
               {batches.length === 0 ? (
-                <tr><td colSpan={8} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
+                <tr><td colSpan={canEdit ? 8 : 7} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>
                   {view === 'all' ? 'No active batches found.' : `No batches expiring within ${warningDays} days.`}
                 </td></tr>
               ) : batches.map(b => (

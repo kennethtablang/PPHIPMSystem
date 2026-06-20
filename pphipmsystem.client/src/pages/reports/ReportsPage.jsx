@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { MdFileDownload, MdBarChart, MdShowChart, MdPieChart, MdPrint } from 'react-icons/md';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
+import { MdBarChart, MdShowChart, MdPieChart, MdPrint } from 'react-icons/md';
 import { getConsumptionReport, getProcurementReport, getForecastAccuracyReport } from '../../api/reports';
 import { toast } from '../../components/common/Toast';
 
@@ -51,7 +51,7 @@ function printReport(tab) {
   if (!printArea) return;
 
   const win = window.open('', '_blank');
-  if (!win) { alert('Pop-up blocked. Please allow pop-ups for this site to export reports.'); return; }
+  if (!win) { toast.error('Pop-up blocked — please allow pop-ups for this site to export reports.'); return; }
 
   const doc = win.document;
 

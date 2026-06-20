@@ -140,7 +140,7 @@ public class InventoryService : IInventoryService
                 QuantityOnHand = i.QuantityOnHand,
                 ReorderThreshold = i.ReorderThreshold,
                 Unit = i.Unit,
-                CategoryName = i.Category.Name
+                CategoryName = i.Category?.Name ?? ""
             }),
             ExpiringBatches = expiringBatches.Select(b => new ExpiringBatchAlertDto
             {
