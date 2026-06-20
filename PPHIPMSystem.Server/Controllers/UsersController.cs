@@ -1,7 +1,10 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using PPHIPMSystem.Server.DTOs.User;
 using PPHIPMSystem.Server.Interfaces;
+using PPHIPMSystem.Server.Models;
 
 namespace PPHIPMSystem.Server.Controllers;
 
@@ -12,11 +15,18 @@ public class UsersController : ControllerBase
 {
     private readonly IUserService _users;
     private readonly IAuthService _auth;
+    private readonly IAuditLogService _audit;
+    private readonly UserManager<ApplicationUser> _userManager;
 
-    public UsersController(IUserService users, IAuthService auth)
+    // Roles that a HospitalAdministrator is NOT allowed to act on
+    private static readonly HashSet<string> _privilegedRoles = new() { "SuperAdmin", "HospitalAdministrator" };
+
+    public UsersController(IUserService users, IAuthService auth, IAuditLogService audit, UserManager<ApplicationUser> userManager)
     {
         _users = users;
         _auth = auth;
+        _audit = audit;
+        _userManager = userManager;
     }
 
     [HttpGet]
@@ -54,8 +64,23 @@ public class UsersController : ControllerBase
     [HttpPatch("{id}/reset-password")]
     public async Task<IActionResult> ResetPassword(string id, [FromBody] ResetPasswordDto dto)
     {
+        var callerId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        var callerRole = User.FindFirstValue(ClaimTypes.Role) ?? "";
+
+        var target = await _userManager.FindByIdAsync(id);
+        if (target is null) return NotFound();
+
+        // HospitalAdministrator may not reset SuperAdmin or peer HospitalAdministrator accounts
+        if (callerRole != "SuperAdmin" && _privilegedRoles.Contains(target.Role))
+            return Forbid();
+
         var ok = await _auth.ResetPasswordAsync(id, dto.NewPassword);
-        return ok ? Ok(new { message = "Password reset." }) : NotFound();
+        if (!ok) return StatusCode(500, new { message = "Password reset failed." });
+
+        await _audit.LogAsync(callerId, "ResetPassword", "User", null,
+            $"Admin reset password for user: {target.UserName} (Role: {target.Role})");
+
+        return Ok(new { message = "Password reset." });
     }
 
     [HttpPatch("{id}/deactivate")]
