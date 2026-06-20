@@ -25,7 +25,7 @@ public class DepartmentsController : ControllerBase
     }
 
     [HttpPost]
-    [Authorize(Roles = "HospitalAdministrator")]
+    [Authorize(Roles = "SuperAdmin,HospitalAdministrator")]
     public async Task<IActionResult> Create([FromBody] CreateDepartmentDto dto)
     {
         var result = await _departments.CreateAsync(dto);
@@ -33,7 +33,7 @@ public class DepartmentsController : ControllerBase
     }
 
     [HttpPut("{id}")]
-    [Authorize(Roles = "HospitalAdministrator")]
+    [Authorize(Roles = "SuperAdmin,HospitalAdministrator")]
     public async Task<IActionResult> Update(int id, [FromBody] CreateDepartmentDto dto)
     {
         var result = await _departments.UpdateAsync(id, dto);
@@ -41,7 +41,7 @@ public class DepartmentsController : ControllerBase
     }
 
     [HttpDelete("{id}")]
-    [Authorize(Roles = "HospitalAdministrator")]
+    [Authorize(Roles = "SuperAdmin,HospitalAdministrator")]
     public async Task<IActionResult> Delete(int id)
     {
         var ok = await _departments.DeleteAsync(id);

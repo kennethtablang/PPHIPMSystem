@@ -33,14 +33,19 @@ public class AuditLogService : IAuditLogService
         await _db.SaveChangesAsync();
     }
 
-    public async Task<IEnumerable<AuditLogDto>> GetAllAsync(DateTime? from, DateTime? to, string? entityType, string? userId)
+    public async Task<IEnumerable<AuditLogDto>> GetAllAsync(string? search = null, string? action = null, DateTime? startDate = null, DateTime? endDate = null)
     {
         var query = _db.AuditLogs.Include(l => l.User).AsQueryable();
 
-        if (from.HasValue) query = query.Where(l => l.Timestamp >= from.Value);
-        if (to.HasValue) query = query.Where(l => l.Timestamp <= to.Value);
-        if (!string.IsNullOrWhiteSpace(entityType)) query = query.Where(l => l.EntityType == entityType);
-        if (!string.IsNullOrWhiteSpace(userId)) query = query.Where(l => l.UserId == userId);
+        if (startDate.HasValue) query = query.Where(l => l.Timestamp >= startDate.Value);
+        if (endDate.HasValue) query = query.Where(l => l.Timestamp <= endDate.Value.AddDays(1));
+        if (!string.IsNullOrWhiteSpace(action)) query = query.Where(l => l.Action == action);
+        if (!string.IsNullOrWhiteSpace(search))
+            query = query.Where(l =>
+                (l.User != null && (l.User.FirstName + " " + l.User.LastName).Contains(search)) ||
+                (l.User != null && l.User.UserName!.Contains(search)) ||
+                l.EntityType.Contains(search) ||
+                (l.Details != null && l.Details.Contains(search)));
 
         var logs = await query.OrderByDescending(l => l.Timestamp).Take(1000).ToListAsync();
         return _mapper.Map<IEnumerable<AuditLogDto>>(logs);

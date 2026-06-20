@@ -7,19 +7,23 @@ namespace PPHIPMSystem.Server.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize]
+[Authorize(Roles = "SuperAdmin,HospitalAdministrator")]
 public class UsersController : ControllerBase
 {
     private readonly IUserService _users;
+    private readonly IAuthService _auth;
 
-    public UsersController(IUserService users) => _users = users;
+    public UsersController(IUserService users, IAuthService auth)
+    {
+        _users = users;
+        _auth = auth;
+    }
 
     [HttpGet]
-    [Authorize(Roles = "HospitalAdministrator")]
-    public async Task<IActionResult> GetAll() => Ok(await _users.GetAllAsync());
+    public async Task<IActionResult> GetAll([FromQuery] string? search)
+        => Ok(await _users.GetAllAsync(search));
 
     [HttpGet("{id}")]
-    [Authorize(Roles = "HospitalAdministrator")]
     public async Task<IActionResult> GetById(string id)
     {
         var result = await _users.GetByIdAsync(id);
@@ -27,7 +31,6 @@ public class UsersController : ControllerBase
     }
 
     [HttpPost]
-    [Authorize(Roles = "HospitalAdministrator")]
     public async Task<IActionResult> Create([FromBody] CreateUserDto dto)
     {
         try
@@ -42,15 +45,20 @@ public class UsersController : ControllerBase
     }
 
     [HttpPut("{id}")]
-    [Authorize(Roles = "HospitalAdministrator")]
     public async Task<IActionResult> Update(string id, [FromBody] UpdateUserDto dto)
     {
         var result = await _users.UpdateAsync(id, dto);
         return result is null ? NotFound() : Ok(result);
     }
 
+    [HttpPatch("{id}/reset-password")]
+    public async Task<IActionResult> ResetPassword(string id, [FromBody] ResetPasswordDto dto)
+    {
+        var ok = await _auth.ResetPasswordAsync(id, dto.NewPassword);
+        return ok ? Ok(new { message = "Password reset." }) : NotFound();
+    }
+
     [HttpPatch("{id}/deactivate")]
-    [Authorize(Roles = "HospitalAdministrator")]
     public async Task<IActionResult> Deactivate(string id)
     {
         var ok = await _users.DeactivateAsync(id);
@@ -58,10 +66,11 @@ public class UsersController : ControllerBase
     }
 
     [HttpDelete("{id}")]
-    [Authorize(Roles = "HospitalAdministrator")]
     public async Task<IActionResult> Delete(string id)
     {
         var ok = await _users.DeleteAsync(id);
         return ok ? NoContent() : NotFound();
     }
 }
+
+public record ResetPasswordDto(string NewPassword);

@@ -120,6 +120,9 @@ public class MappingProfile : Profile
         // AuditLog
         CreateMap<AuditLog, AuditLogDto>()
             .ForMember(d => d.UserFullName, o => o.MapFrom(s =>
-                s.User != null ? $"{s.User.FirstName} {s.User.LastName}" : null));
+                s.User != null ? $"{s.User.FirstName} {s.User.LastName}" : null))
+            .ForMember(d => d.Username, o => o.MapFrom(s => s.User != null ? s.User.UserName : null))
+            .ForMember(d => d.TableName, o => o.MapFrom(s => s.EntityType))
+            .ForMember(d => d.RecordId, o => o.MapFrom(s => s.EntityId));
     }
 }

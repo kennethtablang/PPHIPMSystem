@@ -6,7 +6,7 @@ namespace PPHIPMSystem.Server.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize(Roles = "HospitalAdministrator")]
+[Authorize(Roles = "SuperAdmin,HospitalAdministrator")]
 public class AuditLogsController : ControllerBase
 {
     private readonly IAuditLogService _audit;
@@ -15,9 +15,9 @@ public class AuditLogsController : ControllerBase
 
     [HttpGet]
     public async Task<IActionResult> GetAll(
-        [FromQuery] DateTime? from,
-        [FromQuery] DateTime? to,
-        [FromQuery] string? entityType,
-        [FromQuery] string? userId)
-        => Ok(await _audit.GetAllAsync(from, to, entityType, userId));
+        [FromQuery] string? search,
+        [FromQuery] string? action,
+        [FromQuery] DateTime? startDate,
+        [FromQuery] DateTime? endDate)
+        => Ok(await _audit.GetAllAsync(search, action, startDate, endDate));
 }

@@ -23,9 +23,12 @@ public class UserService : IUserService
         _audit = audit;
     }
 
-    public async Task<IEnumerable<UserDto>> GetAllAsync()
+    public async Task<IEnumerable<UserDto>> GetAllAsync(string? search = null)
     {
-        var users = await _db.Users.Include(u => u.Department).ToListAsync();
+        var query = _db.Users.Include(u => u.Department).AsQueryable();
+        if (!string.IsNullOrWhiteSpace(search))
+            query = query.Where(u => (u.FirstName + " " + u.LastName).Contains(search) || u.UserName!.Contains(search));
+        var users = await query.ToListAsync();
         return _mapper.Map<IEnumerable<UserDto>>(users);
     }
 
