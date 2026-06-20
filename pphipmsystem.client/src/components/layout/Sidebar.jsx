@@ -29,9 +29,10 @@ const roleLabel = r => ({
 }[r] ?? r);
 
 export default function Sidebar({ onRequestLogout }) {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const role = user?.role;
   const [collapsed, setCollapsed] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const is = (...roles) => roles.includes(role);
 
   useEffect(() => {
@@ -135,7 +136,50 @@ export default function Sidebar({ onRequestLogout }) {
 
         {/* ── Logout ── */}
         <div className="sb-footer">
-          <LogoutBtn collapsed={collapsed} onClick={onRequestLogout} />
+          {confirmOpen && (
+            <div style={{
+              background: 'rgba(30,10,10,0.92)',
+              border: '1px solid rgba(239,68,68,.3)',
+              borderRadius: 'var(--radius-md)',
+              padding: '12px 14px',
+              marginBottom: 8,
+            }}>
+              {!collapsed && (
+                <p style={{ fontSize: 11, color: 'rgba(255,255,255,.7)', lineHeight: 1.5, marginBottom: 10 }}>
+                  Are you sure you want to log out? You will need to sign in again to access your account.
+                </p>
+              )}
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button
+                  onClick={() => setConfirmOpen(false)}
+                  style={{
+                    flex: 1, padding: '6px 0', borderRadius: 99,
+                    background: 'rgba(255,255,255,.08)',
+                    border: '1px solid rgba(255,255,255,.14)',
+                    color: 'rgba(255,255,255,.7)',
+                    fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                    fontFamily: "'Montserrat', sans-serif",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={logout}
+                  style={{
+                    flex: 1, padding: '6px 0', borderRadius: 99,
+                    background: 'rgba(239,68,68,.18)',
+                    border: '1px solid rgba(239,68,68,.35)',
+                    color: '#fca5a5',
+                    fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                    fontFamily: "'Montserrat', sans-serif",
+                  }}
+                >
+                  Sign Out
+                </button>
+              </div>
+            </div>
+          )}
+          <LogoutBtn collapsed={collapsed} active={confirmOpen} onClick={() => setConfirmOpen(v => !v)} />
         </div>
 
       </aside>
@@ -187,7 +231,7 @@ function Item({ to, Icon, label, collapsed }) {
   );
 }
 
-function LogoutBtn({ collapsed, onClick }) {
+function LogoutBtn({ collapsed, active, onClick }) {
   const [hov, setHov] = useState(false);
   return (
     <button
@@ -195,7 +239,7 @@ function LogoutBtn({ collapsed, onClick }) {
       title={collapsed ? 'Sign Out' : undefined}
       onMouseEnter={() => setHov(true)}
       onMouseLeave={() => setHov(false)}
-      className={`sb-logout${hov ? ' sb-logout--hov' : ''}`}
+      className={`sb-logout${active ? ' sb-logout--hov' : hov ? ' sb-logout--hov' : ''}`}
       style={{ justifyContent: collapsed ? 'center' : 'flex-start' }}
     >
       <MdLogout size={15} style={{ flexShrink: 0 }} />
