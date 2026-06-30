@@ -10,5 +10,8 @@ public enum ProcurementStatus
     FullyApproved,
     PurchaseOrderGenerated,
     Delivered,
-    Cancelled
+    Cancelled,
+    SubmittedByDepartment,
+    ApprovedByInventoryOfficer
 }
+
