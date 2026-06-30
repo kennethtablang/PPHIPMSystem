@@ -15,11 +15,21 @@ public class AuthController : ControllerBase
     public AuthController(IAuthService auth) => _auth = auth;
 
     [HttpPost("login")]
-    public async Task<IActionResult> Login([FromBody] LoginDto dto)
+    public async Task<IActionResult> Login(LoginDto dto)
     {
         var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
         var result = await _auth.LoginAsync(dto, ip);
-        if (result is null) return Unauthorized(new { message = "Invalid credentials or account inactive." });
+        if (result is null) return Unauthorized(new { message = "Invalid credentials or inactive account." });
+        if (result.RequiresTwoFactor) return Ok(result); // Return 200 OK so frontend knows it needs OTP
+        return Ok(result);
+    }
+
+    [HttpPost("login-2fa")]
+    public async Task<IActionResult> Login2Fa(Login2FaDto dto)
+    {
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+        var result = await _auth.Login2FaAsync(dto, ip);
+        if (result is null) return Unauthorized(new { message = "Invalid or expired verification code." });
         return Ok(result);
     }
 
@@ -38,5 +48,20 @@ public class AuthController : ControllerBase
     {
         var ok = await _auth.ResetPasswordAsync(userId, newPassword);
         return ok ? Ok(new { message = "Password reset." }) : NotFound();
+    }
+
+    [HttpPost("forgot-password")]
+    public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordDto dto)
+    {
+        // Always return OK to prevent email enumeration attacks
+        await _auth.ForgotPasswordAsync(dto.Email);
+        return Ok(new { message = "If the email is registered, a password reset link has been sent." });
+    }
+
+    [HttpPost("reset-password-token")]
+    public async Task<IActionResult> ResetPasswordWithToken([FromBody] ResetPasswordWithTokenDto dto)
+    {
+        var ok = await _auth.ResetPasswordWithTokenAsync(dto);
+        return ok ? Ok(new { message = "Password has been successfully reset." }) : BadRequest(new { message = "Invalid token or email." });
     }
 }

@@ -44,4 +44,12 @@ public class ForecastController : ControllerBase
         var result = await _forecast.UpsertConsumptionRecordAsync(dto);
         return Ok(result);
     }
+
+    [HttpPost("consumption/{itemId}/sync")]
+    [Authorize(Roles = "HospitalAdministrator,InventoryOfficer")]
+    public async Task<IActionResult> SyncConsumption(int itemId)
+    {
+        var result = await _forecast.SyncConsumptionRecordsAsync(itemId);
+        return result ? Ok(new { message = "Synced successfully." }) : NotFound();
+    }
 }

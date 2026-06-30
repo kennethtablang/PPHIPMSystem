@@ -10,7 +10,7 @@ namespace PPHIPMSystem.Server.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize(Roles = "SuperAdmin,HospitalAdministrator")]
+[Authorize] // Require auth globally
 public class UsersController : ControllerBase
 {
     private readonly IUserService _users;
@@ -29,11 +29,31 @@ public class UsersController : ControllerBase
         _userManager = userManager;
     }
 
+    [HttpGet("profile")]
+    public async Task<IActionResult> GetProfile()
+    {
+        var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (userId is null) return Unauthorized();
+        var profile = await _users.GetProfileAsync(userId);
+        return profile is null ? NotFound() : Ok(profile);
+    }
+
+    [HttpPut("profile")]
+    public async Task<IActionResult> UpdateProfile([FromBody] UpdateProfileDto dto)
+    {
+        var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (userId is null) return Unauthorized();
+        var profile = await _users.UpdateProfileAsync(userId, dto);
+        return profile is null ? BadRequest(new { message = "Failed to update profile." }) : Ok(profile);
+    }
+
     [HttpGet]
+    [Authorize(Roles = "SuperAdmin,HospitalAdministrator")]
     public async Task<IActionResult> GetAll([FromQuery] string? search)
         => Ok(await _users.GetAllAsync(search));
 
     [HttpGet("{id}")]
+    [Authorize(Roles = "SuperAdmin,HospitalAdministrator")]
     public async Task<IActionResult> GetById(string id)
     {
         var result = await _users.GetByIdAsync(id);
@@ -41,6 +61,7 @@ public class UsersController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Roles = "SuperAdmin,HospitalAdministrator")]
     public async Task<IActionResult> Create([FromBody] CreateUserDto dto)
     {
         try
@@ -55,6 +76,7 @@ public class UsersController : ControllerBase
     }
 
     [HttpPut("{id}")]
+    [Authorize(Roles = "SuperAdmin,HospitalAdministrator")]
     public async Task<IActionResult> Update(string id, [FromBody] UpdateUserDto dto)
     {
         var result = await _users.UpdateAsync(id, dto);
@@ -62,6 +84,7 @@ public class UsersController : ControllerBase
     }
 
     [HttpPatch("{id}/reset-password")]
+    [Authorize(Roles = "SuperAdmin,HospitalAdministrator")]
     public async Task<IActionResult> ResetPassword(string id, [FromBody] ResetPasswordDto dto)
     {
         var callerId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
@@ -71,7 +94,7 @@ public class UsersController : ControllerBase
         if (target is null) return NotFound();
 
         // HospitalAdministrator may not reset SuperAdmin or peer HospitalAdministrator accounts
-        if (callerRole != "SuperAdmin" && _privilegedRoles.Contains(target.Role))
+        if (callerRole != "SuperAdmin" && _privilegedRoles.Contains(target.Role.ToString()))
             return Forbid();
 
         var ok = await _auth.ResetPasswordAsync(id, dto.NewPassword);
@@ -84,6 +107,7 @@ public class UsersController : ControllerBase
     }
 
     [HttpPatch("{id}/deactivate")]
+    [Authorize(Roles = "SuperAdmin,HospitalAdministrator")]
     public async Task<IActionResult> Deactivate(string id)
     {
         var ok = await _users.DeactivateAsync(id);

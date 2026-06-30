@@ -17,13 +17,32 @@ public class ProcurementController : ControllerBase
 
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] string? status, [FromQuery] int? departmentId)
-        => Ok(await _procurement.GetAllAsync(status, departmentId));
+    {
+        if (User.IsInRole("DepartmentHead"))
+        {
+            var deptClaim = User.FindFirstValue("departmentId");
+            if (int.TryParse(deptClaim, out var userDeptId))
+                departmentId = userDeptId;
+            else
+                return Forbid();
+        }
+        return Ok(await _procurement.GetAllAsync(status, departmentId));
+    }
 
     [HttpGet("{id}")]
     public async Task<IActionResult> GetById(int id)
     {
         var result = await _procurement.GetByIdAsync(id);
-        return result is null ? NotFound() : Ok(result);
+        if (result is null) return NotFound();
+        
+        if (User.IsInRole("DepartmentHead"))
+        {
+            var deptClaim = User.FindFirstValue("departmentId");
+            if (!int.TryParse(deptClaim, out var userDeptId) || result.DepartmentId != userDeptId)
+                return Forbid();
+        }
+        
+        return Ok(result);
     }
 
     [HttpPost]
@@ -39,6 +58,22 @@ public class ProcurementController : ControllerBase
         {
             var result = await _procurement.CreateAsync(dto, userId, deptId);
             return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpPatch("{id}/submit")]
+    [Authorize(Roles = "SuperAdmin,HospitalAdministrator,DepartmentHead")]
+    public async Task<IActionResult> Submit(int id)
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        try
+        {
+            var result = await _procurement.SubmitAsync(id, userId);
+            return result is null ? NotFound() : Ok(result);
         }
         catch (InvalidOperationException ex)
         {
@@ -79,10 +114,12 @@ public class ProcurementController : ControllerBase
     }
 
     [HttpGet("purchase-orders")]
+    [Authorize(Roles = "SuperAdmin,HospitalAdministrator,ProcurementStaff,InventoryOfficer")]
     public async Task<IActionResult> GetAllPOs()
         => Ok(await _procurement.GetAllPurchaseOrdersAsync());
 
     [HttpGet("purchase-orders/{id}")]
+    [Authorize(Roles = "SuperAdmin,HospitalAdministrator,ProcurementStaff,InventoryOfficer")]
     public async Task<IActionResult> GetPO(int id)
     {
         var result = await _procurement.GetPurchaseOrderAsync(id);
