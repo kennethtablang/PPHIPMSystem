@@ -9,4 +9,6 @@ public class LoginResponseDto
     public string FullName { get; set; } = string.Empty;
     public string Role { get; set; } = string.Empty;
     public string? DepartmentName { get; set; }
+    public int? DepartmentId { get; set; }
+    public bool RequiresTwoFactor { get; set; } = false;
 }
