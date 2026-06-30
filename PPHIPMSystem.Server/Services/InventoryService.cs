@@ -123,6 +123,51 @@ public class InventoryService : IInventoryService
             .Take(10)
             .ToListAsync();
 
+        var sixMonthsAgo = now.AddMonths(-5);
+        // Use Quantity as a proxy value (no UnitCost on InventoryItem in current schema)
+        var recentTrends = await _db.StockMovements
+            .Where(m => m.MovementDate >= new DateTime(sixMonthsAgo.Year, sixMonthsAgo.Month, 1))
+            .GroupBy(m => new { m.MovementDate.Year, m.MovementDate.Month, m.MovementType })
+            .Select(g => new {
+                g.Key.Year,
+                g.Key.Month,
+                g.Key.MovementType,
+                TotalQty = g.Sum(m => m.Quantity)
+            })
+            .ToListAsync();
+
+        var monthlyTrends = new List<MonthlyTrendDto>();
+        for (int i = 5; i >= 0; i--)
+        {
+            var targetMonth = now.AddMonths(-i);
+            var monthName = targetMonth.ToString("MMM yyyy");
+
+            var proc = recentTrends
+                .Where(t => t.Year == targetMonth.Year && t.Month == targetMonth.Month && t.MovementType == Models.Enums.StockMovementType.Receipt)
+                .Sum(t => t.TotalQty);
+            var cons = recentTrends
+                .Where(t => t.Year == targetMonth.Year && t.Month == targetMonth.Month && t.MovementType == Models.Enums.StockMovementType.Issuance)
+                .Sum(t => t.TotalQty);
+
+            monthlyTrends.Add(new MonthlyTrendDto
+            {
+                Month = monthName,
+                ProcurementValue = proc,
+                ConsumptionValue = cons
+            });
+        }
+
+        var stockByCategory = items
+            .GroupBy(i => i.Category?.Name ?? "Uncategorized")
+            .Select(g => new StockByCategoryDto
+            {
+                CategoryName = g.Key,
+                ItemCount = g.Count(),
+                TotalValue = g.Sum(i => i.QuantityOnHand)
+            })
+            .OrderByDescending(x => x.TotalValue)
+            .ToList();
+
         return new DashboardSummaryDto
         {
             TotalItems = items.Count,
@@ -163,7 +208,9 @@ public class InventoryService : IInventoryService
                 InventoryItemName = m.InventoryItem?.Name,
                 Quantity = m.Quantity,
                 Unit = m.InventoryItem?.Unit
-            })
+            }),
+            StockByCategory = stockByCategory,
+            MonthlyTrends = monthlyTrends
         };
     }
 }

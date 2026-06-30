@@ -57,7 +57,7 @@ public class ProcurementService : IProcurementService
             DepartmentId = departmentId,
             RequestedByUserId = userId,
             Justification = dto.Justification,
-            Status = ProcurementStatus.SubmittedToProcurement,
+            Status = ProcurementStatus.SubmittedByDepartment,
             Items = dto.Items.Select(i => new ProcurementRequestItem
             {
                 InventoryItemId = i.InventoryItemId,
@@ -69,15 +69,40 @@ public class ProcurementService : IProcurementService
         _db.ProcurementRequests.Add(request);
         await _db.SaveChangesAsync();
 
+        await _audit.LogAsync(userId, "ProcurementCreated", "ProcurementRequest", request.Id, request.RequestNumber);
+
+        return _mapper.Map<ProcurementRequestDto>(await BaseQuery().FirstAsync(r => r.Id == request.Id));
+    }
+
+    public async Task<ProcurementRequestDto?> SubmitAsync(int id, string userId)
+    {
+        var request = await BaseQuery().FirstOrDefaultAsync(r => r.Id == id);
+        if (request is null) return null;
+
+        if (request.Status != ProcurementStatus.SubmittedByDepartment && request.Status != ProcurementStatus.ReturnedForRevision)
+            throw new InvalidOperationException("Request cannot be submitted at this stage.");
+
+        request.Status = ProcurementStatus.SubmittedToProcurement;
+        request.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+
+        // Notify Procurement Staff
         await _notifications.CreateForRoleAsync(UserRole.ProcurementStaff,
             NotificationType.ProcurementSubmitted,
             "New Procurement Request",
             $"Request {request.RequestNumber} submitted for review.",
             request.Id, "ProcurementRequest");
 
+        // Also notify Inventory Officers so they can approve if items are in stock
+        await _notifications.CreateForRoleAsync(UserRole.InventoryOfficer,
+            NotificationType.ProcurementSubmitted,
+            "Department Request Needs Inventory Review",
+            $"Department request {request.RequestNumber} has been submitted. Please verify item availability.",
+            request.Id, "ProcurementRequest");
+
         await _audit.LogAsync(userId, "ProcurementSubmitted", "ProcurementRequest", request.Id, request.RequestNumber);
 
-        return _mapper.Map<ProcurementRequestDto>(await BaseQuery().FirstAsync(r => r.Id == request.Id));
+        return _mapper.Map<ProcurementRequestDto>(request);
     }
 
     public async Task<ProcurementRequestDto?> ProcessApprovalAsync(int id, ApproveProcurementDto dto, string approverId)
@@ -107,14 +132,22 @@ public class ProcurementService : IProcurementService
             Remarks = dto.Remarks
         });
 
-        request.Status = (action, approver.Role) switch
+        request.Status = (action, approver.Role, request.Status) switch
         {
-            (ApprovalAction.Rejected, _) => ProcurementStatus.Rejected,
-            (ApprovalAction.ReturnedForRevision, _) => ProcurementStatus.ReturnedForRevision,
-            (ApprovalAction.Approved, UserRole.ProcurementStaff) => ProcurementStatus.ApprovedByProcurement,
-            (ApprovalAction.Approved, UserRole.HospitalAdministrator) => ProcurementStatus.FullyApproved,
-            (ApprovalAction.Approved, UserRole.InventoryOfficer) => ProcurementStatus.FullyApproved,
-            _ => request.Status
+            (ApprovalAction.Rejected, _, _) => ProcurementStatus.Rejected,
+            (ApprovalAction.ReturnedForRevision, _, _) => ProcurementStatus.ReturnedForRevision,
+            // Inventory Officer can approve department requests directly (items available in stock)
+            (ApprovalAction.Approved, UserRole.InventoryOfficer, ProcurementStatus.SubmittedToProcurement) => ProcurementStatus.ApprovedByInventoryOfficer,
+            (ApprovalAction.Approved, UserRole.ProcurementStaff, ProcurementStatus.SubmittedToProcurement) => ProcurementStatus.ApprovedByProcurement,
+            (ApprovalAction.Approved, UserRole.InventoryOfficer, ProcurementStatus.ApprovedByProcurement) => ProcurementStatus.ApprovedByInventoryOfficer,
+            (ApprovalAction.Approved, UserRole.HospitalAdministrator, ProcurementStatus.ApprovedByInventoryOfficer) => ProcurementStatus.FullyApproved,
+            (ApprovalAction.Approved, UserRole.SuperAdmin, ProcurementStatus.ApprovedByInventoryOfficer) => ProcurementStatus.FullyApproved,
+            // Admins can approve at earlier stages too
+            (ApprovalAction.Approved, UserRole.HospitalAdministrator, ProcurementStatus.SubmittedToProcurement) => ProcurementStatus.ApprovedByProcurement,
+            (ApprovalAction.Approved, UserRole.HospitalAdministrator, ProcurementStatus.ApprovedByProcurement) => ProcurementStatus.ApprovedByInventoryOfficer,
+            (ApprovalAction.Approved, UserRole.SuperAdmin, ProcurementStatus.SubmittedToProcurement) => ProcurementStatus.ApprovedByProcurement,
+            (ApprovalAction.Approved, UserRole.SuperAdmin, ProcurementStatus.ApprovedByProcurement) => ProcurementStatus.ApprovedByInventoryOfficer,
+            _ => throw new InvalidOperationException($"Approver with role {approver.Role} cannot approve request in {request.Status} status.")
         };
         request.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
@@ -140,7 +173,7 @@ public class ProcurementService : IProcurementService
         var request = await BaseQuery().FirstOrDefaultAsync(r => r.Id == requestId)
             ?? throw new InvalidOperationException("Request not found.");
 
-        if (request.Status != ProcurementStatus.FullyApproved && request.Status != ProcurementStatus.ApprovedByProcurement)
+        if (request.Status != ProcurementStatus.FullyApproved)
             throw new InvalidOperationException("Request is not fully approved.");
 
         var costMap = dto.ItemCosts.ToDictionary(c => c.ProcurementRequestItemId, c => c.UnitCost);

@@ -96,4 +96,40 @@ public class UserService : IUserService
         await _audit.LogAsync(null, "UserDeleted", "User", null, $"UserId: {id}");
         return true;
     }
+
+    public async Task<ProfileDto?> GetProfileAsync(string id)
+    {
+        var user = await _db.Users.Include(u => u.Department).FirstOrDefaultAsync(u => u.Id == id);
+        if (user is null) return null;
+
+        return new ProfileDto
+        {
+            Id = user.Id,
+            Username = user.UserName!,
+            FirstName = user.FirstName,
+            LastName = user.LastName,
+            Email = user.Email ?? "",
+            Role = user.Role.ToString(),
+            DepartmentName = user.Department?.Name,
+            TwoFactorEnabled = user.TwoFactorEnabled
+        };
+    }
+
+    public async Task<ProfileDto?> UpdateProfileAsync(string id, UpdateProfileDto dto)
+    {
+        var user = await _db.Users.FindAsync(id);
+        if (user is null) return null;
+
+        user.FirstName = dto.FirstName;
+        user.LastName = dto.LastName;
+        user.Email = dto.Email;
+        
+        var emailResult = await _userManager.SetEmailAsync(user, dto.Email);
+        var twoFactorResult = await _userManager.SetTwoFactorEnabledAsync(user, dto.TwoFactorEnabled);
+
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync(id, "ProfileUpdated", "User", null);
+
+        return await GetProfileAsync(id);
+    }
 }

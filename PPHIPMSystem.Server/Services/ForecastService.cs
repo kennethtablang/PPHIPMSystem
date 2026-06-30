@@ -5,6 +5,8 @@ using PPHIPMSystem.Server.DTOs.Forecast;
 using PPHIPMSystem.Server.Interfaces;
 using PPHIPMSystem.Server.Models;
 using PPHIPMSystem.Server.Models.Enums;
+using Microsoft.AspNetCore.SignalR;
+using PPHIPMSystem.Server.Hubs;
 
 namespace PPHIPMSystem.Server.Services;
 
@@ -12,11 +14,13 @@ public class ForecastService : IForecastService
 {
     private readonly ApplicationDbContext _db;
     private readonly IMapper _mapper;
+    private readonly IHubContext<ForecastHub> _hubContext;
 
-    public ForecastService(ApplicationDbContext db, IMapper mapper)
+    public ForecastService(ApplicationDbContext db, IMapper mapper, IHubContext<ForecastHub> hubContext)
     {
         _db = db;
         _mapper = mapper;
+        _hubContext = hubContext;
     }
 
     public async Task<IEnumerable<DemandForecastDto>> GetForecastsAsync(int? itemId, int? year)
@@ -82,7 +86,11 @@ public class ForecastService : IForecastService
 
         await _db.SaveChangesAsync();
         foreach (var f in forecasts) await _db.Entry(f).Reference(x => x.InventoryItem).LoadAsync();
-        return _mapper.Map<IEnumerable<DemandForecastDto>>(forecasts);
+        
+        var dtoList = _mapper.Map<IEnumerable<DemandForecastDto>>(forecasts);
+        await _hubContext.Clients.All.SendAsync("ReceiveForecastUpdate", dtoList);
+        
+        return dtoList;
     }
 
     public async Task<IEnumerable<ConsumptionRecordDto>> GetConsumptionRecordsAsync(int itemId)
@@ -119,6 +127,48 @@ public class ForecastService : IForecastService
         await _db.SaveChangesAsync();
         await _db.Entry(existing).Reference(c => c.InventoryItem).LoadAsync();
         return _mapper.Map<ConsumptionRecordDto>(existing);
+    }
+
+    public async Task<bool> SyncConsumptionRecordsAsync(int itemId)
+    {
+        var item = await _db.InventoryItems.FindAsync(itemId);
+        if (item is null) return false;
+
+        var movements = await _db.StockMovements
+            .Where(m => m.InventoryItemId == itemId && m.MovementType == StockMovementType.Issuance)
+            .ToListAsync();
+
+        var grouped = movements
+            .GroupBy(m => new { m.MovementDate.Year, m.MovementDate.Month })
+            .Select(g => new { g.Key.Year, g.Key.Month, Total = g.Sum(m => m.Quantity) })
+            .ToList();
+
+        var existingRecords = await _db.ConsumptionRecords
+            .Where(c => c.InventoryItemId == itemId)
+            .ToDictionaryAsync(c => $"{c.Year}-{c.Month}");
+
+        foreach (var g in grouped)
+        {
+            var key = $"{g.Year}-{g.Month}";
+            if (existingRecords.TryGetValue(key, out var record))
+            {
+                record.QuantityConsumed = g.Total;
+                record.RecordedAt = DateTime.UtcNow;
+            }
+            else
+            {
+                _db.ConsumptionRecords.Add(new ConsumptionRecord
+                {
+                    InventoryItemId = itemId,
+                    Year = g.Year,
+                    Month = g.Month,
+                    QuantityConsumed = g.Total
+                });
+            }
+        }
+
+        await _db.SaveChangesAsync();
+        return true;
     }
 
     private static decimal ComputeMovingAverage(List<ConsumptionRecord> history, int window)
