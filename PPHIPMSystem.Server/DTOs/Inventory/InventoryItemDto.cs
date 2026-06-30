@@ -14,6 +14,7 @@ public class InventoryItemDto
     public decimal QuantityOnHand { get; set; }
     public decimal ReorderThreshold { get; set; }
     public bool IsBelowReorder => QuantityOnHand <= ReorderThreshold;
+    public bool IsAvailable => QuantityOnHand > ReorderThreshold;
     public int ExpirationWarningDays { get; set; }
     public ForecastMethod PreferredForecastMethod { get; set; }
     public int MovingAverageWindow { get; set; }

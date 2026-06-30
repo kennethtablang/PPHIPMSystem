@@ -12,8 +12,24 @@ public class DashboardSummaryDto
     public IEnumerable<LowStockAlertDto> LowStockItems { get; set; } = [];
     public IEnumerable<ExpiringBatchAlertDto> ExpiringBatches { get; set; } = [];
     public IEnumerable<RecentTransactionDto> RecentTransactions { get; set; } = [];
+    
+    public IEnumerable<StockByCategoryDto> StockByCategory { get; set; } = [];
+    public IEnumerable<MonthlyTrendDto> MonthlyTrends { get; set; } = [];
 }
 
+public class StockByCategoryDto
+{
+    public string CategoryName { get; set; } = string.Empty;
+    public decimal TotalValue { get; set; }
+    public int ItemCount { get; set; }
+}
+
+public class MonthlyTrendDto
+{
+    public string Month { get; set; } = string.Empty;
+    public decimal ProcurementValue { get; set; }
+    public decimal ConsumptionValue { get; set; }
+}
 public class LowStockAlertDto
 {
     public int ItemId { get; set; }
