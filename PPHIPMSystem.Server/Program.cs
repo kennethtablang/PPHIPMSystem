@@ -10,6 +10,7 @@ using PPHIPMSystem.Server.Data.Seeders;
 using PPHIPMSystem.Server.Interfaces;
 using PPHIPMSystem.Server.Models;
 using PPHIPMSystem.Server.Services;
+using PPHIPMSystem.Server.Hubs;
 
 namespace PPHIPMSystem.Server
 {
@@ -55,6 +56,19 @@ namespace PPHIPMSystem.Server
                     ValidAudience = builder.Configuration["Jwt:Audience"],
                     IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey))
                 };
+                options.Events = new JwtBearerEvents
+                {
+                    OnMessageReceived = context =>
+                    {
+                        var accessToken = context.Request.Query["access_token"];
+                        var path = context.HttpContext.Request.Path;
+                        if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs"))
+                        {
+                            context.Token = accessToken;
+                        }
+                        return Task.CompletedTask;
+                    }
+                };
             });
 
             builder.Services.AddAuthorization();
@@ -66,6 +80,7 @@ namespace PPHIPMSystem.Server
             // Service Layer
             builder.Services.AddScoped<IAuditLogService, AuditLogService>();
             builder.Services.AddScoped<INotificationService, NotificationService>();
+            builder.Services.AddScoped<IEmailService, EmailService>();
             builder.Services.AddScoped<IAuthService, AuthService>();
             builder.Services.AddScoped<IUserService, UserService>();
             builder.Services.AddScoped<IDepartmentService, DepartmentService>();
@@ -79,7 +94,10 @@ namespace PPHIPMSystem.Server
             builder.Services.AddScoped<IForecastService, ForecastService>();
             builder.Services.AddScoped<IReportService, ReportService>();
 
+            builder.Services.AddHostedService<ExpirationCheckService>();
+
             builder.Services.AddControllers();
+            builder.Services.AddSignalR();
 
             // Swagger
             builder.Services.AddEndpointsApiExplorer();
@@ -108,7 +126,8 @@ namespace PPHIPMSystem.Server
                 options.AddPolicy("AllowFrontend", policy =>
                     policy.WithOrigins("https://localhost:59350", "http://localhost:5173")
                           .AllowAnyHeader()
-                          .AllowAnyMethod());
+                          .AllowAnyMethod()
+                          .AllowCredentials());
             });
 
             var app = builder.Build();
@@ -127,10 +146,13 @@ namespace PPHIPMSystem.Server
             app.UseAuthentication();
             app.UseAuthorization();
             app.MapControllers();
+            app.MapHub<NotificationHub>("/hubs/notifications");
+            app.MapHub<ForecastHub>("/hubs/forecast");
             app.MapFallbackToFile("/index.html");
 
             // Seed database
             await DataSeeder.SeedAsync(app.Services);
+            await MockDataSeeder.SeedAsync(app.Services);
 
             app.Run();
         }
