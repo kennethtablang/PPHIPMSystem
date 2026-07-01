@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { MdAdd, MdVisibility, MdCheckCircle, MdArrowForward } from 'react-icons/md';
-import { getRequests, createRequest, approveRequest } from '../../api/procurement';
+import { getRequests, createRequest, approveRequest, submitRequest } from '../../api/procurement';
 import { getItems } from '../../api/inventory';
 import Modal from '../../components/common/Modal';
 import StatusBadge from '../../components/common/StatusBadge';
@@ -83,7 +83,31 @@ export default function ProcurementList() {
     finally { setSaving(false); }
   };
 
-  const STATUSES = ['', 'SubmittedToProcurement', 'ApprovedByProcurement', 'FullyApproved', 'Rejected', 'PurchaseOrderGenerated', 'Delivered'];
+  const handleSubmitToProcurement = async id => {
+    setSaving(true);
+    try {
+      await submitRequest(id);
+      toast.success('Procurement request submitted to Procurement Staff.');
+      load();
+    } catch (e) {
+      toast.error(e.response?.data?.message ?? 'Failed to submit request.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const STATUSES = [
+    { value: '', label: 'All' },
+    { value: 'SubmittedByDepartment', label: 'Draft' },
+    { value: 'SubmittedToProcurement', label: 'Pending Procurement' },
+    { value: 'ApprovedByProcurement', label: 'Procurement Approved' },
+    { value: 'ApprovedByInventoryOfficer', label: 'Inventory Approved' },
+    { value: 'FullyApproved', label: 'Fully Approved' },
+    { value: 'Rejected', label: 'Rejected' },
+    { value: 'ReturnedForRevision', label: 'Returned' },
+    { value: 'PurchaseOrderGenerated', label: 'PO Generated' },
+    { value: 'Delivered', label: 'Delivered' },
+  ];
 
   return (
     <div>
@@ -101,8 +125,8 @@ export default function ProcurementList() {
 
       <div className="filter-bar" style={{ overflowX: 'auto', flexWrap: 'nowrap' }}>
         {STATUSES.map(s => (
-          <button key={s} className={`btn btn-sm ${statusFilter === s ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setStatusFilter(s)} style={{ whiteSpace: 'nowrap' }}>
-            {s || 'All'}
+          <button key={s.value} className={`btn btn-sm ${statusFilter === s.value ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setStatusFilter(s.value)} style={{ whiteSpace: 'nowrap' }}>
+            {s.label}
           </button>
         ))}
       </div>
@@ -139,14 +163,29 @@ export default function ProcurementList() {
                       <button className="btn btn-ghost btn-sm" onClick={() => setViewModal(r)}>
                         <MdVisibility size={14} /> View
                       </button>
-                      {canApprove && r.status === 'SubmittedToProcurement' && (
+                      {canApprove && r.status === 'SubmittedToProcurement' && ['SuperAdmin', 'HospitalAdministrator', 'ProcurementStaff'].includes(user?.role) && (
                         <button className="btn btn-primary btn-sm" onClick={() => { setApproveModal(r); setApproveForm({ action: 'Approve', remarks: '' }); }}>
-                          Review
+                          Review (Procurement)
                         </button>
                       )}
-                      {canApprove && r.status === 'ApprovedByProcurement' && ['SuperAdmin', 'HospitalAdministrator'].includes(user?.role) && (
+                      {canApprove && r.status === 'SubmittedToProcurement' && ['SuperAdmin', 'HospitalAdministrator', 'InventoryOfficer'].includes(user?.role) && (
+                        <button className="btn btn-success btn-sm" onClick={() => { setApproveModal(r); setApproveForm({ action: 'Approve', remarks: '' }); }}>
+                          Review (Inventory)
+                        </button>
+                      )}
+                      {canApprove && r.status === 'ApprovedByProcurement' && ['SuperAdmin', 'HospitalAdministrator', 'InventoryOfficer'].includes(user?.role) && (
+                        <button className="btn btn-primary btn-sm" onClick={() => { setApproveModal(r); setApproveForm({ action: 'Approve', remarks: '' }); }}>
+                          Review (Inventory)
+                        </button>
+                      )}
+                      {canApprove && r.status === 'ApprovedByInventoryOfficer' && ['SuperAdmin', 'HospitalAdministrator'].includes(user?.role) && (
                         <button className="btn btn-primary btn-sm" onClick={() => { setApproveModal(r); setApproveForm({ action: 'Approve', remarks: '' }); }}>
                           Final Approve
+                        </button>
+                      )}
+                      {(r.status === 'SubmittedByDepartment' || r.status === 'ReturnedForRevision') && ['SuperAdmin', 'HospitalAdministrator', 'DepartmentHead'].includes(user?.role) && (
+                        <button className="btn btn-success btn-sm" onClick={() => handleSubmitToProcurement(r.id)} disabled={saving}>
+                          Submit
                         </button>
                       )}
                     </div>
@@ -177,30 +216,39 @@ export default function ProcurementList() {
               <label className="form-label" style={{ margin: 0 }}>Items Requested *</label>
               <button className="btn btn-secondary btn-sm" onClick={addLine}><MdAdd size={14} /> Add Item</button>
             </div>
-            {form.items.map((line, i) => (
-              <div key={i} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 2fr auto', gap: 8, marginBottom: 8, alignItems: 'end' }}>
-                <div className="form-group" style={{ margin: 0 }}>
-                  {i === 0 && <label className="form-label">Item</label>}
-                  <select className="form-control" value={line.inventoryItemId} onChange={setLine(i, 'inventoryItemId')} required>
-                    <option value="">Select item</option>
-                    {items.map(it => <option key={it.id} value={it.id}>{it.name} ({it.unit})</option>)}
-                  </select>
+            {form.items.map((line, i) => {
+              const isDeptHead = user?.role === 'DepartmentHead';
+              return (
+                <div key={i} style={{ display: 'grid', gridTemplateColumns: isDeptHead ? '2fr 1.2fr 2fr auto' : '2fr 1fr 1fr 2fr auto', gap: 8, marginBottom: 8, alignItems: 'end' }}>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    {i === 0 && <label className="form-label">Item</label>}
+                    <select className="form-control" value={line.inventoryItemId} onChange={setLine(i, 'inventoryItemId')} required>
+                      <option value="">Select item</option>
+                      {items.map(it => (
+                        <option key={it.id} value={it.id}>
+                          {it.name} ({it.unit}) — {it.quantityOnHand > 0 ? 'Available' : 'Not Available'} ({it.quantityOnHand} in stock)
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group" style={{ margin: 0 }}>
+                    {i === 0 && <label className="form-label">Qty</label>}
+                    <input className="form-control" type="number" min="0.01" step="0.01" value={line.quantityRequested} onChange={setLine(i, 'quantityRequested')} required placeholder="0" />
+                  </div>
+                  {!isDeptHead && (
+                    <div className="form-group" style={{ margin: 0 }}>
+                      {i === 0 && <label className="form-label">Est. Unit Cost</label>}
+                      <input className="form-control" type="number" min="0" step="0.01" value={line.estimatedUnitCost} onChange={setLine(i, 'estimatedUnitCost')} placeholder="0.00" />
+                    </div>
+                  )}
+                  <div className="form-group" style={{ margin: 0 }}>
+                    {i === 0 && <label className="form-label">Remarks</label>}
+                    <input className="form-control" value={line.remarks} onChange={setLine(i, 'remarks')} placeholder="Optional…" />
+                  </div>
+                  <button className="btn btn-danger btn-icon btn-sm" onClick={() => removeLine(i)} style={{ marginTop: i === 0 ? 20 : 0 }} disabled={form.items.length === 1}>×</button>
                 </div>
-                <div className="form-group" style={{ margin: 0 }}>
-                  {i === 0 && <label className="form-label">Qty</label>}
-                  <input className="form-control" type="number" min="0.01" step="0.01" value={line.quantityRequested} onChange={setLine(i, 'quantityRequested')} required placeholder="0" />
-                </div>
-                <div className="form-group" style={{ margin: 0 }}>
-                  {i === 0 && <label className="form-label">Est. Unit Cost</label>}
-                  <input className="form-control" type="number" min="0" step="0.01" value={line.estimatedUnitCost} onChange={setLine(i, 'estimatedUnitCost')} placeholder="0.00" />
-                </div>
-                <div className="form-group" style={{ margin: 0 }}>
-                  {i === 0 && <label className="form-label">Remarks</label>}
-                  <input className="form-control" value={line.remarks} onChange={setLine(i, 'remarks')} placeholder="Optional…" />
-                </div>
-                <button className="btn btn-danger btn-icon btn-sm" onClick={() => removeLine(i)} style={{ marginTop: i === 0 ? 20 : 0 }} disabled={form.items.length === 1}>×</button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </Modal>
       )}
@@ -221,13 +269,22 @@ export default function ProcurementList() {
             <label className="form-label">Items Requested</label>
             <div className="table-wrap" style={{ marginTop: 8 }}>
               <table>
-                <thead><tr><th>Item</th><th>Qty</th><th>Est. Cost</th><th>Remarks</th></tr></thead>
+                <thead>
+                  <tr>
+                    <th>Item</th>
+                    <th>Qty</th>
+                    {user?.role !== 'DepartmentHead' && <th>Est. Cost</th>}
+                    <th>Remarks</th>
+                  </tr>
+                </thead>
                 <tbody>
                   {(viewModal.items ?? []).map(it => (
                     <tr key={it.id}>
                       <td>{it.itemName} <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>({it.unit})</span></td>
                       <td>{it.quantityRequested}</td>
-                      <td>{it.estimatedUnitCost ? `₱${it.estimatedUnitCost.toLocaleString()}` : '—'}</td>
+                      {user?.role !== 'DepartmentHead' && (
+                        <td>{it.estimatedUnitCost ? `₱${it.estimatedUnitCost.toLocaleString()}` : '—'}</td>
+                      )}
                       <td style={{ color: 'var(--text-muted)', fontSize: 12 }}>{it.remarks ?? '—'}</td>
                     </tr>
                   ))}
