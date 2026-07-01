@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { MdAutoGraph, MdRefresh, MdAdd } from 'react-icons/md';
-import { getForecasts, generateForecast, getConsumptionRecords, upsertConsumption } from '../../api/forecast';
+import { getForecasts, generateForecast, getConsumptionRecords, upsertConsumption, syncConsumption } from '../../api/forecast';
 import { getItems } from '../../api/inventory';
+import { signalRService } from '../../api/signalrService';
 import { toast } from '../../components/common/Toast';
 import { useAuth } from '../../context/AuthContext';
 import Modal from '../../components/common/Modal';
@@ -23,8 +24,35 @@ export default function ForecastPage() {
   const [consumptionModal, setConsumptionModal] = useState(false);
   const [consumptionForm, setConsumptionForm] = useState({ month: now.getMonth() + 1, year: now.getFullYear(), quantity: '' });
   const [savingConsumption, setSavingConsumption] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [periodCount, setPeriodCount] = useState(3);
 
-  useEffect(() => { getItems().then(r => setItems(r.data)); }, []);
+  useEffect(() => { 
+    getItems().then(r => setItems(r.data)); 
+    signalRService.startForecastConnection();
+  }, []);
+
+  useEffect(() => {
+    const handleUpdate = (updatedForecasts) => {
+      if (!updatedForecasts || updatedForecasts.length === 0) return;
+      if (updatedForecasts[0].inventoryItemId != selectedItem) return;
+
+      setForecasts(prev => {
+        const map = new Map(prev.map(f => [f.id, f]));
+        updatedForecasts.forEach(f => map.set(f.id, f));
+        return Array.from(map.values()).sort((a, b) => {
+          if (a.forecastYear !== b.forecastYear) return b.forecastYear - a.forecastYear;
+          return b.forecastMonth - a.forecastMonth;
+        });
+      });
+      toast.info('Forecast data updated in real-time.');
+    };
+
+    signalRService.onForecastUpdated(handleUpdate);
+    return () => {
+      signalRService.offForecastUpdated(handleUpdate);
+    };
+  }, [selectedItem]);
 
   const load = async id => {
     setLoading(true);
@@ -50,8 +78,8 @@ export default function ForecastPage() {
     if (!selectedItem) return;
     setGenerating(true);
     try {
-      await generateForecast(selectedItem);
-      toast.success('Forecast generated.');
+      await generateForecast(selectedItem, periodCount);
+      toast.success(`Forecast generated for next ${periodCount} month(s).`);
       load(selectedItem);
     } catch (e) { toast.error(e.response?.data?.message ?? 'Failed to generate forecast.'); }
     finally { setGenerating(false); }
@@ -61,12 +89,23 @@ export default function ForecastPage() {
     if (!consumptionForm.quantity || +consumptionForm.quantity < 0) return;
     setSavingConsumption(true);
     try {
-      await upsertConsumption({ inventoryItemId: +selectedItem, month: +consumptionForm.month, year: +consumptionForm.year, quantity: +consumptionForm.quantity });
+      await upsertConsumption({ inventoryItemId: +selectedItem, month: +consumptionForm.month, year: +consumptionForm.year, quantityConsumed: +consumptionForm.quantity });
       toast.success('Consumption record saved.');
       setConsumptionModal(false);
       load(selectedItem);
     } catch (e) { toast.error(e.response?.data?.message ?? 'Failed to save consumption.'); }
     finally { setSavingConsumption(false); }
+  };
+
+  const sync = async () => {
+    if (!selectedItem) return;
+    setSyncing(true);
+    try {
+      await syncConsumption(selectedItem);
+      toast.success('Consumption records synced with stock movements.');
+      load(selectedItem);
+    } catch (e) { toast.error(e.response?.data?.message ?? 'Failed to sync consumption records.'); }
+    finally { setSyncing(false); }
   };
 
   const chartData = (() => {
@@ -87,16 +126,34 @@ export default function ForecastPage() {
           <p className="page-subtitle">Moving average and exponential smoothing forecasts based on consumption history</p>
         </div>
         {selectedItem && (
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {canGenerate && (
+              <button className="btn btn-secondary" onClick={sync} disabled={syncing}>
+                <MdRefresh size={16} /> {syncing ? 'Syncing…' : 'Sync Records'}
+              </button>
+            )}
             {canGenerate && (
               <button className="btn btn-secondary" onClick={() => setConsumptionModal(true)}>
                 <MdAdd size={16} /> Add Consumption
               </button>
             )}
             {canGenerate && (
-              <button className="btn btn-primary" onClick={generate} disabled={generating}>
-                <MdAutoGraph size={16} /> {generating ? 'Generating…' : 'Generate Forecast'}
-              </button>
+              <>
+                <select
+                  className="form-control"
+                  value={periodCount}
+                  onChange={e => setPeriodCount(+e.target.value)}
+                  style={{ width: 130 }}
+                  title="Months to forecast ahead"
+                >
+                  {[1,2,3,6,9,12].map(n => (
+                    <option key={n} value={n}>{n} month{n > 1 ? 's' : ''} ahead</option>
+                  ))}
+                </select>
+                <button className="btn btn-primary" onClick={generate} disabled={generating}>
+                  <MdAutoGraph size={16} /> {generating ? 'Generating…' : 'Generate Forecast'}
+                </button>
+              </>
             )}
           </div>
         )}
