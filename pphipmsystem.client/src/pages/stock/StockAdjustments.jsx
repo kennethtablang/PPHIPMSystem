@@ -35,6 +35,10 @@ export default function StockAdjustments() {
 
   const set = k => e => setForm(p => ({ ...p, [k]: e.target.value }));
 
+  // Live variance preview
+  const selectedItem = form.inventoryItemId ? items.find(i => i.id === +form.inventoryItemId) : null;
+  const variance = selectedItem && form.physicalCount !== '' ? +form.physicalCount - selectedItem.quantityOnHand : null;
+
   const save = async () => {
     setSaving(true);
     try {
@@ -148,6 +152,19 @@ export default function StockAdjustments() {
               <option value="">Select item</option>
               {items.map(i => <option key={i.id} value={i.id}>{i.name} (Current: {i.quantityOnHand} {i.unit})</option>)}
             </select>
+            {selectedItem && (
+              <div style={{ marginTop: 8, padding: '8px 12px', borderRadius: 8, background: 'var(--green-50)', border: '1px solid var(--green-200)', fontSize: 13, display: 'flex', gap: 20 }}>
+                <div><span style={{ color: 'var(--text-muted)' }}>Recorded Qty:</span> <strong>{selectedItem.quantityOnHand} {selectedItem.unit}</strong></div>
+                {variance !== null && (
+                  <div>
+                    <span style={{ color: 'var(--text-muted)' }}>Variance:</span>{' '}
+                    <strong style={{ color: variance === 0 ? 'inherit' : variance > 0 ? '#059669' : '#dc2626' }}>
+                      {variance > 0 ? '+' : ''}{variance} {selectedItem.unit}
+                    </strong>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
           <div className="form-group">
             <label className="form-label">Physical Count *</label>
