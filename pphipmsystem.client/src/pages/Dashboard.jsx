@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getDashboard } from '../api/inventory';
 import { createMovement } from '../api/stockMovements';
+import { signalRService } from '../api/signalrService';
 import { useAuth } from '../context/AuthContext';
 import {
   MdInventory, MdWarning, MdEvent, MdShoppingCart,
@@ -10,6 +11,11 @@ import {
 } from 'react-icons/md';
 import Modal from '../components/common/Modal';
 import { toast } from '../components/common/Toast';
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer,
+  PieChart, Pie, Cell
+} from 'recharts';
+import DepartmentHeadDashboard from './dashboard/DepartmentHeadDashboard';
 
 function StatCard({ label, value, icon: Icon, color, onClick }) {
   return (
@@ -59,6 +65,11 @@ const CAN_CREATE_PR = ['SuperAdmin', 'HospitalAdministrator', 'DepartmentHead'];
 export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
+
+  if (user?.role === 'DepartmentHead') {
+    return <DepartmentHeadDashboard />;
+  }
+
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [catFilter, setCatFilter] = useState('');
@@ -67,11 +78,21 @@ export default function Dashboard() {
   const [repeatRemarks, setRepeatRemarks] = useState('');
   const [repeating, setRepeating] = useState(false);
 
-  useEffect(() => {
+  const loadDashboard = () => {
     getDashboard()
       .then(r => setData(r.data))
       .catch(() => {})
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    loadDashboard();
+  }, []);
+
+  useEffect(() => {
+    const handleNotification = () => loadDashboard();
+    signalRService.onNotificationReceived(handleNotification);
+    return () => signalRService.offNotificationReceived(handleNotification);
   }, []);
 
   const openRepeat = tx => {
@@ -154,6 +175,72 @@ export default function Dashboard() {
           </div>
         );
       })()}
+
+      {/* Analytics Section */}
+      <div className="grid-2" style={{ gap: 20, marginBottom: 20 }}>
+        {/* Monthly Trend Chart */}
+        <div className="card">
+          <div className="card-header">
+            <span className="card-title">Procurement vs Consumption (6 Months)</span>
+          </div>
+          <div style={{ height: 300, padding: 10 }}>
+            {data?.monthlyTrends?.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={data.monthlyTrends} margin={{ top: 10, right: 10, left: 0, bottom: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgba(255,255,255,0.1)" />
+                  <XAxis dataKey="Month" stroke="var(--text-muted)" fontSize={12} tickLine={false} axisLine={false} />
+                  <YAxis stroke="var(--text-muted)" fontSize={12} tickLine={false} axisLine={false} tickFormatter={val => '₱' + val.toLocaleString()} />
+                  <RechartsTooltip 
+                    cursor={{ fill: 'rgba(255,255,255,0.05)' }}
+                    contentStyle={{ backgroundColor: 'rgba(5,46,16,0.9)', border: '1px solid var(--border)', borderRadius: 8, color: '#fff' }}
+                    formatter={(value) => ['₱' + Number(value).toLocaleString(undefined, {minimumFractionDigits:2}), '']}
+                  />
+                  <Legend wrapperStyle={{ paddingTop: 10, fontSize: 12, color: 'var(--text-secondary)' }} />
+                  <Bar dataKey="ProcurementValue" name="Received (₱)" fill="var(--blue-500)" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="ConsumptionValue" name="Issued (₱)" fill="var(--amber-500)" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="empty-state"><h3>No trend data available</h3></div>
+            )}
+          </div>
+        </div>
+
+        {/* Stock Value by Category Pie Chart */}
+        <div className="card">
+          <div className="card-header">
+            <span className="card-title">Stock Value by Category</span>
+          </div>
+          <div style={{ height: 300, padding: 10 }}>
+            {data?.stockByCategory?.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={data.stockByCategory}
+                    cx="50%" cy="50%"
+                    innerRadius={70} outerRadius={100}
+                    paddingAngle={5}
+                    dataKey="TotalValue"
+                    nameKey="CategoryName"
+                  >
+                    {data.stockByCategory.map((entry, index) => {
+                      const colors = ['#22c55e', '#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899', '#14b8a6', '#f43f5e'];
+                      return <Cell key={`cell-${index}`} fill={colors[index % colors.length]} />;
+                    })}
+                  </Pie>
+                  <RechartsTooltip 
+                    contentStyle={{ backgroundColor: 'rgba(5,46,16,0.9)', border: '1px solid var(--border)', borderRadius: 8, color: '#fff' }}
+                    formatter={(value) => ['₱' + Number(value).toLocaleString(undefined, {minimumFractionDigits:2}), 'Total Value']}
+                  />
+                  <Legend layout="vertical" verticalAlign="middle" align="right" wrapperStyle={{ fontSize: 12, color: 'var(--text-secondary)' }} />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="empty-state"><h3>No category data</h3></div>
+            )}
+          </div>
+        </div>
+      </div>
 
       <div className="grid-2" style={{ gap: 20 }}>
         {/* Low Stock Alerts */}

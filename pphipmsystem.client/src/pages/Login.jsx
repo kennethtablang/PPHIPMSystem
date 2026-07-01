@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import {
   MdWarehouse, MdLogin, MdInventory, MdShoppingCart,
@@ -13,12 +13,13 @@ const FEATURES = [
 ];
 
 export default function Login() {
-  const { login } = useAuth();
+  const { login, loginWith2Fa } = useAuth();
   const navigate = useNavigate();
-  const [form, setForm] = useState({ username: '', password: '' });
+  const [form, setForm] = useState({ username: '', password: '', code: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPw, setShowPw] = useState(false);
+  const [needs2Fa, setNeeds2Fa] = useState(false);
 
   const set = k => e => setForm(p => ({ ...p, [k]: e.target.value }));
 
@@ -27,10 +28,19 @@ export default function Login() {
     setError('');
     setLoading(true);
     try {
-      await login(form.username, form.password);
-      navigate('/');
+      if (needs2Fa) {
+        await loginWith2Fa(form.username, form.code);
+        navigate('/');
+      } else {
+        const result = await login(form.username, form.password);
+        if (result.requiresTwoFactor) {
+          setNeeds2Fa(true);
+        } else {
+          navigate('/');
+        }
+      }
     } catch {
-      setError('Invalid username or password, or account is inactive.');
+      setError(needs2Fa ? 'Invalid or expired verification code.' : 'Invalid username or password, or account is inactive.');
     } finally {
       setLoading(false);
     }
@@ -320,57 +330,89 @@ export default function Login() {
 
             {/* Form */}
             <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-              <div>
-                <label style={{
-                  display: 'block', fontSize: 11, fontWeight: 700,
-                  color: 'rgba(255,255,255,.55)', letterSpacing: '.1em',
-                  textTransform: 'uppercase', marginBottom: 8,
-                }}>
-                  Username
-                </label>
-                <input
-                  type="text"
-                  value={form.username}
-                  onChange={set('username')}
-                  placeholder="e.g. admin.santos"
-                  required
-                  autoFocus
-                  className="login-input"
-                />
-              </div>
+              {!needs2Fa ? (
+                <>
+                  <div>
+                    <label style={{
+                      display: 'block', fontSize: 11, fontWeight: 700,
+                      color: 'rgba(255,255,255,.55)', letterSpacing: '.1em',
+                      textTransform: 'uppercase', marginBottom: 8,
+                    }}>
+                      Username
+                    </label>
+                    <input
+                      type="text"
+                      value={form.username}
+                      onChange={set('username')}
+                      placeholder="e.g. admin.santos"
+                      required
+                      autoFocus
+                      className="login-input"
+                    />
+                  </div>
 
-              <div>
-                <label style={{
-                  display: 'block', fontSize: 11, fontWeight: 700,
-                  color: 'rgba(255,255,255,.55)', letterSpacing: '.1em',
-                  textTransform: 'uppercase', marginBottom: 8,
-                }}>
-                  Password
-                </label>
-                <div style={{ position: 'relative' }}>
+                  <div>
+                    <label style={{
+                      display: 'block', fontSize: 11, fontWeight: 700,
+                      color: 'rgba(255,255,255,.55)', letterSpacing: '.1em',
+                      textTransform: 'uppercase', marginBottom: 8,
+                    }}>
+                      Password
+                    </label>
+                    <div style={{ position: 'relative' }}>
+                      <input
+                        type={showPw ? 'text' : 'password'}
+                        value={form.password}
+                        onChange={set('password')}
+                        placeholder="Enter your password"
+                        required
+                        className="login-input"
+                        style={{ paddingRight: 46 }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPw(v => !v)}
+                        style={{
+                          position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)',
+                          background: 'none', border: 'none', cursor: 'pointer',
+                          color: 'rgba(255,255,255,.45)', display: 'flex', alignItems: 'center', padding: 2,
+                        }}
+                        tabIndex={-1}
+                      >
+                        {showPw ? <MdVisibilityOff size={18} /> : <MdVisibility size={18} />}
+                      </button>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="fade-in">
+                  <div style={{
+                    background: 'rgba(255,255,255,.05)', padding: '16px', borderRadius: '12px',
+                    border: '1px solid rgba(255,255,255,.1)', marginBottom: '8px'
+                  }}>
+                    <p style={{ color: 'rgba(255,255,255,.8)', fontSize: 13, lineHeight: 1.5, margin: 0 }}>
+                      A verification code has been sent to your registered email address.
+                    </p>
+                  </div>
+                  <label style={{
+                    display: 'block', fontSize: 11, fontWeight: 700,
+                    color: 'rgba(255,255,255,.55)', letterSpacing: '.1em',
+                    textTransform: 'uppercase', marginBottom: 8, marginTop: 8
+                  }}>
+                    Verification Code
+                  </label>
                   <input
-                    type={showPw ? 'text' : 'password'}
-                    value={form.password}
-                    onChange={set('password')}
-                    placeholder="Enter your password"
+                    type="text"
+                    value={form.code}
+                    onChange={set('code')}
+                    placeholder="Enter 6-digit code"
                     required
+                    autoFocus
                     className="login-input"
-                    style={{ paddingRight: 46 }}
+                    style={{ textAlign: 'center', fontSize: 20, letterSpacing: '4px' }}
                   />
-                  <button
-                    type="button"
-                    onClick={() => setShowPw(v => !v)}
-                    style={{
-                      position: 'absolute', right: 14, top: '50%', transform: 'translateY(-50%)',
-                      background: 'none', border: 'none', cursor: 'pointer',
-                      color: 'rgba(255,255,255,.45)', display: 'flex', alignItems: 'center', padding: 2,
-                    }}
-                    tabIndex={-1}
-                  >
-                    {showPw ? <MdVisibilityOff size={18} /> : <MdVisibility size={18} />}
-                  </button>
                 </div>
-              </div>
+              )}
 
               <button
                 type="submit"
@@ -396,6 +438,12 @@ export default function Login() {
                   </>
                 )}
               </button>
+              
+              <div style={{ textAlign: 'center', marginTop: 6 }}>
+                <Link to="/forgot-password" style={{ color: 'rgba(255,255,255,.6)', fontSize: 13, textDecoration: 'none', fontWeight: 500 }}>
+                  Forgot your password?
+                </Link>
+              </div>
             </form>
 
             {/* Divider */}
