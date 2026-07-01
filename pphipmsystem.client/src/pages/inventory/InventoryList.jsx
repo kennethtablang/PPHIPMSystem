@@ -116,7 +116,7 @@ export default function InventoryList() {
                 <th>Item Name</th>
                 <th>Category</th>
                 <th>Unit</th>
-                <th>Qty on Hand</th>
+                <th>Supplies Available</th>
                 <th>Reorder At</th>
                 <th>Forecast Method</th>
                 <th>Status</th>
@@ -137,7 +137,7 @@ export default function InventoryList() {
                   <td>{item.unit}</td>
                   <td>
                     <span style={{ fontWeight: 600, color: item.isBelowReorder ? '#dc2626' : 'var(--text-primary)' }}>
-                      {item.quantityOnHand}
+                      {item.quantityOnHand} {item.unit}
                     </span>
                     {item.isBelowReorder && <MdWarning size={14} color="#f59e0b" style={{ marginLeft: 4 }} />}
                   </td>
@@ -147,7 +147,15 @@ export default function InventoryList() {
                       {item.preferredForecastMethod === 'MovingAverage' ? 'Moving Avg.' : 'Exp. Smooth.'}
                     </span>
                   </td>
-                  <td><span className={`badge ${item.isActive ? 'badge-green' : 'badge-gray'}`}>{item.isActive ? 'Active' : 'Inactive'}</span></td>
+                  <td>
+                    {!item.isActive ? (
+                      <span className="badge badge-gray">Inactive</span>
+                    ) : item.isAvailable ? (
+                      <span className="badge badge-green">Available</span>
+                    ) : (
+                      <span className="badge badge-red">Not Available</span>
+                    )}
+                  </td>
                   {canEdit && (
                     <td>
                       <div style={{ display: 'flex', gap: 4 }}>
