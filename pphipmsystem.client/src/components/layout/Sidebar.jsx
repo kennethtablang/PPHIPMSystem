@@ -94,6 +94,7 @@ export default function Sidebar({ onRequestLogout }) {
           {is(ROLE.SuperAdmin, ROLE.Admin, ROLE.Inventory, ROLE.Procurement, ROLE.DeptHead) && (
             <Group label="Inventory" collapsed={collapsed}>
               <Item to="/inventory"         Icon={MdInventory} label="Items"            collapsed={collapsed} />
+              <Item to="/materials"         Icon={MdInventory} label="Materials List"   collapsed={collapsed} />
               <Item to="/batches"           Icon={MdGridView}  label="Batches & Expiry" collapsed={collapsed} />
               {is(ROLE.SuperAdmin, ROLE.Admin, ROLE.Inventory) && (
                 <>
@@ -104,9 +105,14 @@ export default function Sidebar({ onRequestLogout }) {
             </Group>
           )}
 
-          {is(ROLE.SuperAdmin, ROLE.Admin, ROLE.Procurement, ROLE.DeptHead) && (
+          {is(ROLE.SuperAdmin, ROLE.Admin, ROLE.Procurement, ROLE.Inventory, ROLE.DeptHead) && (
             <Group label="Procurement" collapsed={collapsed}>
-              <Item to="/procurement" Icon={MdShoppingCart} label="Requests" collapsed={collapsed} />
+              {is(ROLE.SuperAdmin, ROLE.Admin, ROLE.Procurement, ROLE.Inventory) && (
+                <Item to="/procurement" Icon={MdShoppingCart} label="Requests" collapsed={collapsed} />
+              )}
+              {is(ROLE.SuperAdmin, ROLE.Admin, ROLE.DeptHead) && (
+                <Item to="/department-requests" Icon={MdShoppingCart} label="Dept. Requests" collapsed={collapsed} />
+              )}
               {is(ROLE.SuperAdmin, ROLE.Admin, ROLE.Procurement) && (
                 <>
                   <Item to="/purchase-orders" Icon={MdLocalShipping} label="Purchase Orders" collapsed={collapsed} />

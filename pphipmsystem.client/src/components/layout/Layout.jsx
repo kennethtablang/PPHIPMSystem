@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
-import { Outlet } from 'react-router-dom';
+import { Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 
 const IDLE_MS    = 30 * 60 * 1000;
@@ -10,6 +10,7 @@ const EVENTS     = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart']
 
 export default function Layout() {
   const { logout } = useAuth();
+  const location = useLocation();
   const [warning, setWarning] = useState(false);
   const [countdown, setCountdown] = useState(WARNING_MS / 1000);
   const idleTimer    = useRef(null);
@@ -67,7 +68,9 @@ export default function Layout() {
       }}>
         <Topbar />
         <main style={{ flex: 1, padding: '24px', overflow: 'auto' }}>
-          <Outlet />
+          <div key={location.pathname} className="fade-in slide-up">
+            <Outlet />
+          </div>
         </main>
       </div>
 

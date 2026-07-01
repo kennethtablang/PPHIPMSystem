@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
-import { MdNotifications, MdRefresh, MdLock, MdVisibility, MdVisibilityOff } from 'react-icons/md';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
+import { MdNotifications, MdRefresh, MdLock, MdVisibility, MdVisibilityOff, MdPerson } from 'react-icons/md';
 import { getUnreadCount } from '../../api/notifications';
+import { signalRService } from '../../api/signalrService';
 import { changePassword } from '../../api/auth';
 import { useAuth } from '../../context/AuthContext';
 import Modal from '../common/Modal';
@@ -43,10 +44,25 @@ export default function Topbar() {
 
   useEffect(() => {
     getUnreadCount().then(r => setUnread(r.data.count)).catch(() => {});
-    const iv = setInterval(() => {
-      getUnreadCount().then(r => setUnread(r.data.count)).catch(() => {});
-    }, 30000);
-    return () => clearInterval(iv);
+    
+    signalRService.startNotificationConnection();
+
+    const handleNotification = (notif) => {
+      setUnread(u => u + 1);
+      
+      const type = notif.type;
+      const message = `${notif.title}: ${notif.message}`;
+
+      if (type.includes('Warning') || type.includes('Rejected')) toast.warning(message);
+      else if (type.includes('Expired')) toast.error(message);
+      else toast.info(message);
+    };
+
+    signalRService.onNotificationReceived(handleNotification);
+
+    return () => {
+      signalRService.offNotificationReceived(handleNotification);
+    };
   }, []);
 
   useEffect(() => {
@@ -171,6 +187,23 @@ export default function Topbar() {
                   <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{user?.fullName}</div>
                   <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{user?.username}</div>
                 </div>
+                <Link
+                  to="/profile"
+                  onClick={() => setMenuOpen(false)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    width: '100%', padding: '11px 16px',
+                    background: 'none', border: 'none', cursor: 'pointer',
+                    fontSize: 13, fontWeight: 500, color: 'var(--text-primary)',
+                    textDecoration: 'none',
+                    transition: 'background .12s',
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background = 'var(--green-50)'}
+                  onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                >
+                  <MdPerson size={15} color="var(--green-600)" />
+                  Profile Settings
+                </Link>
                 <button
                   onClick={openChangePw}
                   style={{
