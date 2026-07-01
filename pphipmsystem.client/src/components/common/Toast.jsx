@@ -1,15 +1,16 @@
 import { useState, useCallback, useEffect } from 'react';
-import { MdCheckCircle, MdError, MdWarning, MdClose } from 'react-icons/md';
+import { MdCheckCircle, MdError, MdWarning, MdClose, MdInfo } from 'react-icons/md';
 
 let addToastFn = null;
 export const toast = {
   success: msg => addToastFn?.({ type: 'success', msg }),
   error: msg => addToastFn?.({ type: 'error', msg }),
   warning: msg => addToastFn?.({ type: 'warning', msg }),
+  info: msg => addToastFn?.({ type: 'info', msg }),
 };
 
-const ICONS = { success: MdCheckCircle, error: MdError, warning: MdWarning };
-const COLORS = { success: 'var(--green-500)', error: '#ef4444', warning: '#f59e0b' };
+const ICONS = { success: MdCheckCircle, error: MdError, warning: MdWarning, info: MdInfo };
+const COLORS = { success: 'var(--green-500)', error: '#ef4444', warning: '#f59e0b', info: '#3b82f6' };
 
 export default function ToastContainer() {
   const [toasts, setToasts] = useState([]);
