@@ -13,6 +13,18 @@ export function AuthProvider({ children }) {
 
   const login = useCallback(async (username, password) => {
     const { data } = await apiLogin({ username, password });
+    if (data.requiresTwoFactor) {
+      return data;
+    }
+    localStorage.setItem('token', data.token);
+    localStorage.setItem('user', JSON.stringify(data));
+    setUser(data);
+    return data;
+  }, []);
+
+  const loginWith2Fa = useCallback(async (username, code) => {
+    const { login2Fa: apiLogin2Fa } = await import('../api/auth');
+    const { data } = await apiLogin2Fa({ username, code });
     localStorage.setItem('token', data.token);
     localStorage.setItem('user', JSON.stringify(data));
     setUser(data);
@@ -26,7 +38,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, login, logout }}>
+    <AuthContext.Provider value={{ user, login, loginWith2Fa, logout }}>
       {children}
     </AuthContext.Provider>
   );
