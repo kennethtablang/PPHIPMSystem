@@ -75,7 +75,7 @@ namespace PPHIPMSystem.Server
             builder.Services.AddScoped<IClaimsTransformation, SuperAdminClaimsTransformation>();
 
             // AutoMapper
-            builder.Services.AddAutoMapper(typeof(Program));
+            builder.Services.AddAutoMapper(cfg => cfg.AddMaps(typeof(Program)));
 
             // Service Layer
             builder.Services.AddScoped<IAuditLogService, AuditLogService>();
@@ -96,8 +96,14 @@ namespace PPHIPMSystem.Server
 
             builder.Services.AddHostedService<ExpirationCheckService>();
 
-            builder.Services.AddControllers();
-            builder.Services.AddSignalR();
+            // The React client sends and expects enum values as strings
+            // (e.g. "Issuance", "MovingAverage", "SubmittedToProcurement").
+            builder.Services.AddControllers()
+                .AddJsonOptions(o => o.JsonSerializerOptions.Converters.Add(
+                    new System.Text.Json.Serialization.JsonStringEnumConverter()));
+            builder.Services.AddSignalR()
+                .AddJsonProtocol(o => o.PayloadSerializerOptions.Converters.Add(
+                    new System.Text.Json.Serialization.JsonStringEnumConverter()));
 
             // Swagger
             builder.Services.AddEndpointsApiExplorer();
