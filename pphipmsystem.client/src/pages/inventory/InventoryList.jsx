@@ -1,13 +1,11 @@
 import { useEffect, useState } from 'react';
-import { MdAdd, MdEdit, MdDelete, MdSearch, MdFilterList, MdWarning } from 'react-icons/md';
+import { MdAdd, MdEdit, MdDelete, MdSearch, MdWarning } from 'react-icons/md';
 import { getItems, createItem, updateItem, deleteItem } from '../../api/inventory';
 import { getCategories } from '../../api/categories';
 import Modal from '../../components/common/Modal';
-import StatusBadge from '../../components/common/StatusBadge';
 import { toast } from '../../components/common/Toast';
 import { useAuth } from '../../context/AuthContext';
 
-const METHODS = ['MovingAverage', 'ExponentialSmoothing'];
 const BLANK = { name: '', itemCode: '', description: '', unit: '', categoryId: '', reorderThreshold: 0, expirationWarningDays: 30, preferredForecastMethod: 'MovingAverage', movingAverageWindow: 3, smoothingConstant: 0.3 };
 
 export default function InventoryList() {
