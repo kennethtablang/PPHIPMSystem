@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { MdAdd, MdSwapVert, MdTrendingUp, MdTrendingDown, MdRemove } from 'react-icons/md';
+import { MdAdd, MdTrendingUp } from 'react-icons/md';
 import { getMovements, createMovement } from '../../api/stockMovements';
 import { getItems } from '../../api/inventory';
 import Modal from '../../components/common/Modal';

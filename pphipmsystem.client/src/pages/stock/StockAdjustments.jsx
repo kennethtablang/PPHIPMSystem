@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { MdAdd, MdCheckCircle, MdCancel } from 'react-icons/md';
+import { MdAdd } from 'react-icons/md';
 import { getAdjustments, createAdjustment, approveAdjustment } from '../../api/stockAdjustments';
 import { getItems } from '../../api/inventory';
 import Modal from '../../components/common/Modal';
