@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { MdCheckCircle, MdError, MdWarning, MdClose, MdInfo } from 'react-icons/md';
 
 let addToastFn = null;
