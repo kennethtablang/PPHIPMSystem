@@ -12,6 +12,9 @@ namespace PPHIPMSystem.Server.Services;
 
 public class ForecastService : IForecastService
 {
+    private const int MaxForecastPeriods = 12;
+    private const decimal ReorderBuffer = 1.1m;
+
     private readonly ApplicationDbContext _db;
     private readonly IMapper _mapper;
     private readonly IHubContext<ForecastHub> _hubContext;
@@ -25,7 +28,7 @@ public class ForecastService : IForecastService
 
     public async Task<IEnumerable<DemandForecastDto>> GetForecastsAsync(int? itemId, int? year)
     {
-        var query = _db.DemandForecasts.Include(f => f.InventoryItem).AsQueryable();
+        var query = _db.DemandForecasts.AsNoTracking().Include(f => f.InventoryItem).AsQueryable();
         if (itemId.HasValue) query = query.Where(f => f.InventoryItemId == itemId.Value);
         if (year.HasValue) query = query.Where(f => f.ForecastYear == year.Value);
         var items = await query.OrderByDescending(f => f.ForecastYear).ThenByDescending(f => f.ForecastMonth).ToListAsync();
@@ -38,64 +41,81 @@ public class ForecastService : IForecastService
             ?? throw new InvalidOperationException("Item not found.");
 
         var method = dto.Method ?? item.PreferredForecastMethod;
-        var periods = Math.Max(1, dto.PeriodCount);
+        var periods = Math.Clamp(dto.PeriodCount, 1, MaxForecastPeriods);
 
-        var history = await _db.ConsumptionRecords
+        // FR-5.1: consumption history is derived automatically from issuance movements.
+        await SyncConsumptionInternalAsync(dto.InventoryItemId);
+
+        var history = await _db.ConsumptionRecords.AsNoTracking()
             .Where(c => c.InventoryItemId == dto.InventoryItemId)
             .OrderBy(c => c.Year).ThenBy(c => c.Month)
             .ToListAsync();
 
-        var forecasts = new List<DemandForecast>();
+        if (history.Count == 0)
+            throw new InvalidOperationException(
+                "No consumption history for this item yet. Record stock issuances or add consumption records first.");
+
+        // Months without a record are months with zero consumption — they must
+        // weigh into the averages, so the series is zero-filled to be continuous.
+        var series = BuildMonthlySeries(history);
+
+        var forecastedQty = Math.Round(method == ForecastMethod.MovingAverage
+            ? ComputeMovingAverage(series, item.MovingAverageWindow)
+            : ComputeExponentialSmoothing(series, (double)item.SmoothingConstant), 2);
+        var suggestedQty = Math.Round(forecastedQty * ReorderBuffer, 2);
+
         var startDate = DateTime.UtcNow;
+        var targetPeriods = Enumerable.Range(1, periods)
+            .Select(p => startDate.AddMonths(p))
+            .Select(d => (d.Year, d.Month))
+            .ToList();
 
-        for (int p = 0; p < periods; p++)
+        var targetYears = targetPeriods.Select(t => t.Year).Distinct().ToList();
+        var existing = await _db.DemandForecasts
+            .Where(f => f.InventoryItemId == dto.InventoryItemId
+                        && f.Method == method
+                        && targetYears.Contains(f.ForecastYear))
+            .ToListAsync();
+        var existingByPeriod = existing.ToDictionary(f => (f.ForecastYear, f.ForecastMonth));
+
+        var forecasts = new List<DemandForecast>();
+        foreach (var (year, month) in targetPeriods)
         {
-            var targetDate = startDate.AddMonths(p + 1);
-            var forecastedQty = method == ForecastMethod.MovingAverage
-                ? ComputeMovingAverage(history, item.MovingAverageWindow)
-                : ComputeExponentialSmoothing(history, (double)item.SmoothingConstant);
-
-            var existing = await _db.DemandForecasts.FirstOrDefaultAsync(f =>
-                f.InventoryItemId == dto.InventoryItemId &&
-                f.ForecastYear == targetDate.Year &&
-                f.ForecastMonth == targetDate.Month &&
-                f.Method == method);
-
-            if (existing is not null)
+            if (existingByPeriod.TryGetValue((year, month), out var forecast))
             {
-                existing.ForecastedQuantity = Math.Round(forecastedQty, 2);
-                existing.SuggestedReorderQuantity = Math.Round(forecastedQty * 1.1m, 2);
-                existing.GeneratedAt = DateTime.UtcNow;
-                forecasts.Add(existing);
+                forecast.ForecastedQuantity = forecastedQty;
+                forecast.SuggestedReorderQuantity = suggestedQty;
+                forecast.GeneratedAt = DateTime.UtcNow;
             }
             else
             {
-                var forecast = new DemandForecast
+                forecast = new DemandForecast
                 {
                     InventoryItemId = dto.InventoryItemId,
                     Method = method,
-                    ForecastYear = targetDate.Year,
-                    ForecastMonth = targetDate.Month,
-                    ForecastedQuantity = Math.Round(forecastedQty, 2),
-                    SuggestedReorderQuantity = Math.Round(forecastedQty * 1.1m, 2)
+                    ForecastYear = year,
+                    ForecastMonth = month,
+                    ForecastedQuantity = forecastedQty,
+                    SuggestedReorderQuantity = suggestedQty
                 };
                 _db.DemandForecasts.Add(forecast);
-                forecasts.Add(forecast);
             }
+            forecast.InventoryItem = item;
+            forecasts.Add(forecast);
         }
 
+        await BackfillActualsAsync(dto.InventoryItemId, history);
         await _db.SaveChangesAsync();
-        foreach (var f in forecasts) await _db.Entry(f).Reference(x => x.InventoryItem).LoadAsync();
-        
+
         var dtoList = _mapper.Map<IEnumerable<DemandForecastDto>>(forecasts);
         await _hubContext.Clients.All.SendAsync("ReceiveForecastUpdate", dtoList);
-        
+
         return dtoList;
     }
 
     public async Task<IEnumerable<ConsumptionRecordDto>> GetConsumptionRecordsAsync(int itemId)
     {
-        var records = await _db.ConsumptionRecords
+        var records = await _db.ConsumptionRecords.AsNoTracking()
             .Include(c => c.InventoryItem)
             .Where(c => c.InventoryItemId == itemId)
             .OrderBy(c => c.Year).ThenBy(c => c.Month)
@@ -124,6 +144,13 @@ public class ForecastService : IForecastService
             };
             _db.ConsumptionRecords.Add(existing);
         }
+
+        var affected = await _db.DemandForecasts
+            .Where(f => f.InventoryItemId == dto.InventoryItemId
+                        && f.ForecastYear == dto.Year && f.ForecastMonth == dto.Month)
+            .ToListAsync();
+        foreach (var f in affected) f.ActualQuantity = dto.QuantityConsumed;
+
         await _db.SaveChangesAsync();
         await _db.Entry(existing).Reference(c => c.InventoryItem).LoadAsync();
         return _mapper.Map<ConsumptionRecordDto>(existing);
@@ -131,29 +158,40 @@ public class ForecastService : IForecastService
 
     public async Task<bool> SyncConsumptionRecordsAsync(int itemId)
     {
-        var item = await _db.InventoryItems.FindAsync(itemId);
-        if (item is null) return false;
+        var exists = await _db.InventoryItems.AnyAsync(i => i.Id == itemId);
+        if (!exists) return false;
 
-        var movements = await _db.StockMovements
+        await SyncConsumptionInternalAsync(itemId);
+        await BackfillActualsAsync(itemId, history: null);
+        await _db.SaveChangesAsync();
+        return true;
+    }
+
+    private async Task SyncConsumptionInternalAsync(int itemId)
+    {
+        var grouped = await _db.StockMovements
             .Where(m => m.InventoryItemId == itemId && m.MovementType == StockMovementType.Issuance)
-            .ToListAsync();
-
-        var grouped = movements
             .GroupBy(m => new { m.MovementDate.Year, m.MovementDate.Month })
             .Select(g => new { g.Key.Year, g.Key.Month, Total = g.Sum(m => m.Quantity) })
-            .ToList();
+            .ToListAsync();
+
+        if (grouped.Count == 0) return;
 
         var existingRecords = await _db.ConsumptionRecords
             .Where(c => c.InventoryItemId == itemId)
-            .ToDictionaryAsync(c => $"{c.Year}-{c.Month}");
+            .ToDictionaryAsync(c => (c.Year, c.Month));
 
+        var changed = false;
         foreach (var g in grouped)
         {
-            var key = $"{g.Year}-{g.Month}";
-            if (existingRecords.TryGetValue(key, out var record))
+            if (existingRecords.TryGetValue((g.Year, g.Month), out var record))
             {
-                record.QuantityConsumed = g.Total;
-                record.RecordedAt = DateTime.UtcNow;
+                if (record.QuantityConsumed != g.Total)
+                {
+                    record.QuantityConsumed = g.Total;
+                    record.RecordedAt = DateTime.UtcNow;
+                    changed = true;
+                }
             }
             else
             {
@@ -164,27 +202,70 @@ public class ForecastService : IForecastService
                     Month = g.Month,
                     QuantityConsumed = g.Total
                 });
+                changed = true;
             }
         }
 
-        await _db.SaveChangesAsync();
-        return true;
+        if (changed) await _db.SaveChangesAsync();
     }
 
-    private static decimal ComputeMovingAverage(List<ConsumptionRecord> history, int window)
+    // Records actual consumption against past forecasts so accuracy (MAE)
+    // can be reported per FR-13.3. Caller is responsible for SaveChanges.
+    private async Task BackfillActualsAsync(int itemId, List<ConsumptionRecord>? history)
     {
-        if (!history.Any()) return 0m;
-        var recent = history.TakeLast(window).Select(c => c.QuantityConsumed).ToList();
-        return recent.Average();
-    }
+        history ??= await _db.ConsumptionRecords.AsNoTracking()
+            .Where(c => c.InventoryItemId == itemId)
+            .ToListAsync();
+        if (history.Count == 0) return;
 
-    private static decimal ComputeExponentialSmoothing(List<ConsumptionRecord> history, double alpha)
-    {
-        if (!history.Any()) return 0m;
-        double smoothed = (double)history.First().QuantityConsumed;
-        foreach (var record in history.Skip(1))
+        var consumptionByPeriod = history.ToDictionary(c => (c.Year, c.Month), c => c.QuantityConsumed);
+        var now = DateTime.UtcNow;
+
+        var pastForecasts = await _db.DemandForecasts
+            .Where(f => f.InventoryItemId == itemId
+                        && (f.ForecastYear < now.Year
+                            || (f.ForecastYear == now.Year && f.ForecastMonth < now.Month)))
+            .ToListAsync();
+
+        foreach (var f in pastForecasts)
         {
-            smoothed = alpha * (double)record.QuantityConsumed + (1 - alpha) * smoothed;
+            if (consumptionByPeriod.TryGetValue((f.ForecastYear, f.ForecastMonth), out var actual))
+                f.ActualQuantity = actual;
+        }
+    }
+
+    // Builds a continuous month-by-month series from the first recorded month
+    // through the last complete month, filling unrecorded months with zero.
+    private static List<decimal> BuildMonthlySeries(List<ConsumptionRecord> history)
+    {
+        var byPeriod = history.ToDictionary(c => (c.Year, c.Month), c => c.QuantityConsumed);
+
+        var start = new DateTime(history[0].Year, history[0].Month, 1);
+        var lastRecorded = new DateTime(history[^1].Year, history[^1].Month, 1);
+        var lastComplete = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1).AddMonths(-1);
+        var end = lastRecorded > lastComplete ? lastRecorded : lastComplete;
+
+        var series = new List<decimal>();
+        for (var d = start; d <= end; d = d.AddMonths(1))
+            series.Add(byPeriod.TryGetValue((d.Year, d.Month), out var qty) ? qty : 0m);
+        return series;
+    }
+
+    private static decimal ComputeMovingAverage(List<decimal> series, int window)
+    {
+        if (series.Count == 0) return 0m;
+        window = Math.Max(1, window);
+        return series.TakeLast(window).Average();
+    }
+
+    private static decimal ComputeExponentialSmoothing(List<decimal> series, double alpha)
+    {
+        if (series.Count == 0) return 0m;
+        alpha = Math.Clamp(alpha, 0.01, 1.0);
+        double smoothed = (double)series[0];
+        foreach (var value in series.Skip(1))
+        {
+            smoothed = alpha * (double)value + (1 - alpha) * smoothed;
         }
         return (decimal)smoothed;
     }

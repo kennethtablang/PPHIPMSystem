@@ -16,7 +16,7 @@ public class ReportService : IReportService
     {
         var year = filter.Year ?? DateTime.UtcNow.Year;
 
-        var query = _db.ConsumptionRecords
+        var query = _db.ConsumptionRecords.AsNoTracking()
             .Include(c => c.InventoryItem).ThenInclude(i => i.Category)
             .Where(c => c.Year == year);
 
@@ -39,14 +39,18 @@ public class ReportService : IReportService
         var peakMonth = byMonth.MaxBy(m => m.TotalQuantity);
 
         var topItems = records
-            .GroupBy(c => c.InventoryItem)
-            .Select(g => new ConsumptionTopItemDto
+            .GroupBy(c => c.InventoryItemId)
+            .Select(g =>
             {
-                ItemId = g.Key.Id,
-                ItemName = g.Key.Name,
-                Category = g.Key.Category?.Name ?? string.Empty,
-                TotalQuantity = g.Sum(c => c.QuantityConsumed),
-                Unit = g.Key.Unit
+                var item = g.First().InventoryItem;
+                return new ConsumptionTopItemDto
+                {
+                    ItemId = item.Id,
+                    ItemName = item.Name,
+                    Category = item.Category?.Name ?? string.Empty,
+                    TotalQuantity = g.Sum(c => c.QuantityConsumed),
+                    Unit = item.Unit
+                };
             })
             .OrderByDescending(i => i.TotalQuantity)
             .Take(10)
@@ -66,7 +70,7 @@ public class ReportService : IReportService
 
     public async Task<ProcurementSummaryDto> GetProcurementReportAsync(ReportFilterDto filter)
     {
-        var query = _db.ProcurementRequests
+        var query = _db.ProcurementRequests.AsNoTracking()
             .Include(r => r.PurchaseOrder).ThenInclude(po => po!.Supplier)
             .AsQueryable();
 
@@ -124,14 +128,15 @@ public class ReportService : IReportService
         if (filter.ItemId.HasValue)
             query = query.Where(f => f.InventoryItemId == filter.ItemId.Value);
 
-        var forecasts = await query.ToListAsync();
+        var forecasts = await query.AsNoTracking().ToListAsync();
 
         var itemForecasts = forecasts
-            .GroupBy(f => f.InventoryItem)
+            .GroupBy(f => f.InventoryItemId)
             .Select(g =>
             {
                 var latest = g.OrderByDescending(f => f.ForecastYear).ThenByDescending(f => f.ForecastMonth).First();
-                var item = g.Key;
+                var item = latest.InventoryItem;
+                var evaluated = g.Where(f => f.ActualQuantity.HasValue).ToList();
                 return new ItemForecastSummaryDto
                 {
                     ItemId = item.Id,
@@ -140,11 +145,17 @@ public class ReportService : IReportService
                     LatestForecast = latest.ForecastedQuantity,
                     SuggestedReorder = latest.SuggestedReorderQuantity,
                     CurrentStock = item.QuantityOnHand,
-                    IsBelowReorder = item.QuantityOnHand < item.ReorderThreshold
+                    IsBelowReorder = item.QuantityOnHand < item.ReorderThreshold,
+                    EvaluatedForecasts = evaluated.Count,
+                    MeanAbsoluteError = evaluated.Count > 0
+                        ? Math.Round(evaluated.Average(f => Math.Abs(f.ForecastedQuantity - f.ActualQuantity!.Value)), 2)
+                        : null
                 };
             })
             .OrderBy(i => i.ItemName)
             .ToList();
+
+        var allEvaluated = forecasts.Where(f => f.ActualQuantity.HasValue).ToList();
 
         return new ForecastSummaryDto
         {
@@ -152,6 +163,10 @@ public class ReportService : IReportService
             MovingAverageCount = forecasts.Count(f => f.Method == ForecastMethod.MovingAverage),
             ExpSmoothingCount = forecasts.Count(f => f.Method == ForecastMethod.ExponentialSmoothing),
             ItemsWithForecast = forecasts.Select(f => f.InventoryItemId).Distinct().Count(),
+            EvaluatedForecasts = allEvaluated.Count,
+            OverallMae = allEvaluated.Count > 0
+                ? Math.Round(allEvaluated.Average(f => Math.Abs(f.ForecastedQuantity - f.ActualQuantity!.Value)), 2)
+                : null,
             ItemForecasts = itemForecasts
         };
     }
