@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   MdNotifications, MdDoneAll, MdWarning, MdError, MdInfo,
-  MdCheckCircle, MdInventory, MdShoppingCart, MdLocalShipping,
+  MdCheckCircle, MdShoppingCart, MdLocalShipping,
   MdTune, MdDeleteForever, MdCircle,
 } from 'react-icons/md';
 import { getNotifications, markRead, markAllRead } from '../../api/notifications';
