@@ -1,6 +1,8 @@
 import * as signalR from '@microsoft/signalr';
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://localhost:7198';
+// Same-origin by default: /hubs is proxied to the API by Vite in dev
+// (see vite.config.js) and served by the API host itself in production.
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
 class SignalRService {
     constructor() {
