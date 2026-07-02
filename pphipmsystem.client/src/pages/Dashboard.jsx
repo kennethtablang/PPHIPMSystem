@@ -65,10 +65,9 @@ const CAN_CREATE_PR = ['SuperAdmin', 'HospitalAdministrator', 'DepartmentHead'];
 export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
-
-  if (user?.role === 'DepartmentHead') {
-    return <DepartmentHeadDashboard />;
-  }
+  // Hooks must all run before any conditional return; the Department Head
+  // branch is rendered at the bottom and the effects no-op for that role.
+  const isDeptHead = user?.role === 'DepartmentHead';
 
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -86,14 +85,16 @@ export default function Dashboard() {
   };
 
   useEffect(() => {
+    if (isDeptHead) return;
     loadDashboard();
-  }, []);
+  }, [isDeptHead]);
 
   useEffect(() => {
+    if (isDeptHead) return;
     const handleNotification = () => loadDashboard();
     signalRService.onNotificationReceived(handleNotification);
     return () => signalRService.offNotificationReceived(handleNotification);
-  }, []);
+  }, [isDeptHead]);
 
   const openRepeat = tx => {
     setRepeatTx(tx);
@@ -118,6 +119,8 @@ export default function Dashboard() {
       toast.error(e.response?.data?.message ?? 'Failed to repeat transaction.');
     } finally { setRepeating(false); }
   };
+
+  if (isDeptHead) return <DepartmentHeadDashboard />;
 
   if (loading) return (
     <div className="loading-center">
