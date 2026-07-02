@@ -43,7 +43,8 @@ export default defineConfig({
     },
     server: {
         proxy: {
-            '^/api': { target, secure: false }
+            '^/api': { target, secure: false },
+            '^/hubs': { target, secure: false, ws: true }
         },
         port: parseInt(env.DEV_SERVER_PORT || '59350'),
         https: {

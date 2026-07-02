@@ -17,5 +17,13 @@ export default defineConfig([
       globals: globals.browser,
       parserOptions: { ecmaFeatures: { jsx: true } },
     },
+    rules: {
+      // Pages intentionally use the `useEffect(() => { load(); }, [filters])`
+      // fetch pattern, where load() sets a loading flag synchronously.
+      'react-hooks/set-state-in-effect': 'warn',
+      // toast (Toast.jsx) and useAuth (AuthContext.jsx) are deliberate
+      // non-component exports; the rule only affects HMR granularity.
+      'react-refresh/only-export-components': ['warn', { allowExportNames: ['toast', 'useAuth'] }],
+    },
   },
 ])
