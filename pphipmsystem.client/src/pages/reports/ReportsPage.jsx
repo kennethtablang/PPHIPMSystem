@@ -301,6 +301,11 @@ function ForecastAccuracyReport({ data, year }) {
         <div className="stat-card blue"><div className="stat-label">Moving Average</div><div className="stat-value">{data.movingAverageCount}</div></div>
         <div className="stat-card teal"><div className="stat-label">Exp. Smoothing</div><div className="stat-value">{data.expSmoothingCount}</div></div>
         <div className="stat-card amber"><div className="stat-label">Items with Forecast</div><div className="stat-value">{data.itemsWithForecast}</div></div>
+        <div className="stat-card purple">
+          <div className="stat-label">Overall MAE</div>
+          <div className="stat-value">{data.overallMae != null ? data.overallMae.toFixed(2) : '—'}</div>
+          <div className="stat-sub">{data.evaluatedForecasts ?? 0} forecast(s) evaluated vs actual</div>
+        </div>
       </div>
       {(data.itemForecasts ?? []).length > 0 && (
         <div className="card">
@@ -309,7 +314,7 @@ function ForecastAccuracyReport({ data, year }) {
             <div className="table-wrap" style={{ margin: 0 }}>
               <table>
                 <thead>
-                  <tr><th>Item</th><th>Method</th><th>Latest Forecast</th><th>Suggested Reorder</th><th>Current Stock</th><th>Status</th></tr>
+                  <tr><th>Item</th><th>Method</th><th>Latest Forecast</th><th>MAE</th><th>Suggested Reorder</th><th>Current Stock</th><th>Status</th></tr>
                 </thead>
                 <tbody>
                   {data.itemForecasts.map(f => (
@@ -317,6 +322,9 @@ function ForecastAccuracyReport({ data, year }) {
                       <td style={{ fontWeight: 500 }}>{f.itemName}</td>
                       <td><span className="badge badge-blue">{f.method === 'MovingAverage' ? 'Moving Avg' : 'Exp. Smooth'}</span></td>
                       <td style={{ fontWeight: 600 }}>{f.latestForecast?.toFixed(2)}</td>
+                      <td title={f.evaluatedForecasts ? `${f.evaluatedForecasts} period(s) evaluated` : 'No completed periods to evaluate yet'}>
+                        {f.meanAbsoluteError != null ? f.meanAbsoluteError.toFixed(2) : <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                      </td>
                       <td style={{ color: 'var(--green-700)', fontWeight: 600 }}>{f.suggestedReorder?.toFixed(2)}</td>
                       <td style={{ color: f.isBelowReorder ? '#dc2626' : undefined, fontWeight: f.isBelowReorder ? 700 : 400 }}>{f.currentStock}</td>
                       <td><span className={`badge ${f.isBelowReorder ? 'badge-red' : 'badge-green'}`}>{f.isBelowReorder ? 'Low Stock' : 'Adequate'}</span></td>
