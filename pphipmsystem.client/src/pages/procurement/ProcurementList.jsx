@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { MdAdd, MdVisibility, MdCheckCircle, MdArrowForward } from 'react-icons/md';
+import { MdAdd, MdVisibility } from 'react-icons/md';
 import { getRequests, createRequest, approveRequest, submitRequest } from '../../api/procurement';
 import { getItems } from '../../api/inventory';
 import Modal from '../../components/common/Modal';

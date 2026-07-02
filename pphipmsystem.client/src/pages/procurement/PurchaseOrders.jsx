@@ -1,10 +1,22 @@
 import { useEffect, useState } from 'react';
-import { MdAdd, MdVisibility, MdLocalShipping } from 'react-icons/md';
+import { MdAdd, MdVisibility, MdLocalShipping, MdPrint, MdCheckCircle, MdAssignment, MdPendingActions } from 'react-icons/md';
 import { getPurchaseOrders, getPurchaseOrder, generatePO, confirmDelivery, getRequests } from '../../api/procurement';
 import { getSuppliers } from '../../api/suppliers';
 import Modal from '../../components/common/Modal';
 import { toast } from '../../components/common/Toast';
 import { useAuth } from '../../context/AuthContext';
+
+function StatCard({ label, value, icon: Icon, color, onClick }) {
+  return (
+    <div className={`stat-card ${color}`} style={{ cursor: onClick ? 'pointer' : 'default' }} onClick={onClick}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+        <div className={`stat-icon ${color}`}><Icon size={20} /></div>
+      </div>
+      <div className="stat-value">{value}</div>
+      <div className="stat-label">{label}</div>
+    </div>
+  );
+}
 
 export default function PurchaseOrders() {
   const { user } = useAuth();
@@ -65,6 +77,54 @@ export default function PurchaseOrders() {
     catch { toast.error('Failed to confirm delivery.'); }
   };
 
+  const printPO = () => {
+    const p = document.getElementById('po-print-area');
+    if (!p) return;
+    const win = window.open('', '_blank', 'width=900,height=650');
+    if (!win) { toast.error('Pop-up blocked. Allow pop-ups to print.'); return; }
+
+    const doc = win.document;
+    doc.title = `PO ${viewModal.poNumber}`;
+
+    const style = doc.createElement('style');
+    style.textContent = `
+      body { font-family: 'Montserrat', Arial, sans-serif; padding: 40px; max-width: 800px; margin: 0 auto; color: #111c15; }
+      table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+      th { background: #1a6a36; color: #fff; text-align: left; padding: 8px 12px; font-size: 12px; }
+      td { padding: 8px 12px; border-bottom: 1px solid #d1e8d8; font-size: 13px; }
+      .badge { padding: 2px 8px; border: 1px solid #999; border-radius: 99px; font-size: 11px; }
+      .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+      .print-head { display: flex; justify-content: space-between; border-bottom: 2px solid #1a6a36; padding-bottom: 20px; margin-bottom: 30px; }
+      .print-head h1 { color: #1a6a36; margin: 0; font-size: 24px; }
+    `;
+    doc.head.appendChild(style);
+
+    const el = (tag, text, styleText) => {
+      const node = doc.createElement(tag);
+      if (text) node.textContent = text;
+      if (styleText) node.style.cssText = styleText;
+      return node;
+    };
+    const head = el('div');
+    head.className = 'print-head';
+    const brand = el('div');
+    brand.append(
+      el('h1', 'PURCHASE ORDER'),
+      el('div', 'PPH Inventory & Procurement System', 'font-size:14px;margin-top:5px;color:#555'),
+    );
+    const meta = el('div', null, 'text-align:right');
+    meta.append(
+      el('div', `PO #${viewModal.poNumber}`, 'font-size:18px;font-weight:bold'),
+      el('div', `Generated: ${new Date(viewModal.generatedAt).toLocaleDateString('en-PH')}`, 'font-size:12px;color:#666;margin-top:5px'),
+    );
+    head.append(brand, meta);
+
+    doc.body.append(head, doc.importNode(p, true));
+    win.focus();
+    win.print();
+    win.close();
+  };
+
   return (
     <div>
       <div className="page-header">
@@ -78,6 +138,13 @@ export default function PurchaseOrders() {
           </button>
         )}
       </div>
+
+      <div className="grid-stat" style={{ marginBottom: 24 }}>
+        <StatCard label="Total POs" value={orders.length} icon={MdAssignment} color="blue" />
+        <StatCard label="Pending Delivery" value={orders.filter(o => !o.isDelivered).length} icon={MdPendingActions} color="amber" />
+        <StatCard label="Delivered" value={orders.filter(o => o.isDelivered).length} icon={MdCheckCircle} color="green" />
+      </div>
+
 
       {loading ? (
         <div className="loading-center"><div className="spinner" /></div>
@@ -187,28 +254,35 @@ export default function PurchaseOrders() {
       {/* View Modal */}
       {viewModal && (
         <Modal title={`PO: ${viewModal.poNumber}`} onClose={() => setViewModal(null)} size="modal-lg"
-          footer={<button className="btn btn-secondary" onClick={() => setViewModal(null)}>Close</button>}
+          footer={
+            <>
+              <button className="btn btn-secondary" onClick={() => setViewModal(null)}>Close</button>
+              <button className="btn btn-primary" onClick={printPO}><MdPrint size={16} /> Print PO</button>
+            </>
+          }
         >
-          <div className="grid-2">
-            <div><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Supplier</span><br /><strong>{viewModal.supplierName}</strong></div>
-            <div><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Total Amount</span><br /><strong style={{ color: 'var(--green-700)', fontSize: 18 }}>₱{viewModal.totalAmount?.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong></div>
-            <div><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Generated By</span><br /><strong>{viewModal.generatedByFullName}</strong></div>
-            <div><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Delivery Status</span><br /><span className={`badge ${viewModal.isDelivered ? 'badge-green' : 'badge-amber'}`}>{viewModal.isDelivered ? `Delivered ${new Date(viewModal.deliveredAt).toLocaleDateString('en-PH')}` : 'Pending Delivery'}</span></div>
-          </div>
-          <div className="table-wrap">
-            <table>
-              <thead><tr><th>Item</th><th>Qty Ordered</th><th>Unit Cost</th><th>Total</th></tr></thead>
-              <tbody>
-                {(viewModal.items ?? []).map(it => (
-                  <tr key={it.id}>
-                    <td>{it.itemName} <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>({it.unit})</span></td>
-                    <td>{it.quantityOrdered}</td>
-                    <td>₱{it.unitCost?.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                    <td style={{ fontWeight: 600 }}>₱{it.totalCost?.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div id="po-print-area">
+            <div className="grid-2" style={{ marginBottom: 20 }}>
+              <div><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Supplier</span><br /><strong>{viewModal.supplierName}</strong></div>
+              <div><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Total Amount</span><br /><strong style={{ color: 'var(--green-700)', fontSize: 18 }}>₱{viewModal.totalAmount?.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong></div>
+              <div><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Generated By</span><br /><strong>{viewModal.generatedByFullName}</strong></div>
+              <div><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Delivery Status</span><br /><span className={`badge ${viewModal.isDelivered ? 'badge-green' : 'badge-amber'}`}>{viewModal.isDelivered ? `Delivered ${new Date(viewModal.deliveredAt).toLocaleDateString('en-PH')}` : 'Pending Delivery'}</span></div>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Item</th><th>Qty Ordered</th><th>Unit Cost</th><th>Total</th></tr></thead>
+                <tbody>
+                  {(viewModal.items ?? []).map(it => (
+                    <tr key={it.id}>
+                      <td>{it.itemName} <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>({it.unit})</span></td>
+                      <td>{it.quantityOrdered}</td>
+                      <td>₱{it.unitCost?.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                      <td style={{ fontWeight: 600 }}>₱{it.totalCost?.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </Modal>
       )}
