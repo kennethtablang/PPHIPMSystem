@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { MdAdd, MdEdit, MdSearch, MdBlock, MdCheckCircle } from 'react-icons/md';
+import { MdAdd, MdEdit, MdSearch } from 'react-icons/md';
 import { getUsers, createUser, updateUser, resetPassword } from '../../api/users';
 import { getDepartments } from '../../api/departments';
 import Modal from '../../components/common/Modal';
