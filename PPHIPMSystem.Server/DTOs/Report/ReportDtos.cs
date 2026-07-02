@@ -67,6 +67,8 @@ public class ForecastSummaryDto
     public int MovingAverageCount { get; set; }
     public int ExpSmoothingCount { get; set; }
     public int ItemsWithForecast { get; set; }
+    public int EvaluatedForecasts { get; set; }
+    public decimal? OverallMae { get; set; }
     public IEnumerable<ItemForecastSummaryDto> ItemForecasts { get; set; } = [];
 }
 
@@ -79,4 +81,6 @@ public class ItemForecastSummaryDto
     public decimal? SuggestedReorder { get; set; }
     public decimal CurrentStock { get; set; }
     public bool IsBelowReorder { get; set; }
+    public int EvaluatedForecasts { get; set; }
+    public decimal? MeanAbsoluteError { get; set; }
 }
