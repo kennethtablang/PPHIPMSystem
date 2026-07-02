@@ -67,7 +67,7 @@ export default function Layout() {
         transition: 'margin-left 0.22s ease',
       }}>
         <Topbar />
-        <main style={{ flex: 1, padding: '24px', overflow: 'auto' }}>
+        <main className="main-content" style={{ flex: 1, overflow: 'auto' }}>
           <div key={location.pathname} className="fade-in slide-up">
             <Outlet />
           </div>

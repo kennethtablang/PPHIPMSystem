@@ -6,7 +6,7 @@ import {
   MdShoppingCart, MdLocalShipping, MdStore, MdBarChart,
   MdPeople, MdBusiness, MdCategory, MdHistory, MdAnalytics,
   MdNotifications, MdChevronLeft, MdChevronRight, MdLogout,
-  MdGridView,
+  MdGridView, MdPerson,
 } from 'react-icons/md';
 
 const W_OPEN   = 252;
@@ -28,12 +28,20 @@ const roleLabel = r => ({
   DepartmentHead:        'Department Head',
 }[r] ?? r);
 
-export default function Sidebar({ onRequestLogout }) {
+export default function Sidebar() {
   const { user, logout } = useAuth();
   const role = user?.role;
-  const [collapsed, setCollapsed] = useState(false);
+  // Auto-collapse to the icon rail on narrow viewports; users can still expand manually.
+  const [collapsed, setCollapsed] = useState(() => window.matchMedia('(max-width: 900px)').matches);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const is = (...roles) => roles.includes(role);
+
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 900px)');
+    const onChange = e => setCollapsed(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
 
   useEffect(() => {
     document.documentElement.style.setProperty(
@@ -140,8 +148,11 @@ export default function Sidebar({ onRequestLogout }) {
 
         </nav>
 
-        {/* ── Logout ── */}
+        {/* ── Footer ── */}
         <div className="sb-footer">
+          <nav className="sb-nav" style={{ padding: 0, marginBottom: 12 }}>
+            <Item to="/profile" Icon={MdPerson} label="Profile Settings" collapsed={collapsed} />
+          </nav>
           {confirmOpen && (
             <div style={{
               background: 'rgba(30,10,10,0.92)',
