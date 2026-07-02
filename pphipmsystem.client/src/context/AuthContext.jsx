@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useCallback } from 'react';
-import { login as apiLogin } from '../api/auth';
+import { login as apiLogin, login2Fa as apiLogin2Fa } from '../api/auth';
+import { signalRService } from '../api/signalrService';
 
 const AuthContext = createContext(null);
 
@@ -23,7 +24,6 @@ export function AuthProvider({ children }) {
   }, []);
 
   const loginWith2Fa = useCallback(async (username, code) => {
-    const { login2Fa: apiLogin2Fa } = await import('../api/auth');
     const { data } = await apiLogin2Fa({ username, code });
     localStorage.setItem('token', data.token);
     localStorage.setItem('user', JSON.stringify(data));
@@ -32,6 +32,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   const logout = useCallback(() => {
+    signalRService.stopConnections();
     localStorage.clear();
     setUser(null);
     window.location.href = '/login';
