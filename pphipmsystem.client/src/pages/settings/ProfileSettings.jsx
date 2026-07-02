@@ -1,11 +1,9 @@
 import { useState, useEffect } from 'react';
-import { useAuth } from '../../context/AuthContext';
 import { getProfile, updateProfile } from '../../api/users';
 import { toast } from '../../components/common/Toast';
 import { MdPerson, MdSave, MdSecurity, MdEmail } from 'react-icons/md';
 
 export default function ProfileSettings() {
-  const { user } = useAuth();
   const [profile, setProfile] = useState({
     firstName: '',
     lastName: '',
@@ -18,26 +16,25 @@ export default function ProfileSettings() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
+    const fetchProfile = async () => {
+      try {
+        const { data } = await getProfile();
+        setProfile({
+          firstName: data.firstName || '',
+          lastName: data.lastName || '',
+          email: data.email || '',
+          twoFactorEnabled: data.twoFactorEnabled || false,
+          role: data.role || '',
+          departmentName: data.departmentName || 'N/A',
+        });
+      } catch {
+        toast.error('Failed to load profile');
+      } finally {
+        setLoading(false);
+      }
+    };
     fetchProfile();
   }, []);
-
-  const fetchProfile = async () => {
-    try {
-      const { data } = await getProfile();
-      setProfile({
-        firstName: data.firstName || '',
-        lastName: data.lastName || '',
-        email: data.email || '',
-        twoFactorEnabled: data.twoFactorEnabled || false,
-        role: data.role || '',
-        departmentName: data.departmentName || 'N/A',
-      });
-    } catch (e) {
-      toast.error('Failed to load profile');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   const set = k => e => {
     const val = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
@@ -63,7 +60,7 @@ export default function ProfileSettings() {
       }
       await updateProfile(profile);
       toast.success('Profile updated successfully!');
-    } catch (e) {
+    } catch {
       toast.error('Failed to update profile.');
     } finally {
       setSaving(false);
