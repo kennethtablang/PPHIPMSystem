@@ -26,6 +26,7 @@ export default function ForecastPage() {
   const [savingConsumption, setSavingConsumption] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [periodCount, setPeriodCount] = useState(3);
+  const [method, setMethod] = useState('');
 
   useEffect(() => { 
     getItems().then(r => setItems(r.data)); 
@@ -78,7 +79,7 @@ export default function ForecastPage() {
     if (!selectedItem) return;
     setGenerating(true);
     try {
-      await generateForecast(selectedItem, periodCount);
+      await generateForecast(selectedItem, periodCount, method || null);
       toast.success(`Forecast generated for next ${periodCount} month(s).`);
       load(selectedItem);
     } catch (e) { toast.error(e.response?.data?.message ?? 'Failed to generate forecast.'); }
@@ -110,13 +111,20 @@ export default function ForecastPage() {
 
   const chartData = (() => {
     const map = {};
-    consumption.forEach(c => { const k = `${c.year}-${String(c.month).padStart(2, '0')}`; map[k] = { period: `${MONTHS[c.month - 1]} ${c.year}`, consumption: c.quantity }; });
+    consumption.forEach(c => { const k = `${c.year}-${String(c.month).padStart(2, '0')}`; map[k] = { period: `${MONTHS[c.month - 1]} ${c.year}`, consumption: c.quantityConsumed }; });
     forecasts.forEach(f => { const k = `${f.forecastYear}-${String(f.forecastMonth).padStart(2, '0')}`; map[k] = { ...(map[k] ?? { period: `${MONTHS[f.forecastMonth - 1]} ${f.forecastYear}` }), forecast: f.forecastedQuantity, reorder: f.suggestedReorderQuantity }; });
     return Object.keys(map).sort().map(k => map[k]);
   })();
 
   const currentItem = items.find(i => i.id == selectedItem);
-  const latestForecast = forecasts.length > 0 ? forecasts[forecasts.length - 1] : null;
+  // Forecasts arrive newest-period-first; the summary cards should show the
+  // nearest upcoming month, falling back to the most recent one.
+  const ascending = [...forecasts].sort((a, b) =>
+    (a.forecastYear - b.forecastYear) || (a.forecastMonth - b.forecastMonth));
+  const nextForecast = ascending.find(f =>
+    f.forecastYear > now.getFullYear() ||
+    (f.forecastYear === now.getFullYear() && f.forecastMonth > now.getMonth())
+  ) ?? ascending[ascending.length - 1] ?? null;
 
   return (
     <div>
@@ -139,6 +147,17 @@ export default function ForecastPage() {
             )}
             {canGenerate && (
               <>
+                <select
+                  className="form-control"
+                  value={method}
+                  onChange={e => setMethod(e.target.value)}
+                  style={{ width: 160 }}
+                  title="Forecasting method"
+                >
+                  <option value="">Item default method</option>
+                  <option value="MovingAverage">Moving Average</option>
+                  <option value="ExponentialSmoothing">Exp. Smoothing</option>
+                </select>
                 <select
                   className="form-control"
                   value={periodCount}
@@ -168,32 +187,32 @@ export default function ForecastPage() {
       </div>
 
       {!selectedItem ? (
-        <div style={{ textAlign: 'center', padding: '80px 20px', color: 'var(--text-muted)' }}>
-          <MdAutoGraph size={64} style={{ opacity: 0.2, marginBottom: 16 }} />
-          <div style={{ fontSize: 16 }}>Select an item to view demand forecasting</div>
+        <div className="empty-state">
+          <MdAutoGraph size={64} style={{ opacity: 0.2 }} />
+          <h3>Select an item to view demand forecasting</h3>
         </div>
       ) : loading ? (
         <div className="loading-center"><div className="spinner" /></div>
       ) : (
         <>
           {/* Summary Cards */}
-          {currentItem && latestForecast && (
+          {currentItem && nextForecast && (
             <div className="grid-stat" style={{ marginBottom: 24 }}>
               <div className="stat-card green">
-                <div className="stat-label">Forecasted Demand</div>
-                <div className="stat-value">{latestForecast.forecastedQuantity?.toFixed(2)}</div>
+                <div className="stat-label">Forecasted Demand — {MONTHS[nextForecast.forecastMonth - 1]} {nextForecast.forecastYear}</div>
+                <div className="stat-value">{nextForecast.forecastedQuantity?.toFixed(2)}</div>
                 <div className="stat-sub">{currentItem.unit} / month</div>
               </div>
               <div className="stat-card blue">
                 <div className="stat-label">Suggested Reorder</div>
-                <div className="stat-value">{latestForecast.suggestedReorderQuantity?.toFixed(2)}</div>
+                <div className="stat-value">{nextForecast.suggestedReorderQuantity?.toFixed(2)}</div>
                 <div className="stat-sub">{currentItem.unit} (+10% buffer)</div>
               </div>
               <div className="stat-card teal">
                 <div className="stat-label">Forecast Method</div>
-                <div className="stat-value" style={{ fontSize: 18, fontWeight: 700 }}>{latestForecast.method === 'MovingAverage' ? 'Moving Avg' : 'Exp. Smooth'}</div>
+                <div className="stat-value" style={{ fontSize: 18, fontWeight: 700 }}>{nextForecast.method === 'MovingAverage' ? 'Moving Avg' : 'Exp. Smooth'}</div>
                 <div className="stat-sub">
-                  {latestForecast.method === 'MovingAverage' ? `${currentItem.movingAverageWindow}-month window` : `α = ${currentItem.smoothingConstant}`}
+                  {nextForecast.method === 'MovingAverage' ? `${currentItem.movingAverageWindow}-month window` : `α = ${currentItem.smoothingConstant}`}
                 </div>
               </div>
               <div className="stat-card amber">
@@ -274,7 +293,7 @@ export default function ForecastPage() {
                 <div className="table-wrap" style={{ margin: 0 }}>
                   <table>
                     <thead>
-                      <tr><th>Period</th><th>Method</th><th>Forecasted Qty</th><th>Suggested Reorder</th><th>Generated At</th></tr>
+                      <tr><th>Period</th><th>Method</th><th>Forecasted Qty</th><th>Actual</th><th>Abs. Error</th><th>Suggested Reorder</th><th>Generated At</th></tr>
                     </thead>
                     <tbody>
                       {[...forecasts].reverse().map(f => (
@@ -282,6 +301,8 @@ export default function ForecastPage() {
                           <td>{MONTHS[f.forecastMonth - 1]} {f.forecastYear}</td>
                           <td><span className="badge badge-blue">{f.method === 'MovingAverage' ? 'Moving Avg' : 'Exp. Smooth'}</span></td>
                           <td style={{ fontWeight: 600 }}>{f.forecastedQuantity?.toFixed(2)}</td>
+                          <td>{f.actualQuantity != null ? f.actualQuantity.toFixed(2) : <span style={{ color: 'var(--text-muted)' }}>—</span>}</td>
+                          <td>{f.forecastError != null ? f.forecastError.toFixed(2) : <span style={{ color: 'var(--text-muted)' }}>—</span>}</td>
                           <td style={{ color: 'var(--green-700)', fontWeight: 600 }}>{f.suggestedReorderQuantity?.toFixed(2)}</td>
                           <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{new Date(f.generatedAt).toLocaleString('en-PH')}</td>
                         </tr>
