@@ -30,4 +30,14 @@ public class SystemSettingsDto
     public int PasswordMinLength { get; set; } = 8;
 
     public bool PasswordRequireSpecial { get; set; } = true;
+
+    // Data retention (0 = keep forever), applied nightly by MaintenanceSchedulerService.
+    [Range(0, 3650)]
+    public int NotificationRetentionDays { get; set; } = 90;
+
+    [Range(0, 3650)]
+    public int AuditLogRetentionDays { get; set; } = 0;
+
+    // Email the monthly consumption/procurement summary to administrators.
+    public bool MonthlyReportEmails { get; set; } = false;
 }

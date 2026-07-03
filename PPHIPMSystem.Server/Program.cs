@@ -139,6 +139,7 @@ namespace PPHIPMSystem.Server
 
             builder.Services.AddHostedService<ExpirationCheckService>();
             builder.Services.AddHostedService<BackupSchedulerService>();
+            builder.Services.AddHostedService<MaintenanceSchedulerService>();
 
             // The React client sends and expects enum values as strings
             // (e.g. "Issuance", "MovingAverage", "SubmittedToProcurement").

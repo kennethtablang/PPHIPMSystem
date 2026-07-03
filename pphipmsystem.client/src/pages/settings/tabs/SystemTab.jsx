@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { MdDns, MdSave, MdInventory2, MdLock, MdCampaign } from 'react-icons/md';
+import { MdDns, MdSave, MdInventory2, MdLock, MdCampaign, MdStorage } from 'react-icons/md';
 import { getSystemSettings, updateSystemSettings } from '../../../api/systemSettings';
 import { toast } from '../../../components/common/Toast';
 
@@ -30,6 +30,8 @@ export default function SystemTab() {
         defaultExpirationWarningDays: Number(settings.defaultExpirationWarningDays),
         defaultReorderThreshold: Number(settings.defaultReorderThreshold),
         passwordMinLength: minLen,
+        notificationRetentionDays: Number(settings.notificationRetentionDays),
+        auditLogRetentionDays: Number(settings.auditLogRetentionDays),
       };
       const { data } = await updateSystemSettings(payload);
       setSettings(data);
@@ -87,6 +89,24 @@ export default function SystemTab() {
             <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 12 }}>Passwords must include at least one symbol (e.g. ! @ #).</p>
           </div>
           <Toggle on={settings.passwordRequireSpecial} onClick={toggle('passwordRequireSpecial')} />
+        </div>
+
+        <Section Icon={MdStorage} title="Data & reports" desc="Nightly housekeeping and automatic reporting." />
+
+        <Field label="Notification retention (days)" desc="Notifications older than this are deleted nightly. 0 keeps them forever.">
+          <input type="number" min={0} max={3650} className="form-control" style={{ width: 160 }} value={settings.notificationRetentionDays} onChange={set('notificationRetentionDays')} />
+        </Field>
+
+        <Field label="Audit log retention (days)" desc="Audit records older than this are deleted nightly. 0 (recommended) keeps the full history.">
+          <input type="number" min={0} max={3650} className="form-control" style={{ width: 160 }} value={settings.auditLogRetentionDays} onChange={set('auditLogRetentionDays')} />
+        </Field>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <div style={{ flex: 1 }}>
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>Monthly summary email</label>
+            <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 12 }}>On the 1st of each month, email administrators a consumption and procurement summary of the previous month.</p>
+          </div>
+          <Toggle on={settings.monthlyReportEmails} onClick={toggle('monthlyReportEmails')} />
         </div>
 
         <Section Icon={MdCampaign} title="Announcement" desc="Shown as a banner to every user until they dismiss it. Leave empty for no banner." />

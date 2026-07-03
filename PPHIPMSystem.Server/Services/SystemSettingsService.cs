@@ -18,6 +18,11 @@ public class SystemSettingsService : ISystemSettingsService
     public const string AnnouncementKey = "AnnouncementMessage";
     public const string PasswordMinLengthKey = "PasswordMinLength";
     public const string PasswordRequireSpecialKey = "PasswordRequireSpecial";
+    public const string NotificationRetentionKey = "NotificationRetentionDays";
+    public const string AuditLogRetentionKey = "AuditLogRetentionDays";
+    public const string MonthlyReportEmailsKey = "MonthlyReportEmails";
+    // Bookkeeping (not exposed in the settings UI): last month a report email went out.
+    public const string MonthlyReportLastSentKey = "MonthlyReportLastSent";
 
     private const string DefaultOrgName = "Pangasinan Provincial Hospital";
     private const string DefaultBackupTime = "00:00";
@@ -43,6 +48,9 @@ public class SystemSettingsService : ISystemSettingsService
             AnnouncementMessage = all.GetValueOrDefault(AnnouncementKey, string.Empty),
             PasswordMinLength = int.TryParse(all.GetValueOrDefault(PasswordMinLengthKey), out var p) ? p : DefaultPasswordMinLength,
             PasswordRequireSpecial = !bool.TryParse(all.GetValueOrDefault(PasswordRequireSpecialKey), out var s) || s,
+            NotificationRetentionDays = int.TryParse(all.GetValueOrDefault(NotificationRetentionKey), out var nr) ? nr : 90,
+            AuditLogRetentionDays = int.TryParse(all.GetValueOrDefault(AuditLogRetentionKey), out var ar) ? ar : 0,
+            MonthlyReportEmails = bool.TryParse(all.GetValueOrDefault(MonthlyReportEmailsKey), out var mr) && mr,
         };
     }
 
@@ -56,6 +64,9 @@ public class SystemSettingsService : ISystemSettingsService
         await SetAsync(AnnouncementKey, dto.AnnouncementMessage?.Trim() ?? string.Empty);
         await SetAsync(PasswordMinLengthKey, dto.PasswordMinLength.ToString());
         await SetAsync(PasswordRequireSpecialKey, dto.PasswordRequireSpecial.ToString());
+        await SetAsync(NotificationRetentionKey, dto.NotificationRetentionDays.ToString());
+        await SetAsync(AuditLogRetentionKey, dto.AuditLogRetentionDays.ToString());
+        await SetAsync(MonthlyReportEmailsKey, dto.MonthlyReportEmails.ToString());
         await _db.SaveChangesAsync();
         return await GetAsync();
     }
