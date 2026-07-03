@@ -54,6 +54,11 @@ public class SuppliersController : ControllerBase
     public async Task<IActionResult> GetOrders(int id)
         => Ok(await _suppliers.GetOrdersAsync(id));
 
+    [HttpGet("metrics")]
+    [Authorize(Roles = "SuperAdmin,HospitalAdministrator,ProcurementStaff,InventoryOfficer")]
+    public async Task<IActionResult> GetMetrics()
+        => Ok(await _suppliers.GetMetricsAsync());
+
     [HttpDelete("{id}")]
     [Authorize(Roles = "SuperAdmin,HospitalAdministrator")]
     public async Task<IActionResult> Delete(int id)

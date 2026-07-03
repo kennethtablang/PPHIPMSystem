@@ -83,4 +83,32 @@ public class SupplierService : ISupplierService
 
         return _mapper.Map<IEnumerable<PurchaseOrderDto>>(orders);
     }
+
+    public async Task<IEnumerable<SupplierMetricsDto>> GetMetricsAsync()
+    {
+        // Aggregate in memory: the per-supplier PO counts are small, and lead
+        // time needs DateTime arithmetic EF can't translate cleanly.
+        var pos = await _db.PurchaseOrders.AsNoTracking()
+            .Select(po => new { po.SupplierId, po.IsDelivered, po.TotalAmount, po.GeneratedAt, po.DeliveredAt })
+            .ToListAsync();
+
+        return pos
+            .GroupBy(po => po.SupplierId)
+            .Select(g =>
+            {
+                var leadTimes = g
+                    .Where(po => po.IsDelivered && po.DeliveredAt.HasValue)
+                    .Select(po => (po.DeliveredAt!.Value - po.GeneratedAt).TotalDays)
+                    .ToList();
+                return new SupplierMetricsDto
+                {
+                    SupplierId = g.Key,
+                    PoCount = g.Count(),
+                    DeliveredCount = g.Count(po => po.IsDelivered),
+                    TotalAmount = g.Sum(po => po.TotalAmount),
+                    AvgLeadTimeDays = leadTimes.Count > 0 ? Math.Round(leadTimes.Average(), 1) : null,
+                };
+            })
+            .ToList();
+    }
 }

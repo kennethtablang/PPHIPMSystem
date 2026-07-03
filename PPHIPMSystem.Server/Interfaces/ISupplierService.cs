@@ -12,4 +12,5 @@ public interface ISupplierService
     Task<bool> UpdateAccreditationAsync(int id, bool isAccredited, DateTime? expiry);
     Task<bool> DeleteAsync(int id);
     Task<IEnumerable<PurchaseOrderDto>> GetOrdersAsync(int supplierId);
+    Task<IEnumerable<SupplierMetricsDto>> GetMetricsAsync();
 }

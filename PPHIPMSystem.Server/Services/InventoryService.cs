@@ -52,6 +52,9 @@ public class InventoryService : IInventoryService
 
     public async Task<InventoryItemDto> CreateAsync(CreateInventoryItemDto dto)
     {
+        _ = await _db.Categories.FindAsync(dto.CategoryId)
+            ?? throw new InvalidOperationException("Category not found.");
+
         var entity = _mapper.Map<InventoryItem>(dto);
         _db.InventoryItems.Add(entity);
         await _db.SaveChangesAsync();
@@ -63,6 +66,10 @@ public class InventoryService : IInventoryService
     {
         var entity = await _db.InventoryItems.FindAsync(id);
         if (entity is null) return null;
+
+        _ = await _db.Categories.FindAsync(dto.CategoryId)
+            ?? throw new InvalidOperationException("Category not found.");
+
         _mapper.Map(dto, entity);
         entity.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();

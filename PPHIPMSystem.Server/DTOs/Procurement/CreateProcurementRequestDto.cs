@@ -8,18 +8,18 @@ public class CreateProcurementRequestDto
     public string Justification { get; set; } = string.Empty;
 
     [Required, MinLength(1)]
-    public IEnumerable<CreateProcurementRequestItemDto> Items { get; set; } = [];
+    public List<CreateProcurementRequestItemDto> Items { get; set; } = [];
 }
 
 public class CreateProcurementRequestItemDto
 {
-    [Required]
+    [Range(1, int.MaxValue)]
     public int InventoryItemId { get; set; }
 
-    [Required, Range(0.01, double.MaxValue)]
+    [Range(0.01, 1_000_000_000)]
     public decimal QuantityRequested { get; set; }
 
-    [Range(0, double.MaxValue)]
+    [Range(0, 1_000_000_000)]
     public decimal? EstimatedUnitCost { get; set; }
 
     [MaxLength(300)]
@@ -37,18 +37,18 @@ public class ApproveProcurementDto
 
 public class GeneratePurchaseOrderDto
 {
-    [Required]
+    [Range(1, int.MaxValue)]
     public int SupplierId { get; set; }
 
-    [Required]
-    public IEnumerable<POItemCostDto> ItemCosts { get; set; } = [];
+    [Required, MinLength(1)]
+    public List<POItemCostDto> ItemCosts { get; set; } = [];
 }
 
 public class POItemCostDto
 {
-    [Required]
+    [Range(1, int.MaxValue)]
     public int ProcurementRequestItemId { get; set; }
 
-    [Required, Range(0, double.MaxValue)]
+    [Range(0, 1_000_000_000)]
     public decimal UnitCost { get; set; }
 }

@@ -44,6 +44,7 @@ public class UserService : IUserService
         {
             EmployeeId = dto.EmployeeId,
             FirstName = dto.FirstName,
+            MiddleName = dto.MiddleName,
             LastName = dto.LastName,
             UserName = dto.UserName,
             Email = dto.Email,
@@ -65,6 +66,7 @@ public class UserService : IUserService
         if (user is null) return null;
 
         user.FirstName = dto.FirstName;
+        user.MiddleName = dto.MiddleName;
         user.LastName = dto.LastName;
         user.Email = dto.Email;
         user.Role = dto.Role;
@@ -111,7 +113,11 @@ public class UserService : IUserService
             Email = user.Email ?? "",
             Role = user.Role.ToString(),
             DepartmentName = user.Department?.Name,
-            TwoFactorEnabled = user.TwoFactorEnabled
+            TwoFactorEnabled = user.TwoFactorEnabled,
+            EmailNotificationsEnabled = user.EmailNotificationsEnabled,
+            EmailNotifyInventory = user.EmailNotifyInventory,
+            EmailNotifyProcurement = user.EmailNotifyProcurement,
+            EmailNotifyAdjustments = user.EmailNotifyAdjustments
         };
     }
 
@@ -123,7 +129,11 @@ public class UserService : IUserService
         user.FirstName = dto.FirstName;
         user.LastName = dto.LastName;
         user.Email = dto.Email;
-        
+        user.EmailNotificationsEnabled = dto.EmailNotificationsEnabled;
+        user.EmailNotifyInventory = dto.EmailNotifyInventory;
+        user.EmailNotifyProcurement = dto.EmailNotifyProcurement;
+        user.EmailNotifyAdjustments = dto.EmailNotifyAdjustments;
+
         var emailResult = await _userManager.SetEmailAsync(user, dto.Email);
         var twoFactorResult = await _userManager.SetTwoFactorEnabledAsync(user, dto.TwoFactorEnabled);
 

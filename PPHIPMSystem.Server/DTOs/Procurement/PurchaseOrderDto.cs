@@ -1,4 +1,24 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace PPHIPMSystem.Server.DTOs.Procurement;
+
+// Optional batch details captured when confirming a delivery — one line per
+// PO item the receiver wants to record a lot number / expiry for.
+public class ConfirmDeliveryDto
+{
+    public List<DeliveryLineDto> Lines { get; set; } = [];
+}
+
+public class DeliveryLineDto
+{
+    [Range(1, int.MaxValue)]
+    public int PurchaseOrderItemId { get; set; }
+
+    [MaxLength(100)]
+    public string? LotNumber { get; set; }
+
+    public DateTime? ExpirationDate { get; set; }
+}
 
 public class PurchaseOrderDto
 {

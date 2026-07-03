@@ -4,10 +4,10 @@ namespace PPHIPMSystem.Server.DTOs.StockAdjustment;
 
 public class CreateStockAdjustmentDto
 {
-    [Required]
+    [Range(1, int.MaxValue)]
     public int InventoryItemId { get; set; }
 
-    [Required, Range(0, double.MaxValue)]
+    [Range(0, 1_000_000_000)]
     public decimal PhysicalCount { get; set; }
 
     [Required, MaxLength(500)]

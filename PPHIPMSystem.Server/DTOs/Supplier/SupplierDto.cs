@@ -15,3 +15,14 @@ public class SupplierDto
     public DateTime CreatedAt { get; set; }
     public int TotalOrders { get; set; }
 }
+
+// Performance figures derived from purchase-order history.
+public class SupplierMetricsDto
+{
+    public int SupplierId { get; set; }
+    public int PoCount { get; set; }
+    public int DeliveredCount { get; set; }
+    public decimal TotalAmount { get; set; }
+    // Average days from PO generation to confirmed delivery (delivered POs only).
+    public double? AvgLeadTimeDays { get; set; }
+}

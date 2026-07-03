@@ -1,4 +1,5 @@
 using System.Text;
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
@@ -27,13 +28,21 @@ namespace PPHIPMSystem.Server
             // Identity
             builder.Services.AddIdentity<ApplicationUser, IdentityRole>(options =>
             {
+                // Hard floor; the admin-configurable rules (min length above 8,
+                // special character) live in SystemPasswordValidator.
                 options.Password.RequireDigit = true;
                 options.Password.RequiredLength = 8;
                 options.Password.RequireUppercase = true;
-                options.Password.RequireNonAlphanumeric = true;
+                options.Password.RequireNonAlphanumeric = false;
                 options.User.RequireUniqueEmail = true;
+
+                // Brute-force protection: 5 wrong passwords locks the account for 15 minutes.
+                options.Lockout.AllowedForNewUsers = true;
+                options.Lockout.MaxFailedAccessAttempts = 5;
+                options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
             })
             .AddEntityFrameworkStores<ApplicationDbContext>()
+            .AddPasswordValidator<SystemPasswordValidator>()
             .AddDefaultTokenProviders();
 
             // JWT Authentication
@@ -93,8 +102,12 @@ namespace PPHIPMSystem.Server
             builder.Services.AddScoped<IProcurementService, ProcurementService>();
             builder.Services.AddScoped<IForecastService, ForecastService>();
             builder.Services.AddScoped<IReportService, ReportService>();
+            builder.Services.AddScoped<IReportExportService, ReportExportService>();
+            builder.Services.AddScoped<IBackupService, BackupService>();
+            builder.Services.AddScoped<ISystemSettingsService, SystemSettingsService>();
 
             builder.Services.AddHostedService<ExpirationCheckService>();
+            builder.Services.AddHostedService<BackupSchedulerService>();
 
             // The React client sends and expects enum values as strings
             // (e.g. "Issuance", "MovingAverage", "SubmittedToProcurement").
@@ -127,13 +140,39 @@ namespace PPHIPMSystem.Server
                 });
             });
 
+            // Throttle credential guessing and email-sending abuse per client IP.
+            builder.Services.AddRateLimiter(options =>
+            {
+                options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+                options.OnRejected = async (ctx, ct) =>
+                {
+                    ctx.HttpContext.Response.ContentType = "application/json";
+                    await ctx.HttpContext.Response.WriteAsync(
+                        "{\"message\":\"Too many attempts. Please wait a moment and try again.\"}", ct);
+                };
+
+                // Sign-in attempts: 10 per minute per IP.
+                options.AddPolicy("auth", httpContext =>
+                    RateLimitPartition.GetFixedWindowLimiter(
+                        httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                        _ => new FixedWindowRateLimiterOptions { PermitLimit = 10, Window = TimeSpan.FromMinutes(1) }));
+
+                // Endpoints that send email (reset links, OTPs): 3 per 5 minutes per IP.
+                options.AddPolicy("auth-email", httpContext =>
+                    RateLimitPartition.GetFixedWindowLimiter(
+                        httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+                        _ => new FixedWindowRateLimiterOptions { PermitLimit = 3, Window = TimeSpan.FromMinutes(5) }));
+            });
+
             builder.Services.AddCors(options =>
             {
                 options.AddPolicy("AllowFrontend", policy =>
                     policy.WithOrigins("https://localhost:59350", "http://localhost:5173")
                           .AllowAnyHeader()
                           .AllowAnyMethod()
-                          .AllowCredentials());
+                          .AllowCredentials()
+                          // Lets the client read the export filename from downloads.
+                          .WithExposedHeaders("Content-Disposition"));
             });
 
             var app = builder.Build();
@@ -146,9 +185,20 @@ namespace PPHIPMSystem.Server
                 app.UseSwagger();
                 app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "IPMS API v1"));
             }
+            else
+            {
+                // Safety net: any unhandled exception becomes a clean JSON 500
+                // instead of a raw crash page (dev keeps the detailed page).
+                app.UseExceptionHandler(a => a.Run(async context =>
+                {
+                    context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+                    await context.Response.WriteAsJsonAsync(new { message = "An unexpected error occurred." });
+                }));
+            }
 
             app.UseHttpsRedirection();
             app.UseCors("AllowFrontend");
+            app.UseRateLimiter();
             app.UseAuthentication();
             app.UseAuthorization();
             app.MapControllers();

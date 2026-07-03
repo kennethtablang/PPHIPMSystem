@@ -40,16 +40,30 @@ public class InventoryController : ControllerBase
     [Authorize(Roles = "HospitalAdministrator,InventoryOfficer")]
     public async Task<IActionResult> Create([FromBody] CreateInventoryItemDto dto)
     {
-        var result = await _inventory.CreateAsync(dto);
-        return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
+        try
+        {
+            var result = await _inventory.CreateAsync(dto);
+            return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     [HttpPut("{id}")]
     [Authorize(Roles = "HospitalAdministrator,InventoryOfficer")]
     public async Task<IActionResult> Update(int id, [FromBody] UpdateInventoryItemDto dto)
     {
-        var result = await _inventory.UpdateAsync(id, dto);
-        return result is null ? NotFound() : Ok(result);
+        try
+        {
+            var result = await _inventory.UpdateAsync(id, dto);
+            return result is null ? NotFound() : Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     [HttpDelete("{id}")]

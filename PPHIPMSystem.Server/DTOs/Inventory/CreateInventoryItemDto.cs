@@ -17,10 +17,10 @@ public class CreateInventoryItemDto
     [Required, MaxLength(50)]
     public string Unit { get; set; } = string.Empty;
 
-    [Required]
+    [Range(1, int.MaxValue)]
     public int CategoryId { get; set; }
 
-    [Range(0, double.MaxValue)]
+    [Range(0, 1_000_000_000)]
     public decimal ReorderThreshold { get; set; } = 0;
 
     [Range(1, 365)]

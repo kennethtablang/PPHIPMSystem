@@ -41,8 +41,15 @@ public class ForecastController : ControllerBase
     [Authorize(Roles = "HospitalAdministrator,InventoryOfficer")]
     public async Task<IActionResult> UpsertConsumption([FromBody] CreateConsumptionRecordDto dto)
     {
-        var result = await _forecast.UpsertConsumptionRecordAsync(dto);
-        return Ok(result);
+        try
+        {
+            var result = await _forecast.UpsertConsumptionRecordAsync(dto);
+            return Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     [HttpPost("consumption/{itemId}/sync")]

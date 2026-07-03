@@ -4,16 +4,17 @@ namespace PPHIPMSystem.Server.DTOs.Batch;
 
 public class CreateItemBatchDto
 {
-    [Required]
+    [Range(1, int.MaxValue)]
     public int InventoryItemId { get; set; }
 
     [MaxLength(100)]
     public string? LotNumber { get; set; }
 
-    [Required, Range(0.01, double.MaxValue)]
+    [Range(0.01, 1_000_000_000)]
     public decimal Quantity { get; set; }
 
     public DateTime? ExpirationDate { get; set; }
 
+    [Range(1, int.MaxValue)]
     public int? PurchaseOrderId { get; set; }
 }

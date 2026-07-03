@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PPHIPMSystem.Server.Data;
 
@@ -11,9 +12,11 @@ using PPHIPMSystem.Server.Data;
 namespace PPHIPMSystem.Server.Data.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260702091527_AddUserMiddleName")]
+    partial class AddUserMiddleName
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -180,18 +183,6 @@ namespace PPHIPMSystem.Server.Data.Migrations
                     b.Property<bool>("EmailConfirmed")
                         .HasColumnType("bit");
 
-                    b.Property<bool>("EmailNotificationsEnabled")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("EmailNotifyAdjustments")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("EmailNotifyInventory")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("EmailNotifyProcurement")
-                        .HasColumnType("bit");
-
                     b.Property<string>("EmployeeId")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
@@ -304,55 +295,6 @@ namespace PPHIPMSystem.Server.Data.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("AuditLogs");
-                });
-
-            modelBuilder.Entity("PPHIPMSystem.Server.Models.Backup", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("ErrorMessage")
-                        .HasMaxLength(2000)
-                        .HasColumnType("nvarchar(2000)");
-
-                    b.Property<string>("FileName")
-                        .IsRequired()
-                        .HasMaxLength(260)
-                        .HasColumnType("nvarchar(260)");
-
-                    b.Property<string>("FilePath")
-                        .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<long>("FileSizeBytes")
-                        .HasColumnType("bigint");
-
-                    b.Property<int>("RecordCount")
-                        .HasColumnType("int");
-
-                    b.Property<int>("Status")
-                        .HasColumnType("int");
-
-                    b.Property<string>("TriggeredByName")
-                        .HasMaxLength(200)
-                        .HasColumnType("nvarchar(200)");
-
-                    b.Property<string>("TriggeredByUserId")
-                        .HasColumnType("nvarchar(max)");
-
-                    b.Property<int>("Type")
-                        .HasColumnType("int");
-
-                    b.HasKey("Id");
-
-                    b.ToTable("Backups");
                 });
 
             modelBuilder.Entity("PPHIPMSystem.Server.Models.Category", b =>
@@ -985,22 +927,6 @@ namespace PPHIPMSystem.Server.Data.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("Suppliers");
-                });
-
-            modelBuilder.Entity("PPHIPMSystem.Server.Models.SystemSetting", b =>
-                {
-                    b.Property<string>("Key")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.Property<string>("Value")
-                        .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.HasKey("Key");
-
-                    b.ToTable("SystemSettings");
                 });
 
             modelBuilder.Entity("Microsoft.AspNetCore.Identity.IdentityRoleClaim<string>", b =>

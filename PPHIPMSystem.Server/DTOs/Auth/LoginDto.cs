@@ -4,9 +4,9 @@ namespace PPHIPMSystem.Server.DTOs.Auth;
 
 public class LoginDto
 {
-    [Required]
+    [Required, MaxLength(100)]
     public string Username { get; set; } = string.Empty;
 
-    [Required]
+    [Required, MaxLength(128)]
     public string Password { get; set; } = string.Empty;
 }

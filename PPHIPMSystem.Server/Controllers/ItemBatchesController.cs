@@ -32,8 +32,15 @@ public class ItemBatchesController : ControllerBase
     public async Task<IActionResult> Create([FromBody] CreateItemBatchDto dto)
     {
         var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
-        var result = await _batches.CreateAsync(dto, userId);
-        return Ok(result);
+        try
+        {
+            var result = await _batches.CreateAsync(dto, userId);
+            return Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     [HttpPatch("{id}/dispose")]

@@ -6,6 +6,7 @@ namespace PPHIPMSystem.Server.Models;
 public class ApplicationUser : IdentityUser
 {
     public string FirstName { get; set; } = string.Empty;
+    public string? MiddleName { get; set; }
     public string LastName { get; set; } = string.Empty;
     public string EmployeeId { get; set; } = string.Empty;
     public UserRole Role { get; set; }
@@ -14,6 +15,12 @@ public class ApplicationUser : IdentityUser
     public bool IsActive { get; set; } = true;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? LastLoginAt { get; set; }
+
+    // Email notification preferences (master + per-category).
+    public bool EmailNotificationsEnabled { get; set; } = true;
+    public bool EmailNotifyInventory { get; set; } = true;      // low stock, expiry
+    public bool EmailNotifyProcurement { get; set; } = true;    // requests, approvals, POs
+    public bool EmailNotifyAdjustments { get; set; } = true;    // stock adjustments
 
     public ICollection<ProcurementRequest> ProcurementRequests { get; set; } = [];
     public ICollection<ProcurementApproval> ProcurementApprovals { get; set; } = [];

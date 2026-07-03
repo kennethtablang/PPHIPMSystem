@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.RateLimiting;
 using PPHIPMSystem.Server.DTOs.Auth;
 using PPHIPMSystem.Server.Interfaces;
 
@@ -15,22 +16,38 @@ public class AuthController : ControllerBase
     public AuthController(IAuthService auth) => _auth = auth;
 
     [HttpPost("login")]
+    [EnableRateLimiting("auth")]
     public async Task<IActionResult> Login(LoginDto dto)
     {
         var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
-        var result = await _auth.LoginAsync(dto, ip);
-        if (result is null) return Unauthorized(new { message = "Invalid credentials or inactive account." });
-        if (result.RequiresTwoFactor) return Ok(result); // Return 200 OK so frontend knows it needs OTP
-        return Ok(result);
+        try
+        {
+            var result = await _auth.LoginAsync(dto, ip);
+            if (result is null) return Unauthorized(new { message = "Invalid credentials or inactive account." });
+            if (result.RequiresTwoFactor) return Ok(result); // Return 200 OK so frontend knows it needs OTP
+            return Ok(result);
+        }
+        catch (InvalidOperationException ex) // account lockout
+        {
+            return Unauthorized(new { message = ex.Message });
+        }
     }
 
     [HttpPost("login-2fa")]
+    [EnableRateLimiting("auth")]
     public async Task<IActionResult> Login2Fa(Login2FaDto dto)
     {
         var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
-        var result = await _auth.Login2FaAsync(dto, ip);
-        if (result is null) return Unauthorized(new { message = "Invalid or expired verification code." });
-        return Ok(result);
+        try
+        {
+            var result = await _auth.Login2FaAsync(dto, ip);
+            if (result is null) return Unauthorized(new { message = "Invalid or expired verification code." });
+            return Ok(result);
+        }
+        catch (InvalidOperationException ex) // account lockout
+        {
+            return Unauthorized(new { message = ex.Message });
+        }
     }
 
     [Authorize]
@@ -51,6 +68,7 @@ public class AuthController : ControllerBase
     }
 
     [HttpPost("forgot-password")]
+    [EnableRateLimiting("auth-email")]
     public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordDto dto)
     {
         // Always return OK to prevent email enumeration attacks
@@ -59,6 +77,7 @@ public class AuthController : ControllerBase
     }
 
     [HttpPost("reset-password-token")]
+    [EnableRateLimiting("auth")]
     public async Task<IActionResult> ResetPasswordWithToken([FromBody] ResetPasswordWithTokenDto dto)
     {
         var ok = await _auth.ResetPasswordWithTokenAsync(dto);

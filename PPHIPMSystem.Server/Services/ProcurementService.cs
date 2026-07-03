@@ -50,6 +50,15 @@ public class ProcurementService : IProcurementService
 
     public async Task<ProcurementRequestDto> CreateAsync(CreateProcurementRequestDto dto, string userId, int departmentId)
     {
+        // Validate item ids up front so a bad id is a 400, not an FK 500.
+        var requestedIds = dto.Items.Select(i => i.InventoryItemId).Distinct().ToList();
+        var knownIds = await _db.InventoryItems
+            .Where(i => requestedIds.Contains(i.Id))
+            .Select(i => i.Id)
+            .ToListAsync();
+        if (knownIds.Count != requestedIds.Count)
+            throw new InvalidOperationException("One or more requested items do not exist.");
+
         var count = await _db.ProcurementRequests.CountAsync() + 1;
         var request = new ProcurementRequest
         {
@@ -67,7 +76,22 @@ public class ProcurementService : IProcurementService
             }).ToList()
         };
         _db.ProcurementRequests.Add(request);
-        await _db.SaveChangesAsync();
+
+        // RequestNumber has a unique index; concurrent submissions can collide on
+        // the Count()+1 number, so bump and retry instead of failing with a 500.
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                await _db.SaveChangesAsync();
+                break;
+            }
+            catch (DbUpdateException) when (attempt < 5)
+            {
+                count++;
+                request.RequestNumber = $"PR-{DateTime.UtcNow:yyyyMM}-{count:D4}";
+            }
+        }
 
         await _audit.LogAsync(userId, "ProcurementCreated", "ProcurementRequest", request.Id, request.RequestNumber);
 
@@ -176,7 +200,14 @@ public class ProcurementService : IProcurementService
         if (request.Status != ProcurementStatus.FullyApproved)
             throw new InvalidOperationException("Request is not fully approved.");
 
-        var costMap = dto.ItemCosts.ToDictionary(c => c.ProcurementRequestItemId, c => c.UnitCost);
+        _ = await _db.Suppliers.FindAsync(dto.SupplierId)
+            ?? throw new InvalidOperationException("Supplier not found.");
+
+        // GroupBy tolerates duplicate item ids in the payload (last one wins)
+        // where ToDictionary would throw.
+        var costMap = dto.ItemCosts
+            .GroupBy(c => c.ProcurementRequestItemId)
+            .ToDictionary(g => g.Key, g => g.Last().UnitCost);
         var count = await _db.PurchaseOrders.CountAsync() + 1;
 
         var po = new PurchaseOrder
@@ -197,7 +228,21 @@ public class ProcurementService : IProcurementService
         _db.PurchaseOrders.Add(po);
         request.Status = ProcurementStatus.PurchaseOrderGenerated;
         request.UpdatedAt = DateTime.UtcNow;
-        await _db.SaveChangesAsync();
+
+        // Same unique-number retry as CreateAsync — PONumber can collide under concurrency.
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                await _db.SaveChangesAsync();
+                break;
+            }
+            catch (DbUpdateException) when (attempt < 5)
+            {
+                count++;
+                po.PONumber = $"PO-{DateTime.UtcNow:yyyyMM}-{count:D4}";
+            }
+        }
 
         await _notifications.CreateAsync(request.RequestedByUserId,
             NotificationType.PurchaseOrderGenerated,
@@ -238,7 +283,7 @@ public class ProcurementService : IProcurementService
         return _mapper.Map<IEnumerable<PurchaseOrderDto>>(pos);
     }
 
-    public async Task<bool> ConfirmDeliveryAsync(int purchaseOrderId, string userId)
+    public async Task<bool> ConfirmDeliveryAsync(int purchaseOrderId, ConfirmDeliveryDto? dto, string userId)
     {
         var po = await _db.PurchaseOrders
             .Include(p => p.Items).ThenInclude(i => i.InventoryItem)
@@ -248,6 +293,11 @@ public class ProcurementService : IProcurementService
         po.IsDelivered = true;
         po.DeliveredAt = DateTime.UtcNow;
 
+        // Lot/expiry the receiver typed in, keyed by PO line.
+        var lineDetails = (dto?.Lines ?? [])
+            .GroupBy(l => l.PurchaseOrderItemId)
+            .ToDictionary(g => g.Key, g => g.Last());
+
         foreach (var item in po.Items)
         {
             var invItem = await _db.InventoryItems.FindAsync(item.InventoryItemId);
@@ -255,6 +305,20 @@ public class ProcurementService : IProcurementService
             invItem.QuantityOnHand += item.QuantityOrdered;
             invItem.UpdatedAt = DateTime.UtcNow;
             item.QuantityDelivered = item.QuantityOrdered;
+
+            // Every delivered line becomes a batch so expiration tracking and
+            // FEFO issuance can see PO-received stock.
+            var details = lineDetails.GetValueOrDefault(item.Id);
+            _db.ItemBatches.Add(new ItemBatch
+            {
+                InventoryItemId = item.InventoryItemId,
+                Quantity = item.QuantityOrdered,
+                RemainingQuantity = item.QuantityOrdered,
+                LotNumber = string.IsNullOrWhiteSpace(details?.LotNumber) ? null : details!.LotNumber!.Trim(),
+                ExpirationDate = details?.ExpirationDate,
+                PurchaseOrderId = purchaseOrderId,
+                ReceivedDate = DateTime.UtcNow
+            });
 
             _db.StockMovements.Add(new StockMovement
             {

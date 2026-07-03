@@ -44,6 +44,10 @@ public class StockMovementService : IStockMovementService
         var item = await _db.InventoryItems.FindAsync(dto.InventoryItemId)
             ?? throw new InvalidOperationException("Inventory item not found.");
 
+        if (dto.PurchaseOrderId.HasValue &&
+            await _db.PurchaseOrders.FindAsync(dto.PurchaseOrderId.Value) is null)
+            throw new InvalidOperationException("Purchase order not found.");
+
         var before = item.QuantityOnHand;
         decimal after;
 
@@ -58,10 +62,12 @@ public class StockMovementService : IStockMovementService
                 if (dto.Quantity > before)
                     throw new InvalidOperationException("Insufficient stock.");
                 after = before - dto.Quantity;
+                await ConsumeBatchesFefoAsync(dto.InventoryItemId, dto.Quantity);
                 break;
             default:
-                after = before;
-                break;
+                // Adjustments go through the stock-adjustment approval flow,
+                // not direct movements.
+                throw new InvalidOperationException("Unsupported movement type.");
         }
 
         item.QuantityOnHand = after;
@@ -121,5 +127,28 @@ public class StockMovementService : IStockMovementService
         await _db.Entry(movement).Reference(m => m.InventoryItem).LoadAsync();
         await _db.Entry(movement).Reference(m => m.PerformedByUser).LoadAsync();
         return _mapper.Map<StockMovementDto>(movement);
+    }
+
+    // FEFO (First-Expire-First-Out): consume issued/disposed stock from the
+    // batch expiring soonest so RemainingQuantity tracks the physical shelf.
+    // Stock that predates batch tracking simply has no batch to consume —
+    // any shortfall is ignored rather than blocking the movement.
+    private async Task ConsumeBatchesFefoAsync(int inventoryItemId, decimal quantity)
+    {
+        var batches = await _db.ItemBatches
+            .Where(b => b.InventoryItemId == inventoryItemId && b.RemainingQuantity > 0)
+            .OrderBy(b => b.ExpirationDate == null)   // dated batches first
+            .ThenBy(b => b.ExpirationDate)
+            .ThenBy(b => b.ReceivedDate)
+            .ToListAsync();
+
+        var remaining = quantity;
+        foreach (var batch in batches)
+        {
+            if (remaining <= 0) break;
+            var take = Math.Min(batch.RemainingQuantity, remaining);
+            batch.RemainingQuantity -= take;
+            remaining -= take;
+        }
     }
 }

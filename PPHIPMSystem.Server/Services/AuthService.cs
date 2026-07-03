@@ -40,12 +40,24 @@ public class AuthService : IAuthService
             return null;
         }
 
+        if (await _userManager.IsLockedOutAsync(user))
+        {
+            await _audit.LogAsync(user.Id, "LoginFailed", "Auth", null, "Account locked out", ipAddress);
+            throw new InvalidOperationException("Account temporarily locked after repeated failed sign-ins. Try again in 15 minutes.");
+        }
+
         var valid = await _userManager.CheckPasswordAsync(user, dto.Password);
         if (!valid)
         {
+            // Count the failure so Identity lockout actually engages.
+            await _userManager.AccessFailedAsync(user);
             await _audit.LogAsync(user.Id, "LoginFailed", "Auth", null, "Invalid password", ipAddress);
+            if (await _userManager.IsLockedOutAsync(user))
+                throw new InvalidOperationException("Account temporarily locked after repeated failed sign-ins. Try again in 15 minutes.");
             return null;
         }
+
+        await _userManager.ResetAccessFailedCountAsync(user);
 
         if (user.TwoFactorEnabled)
         {
@@ -96,12 +108,22 @@ public class AuthService : IAuthService
 
         if (user is null) return null;
 
+        if (await _userManager.IsLockedOutAsync(user))
+        {
+            await _audit.LogAsync(user.Id, "LoginFailed", "Auth", null, "Account locked out (2FA)", ipAddress);
+            throw new InvalidOperationException("Account temporarily locked after repeated failed sign-ins. Try again in 15 minutes.");
+        }
+
         var validCode = await _userManager.VerifyTwoFactorTokenAsync(user, "Email", dto.Code);
         if (!validCode)
         {
+            // Failed codes count toward lockout too, so OTPs can't be brute-forced.
+            await _userManager.AccessFailedAsync(user);
             await _audit.LogAsync(user.Id, "LoginFailed", "Auth", null, "Invalid 2FA code", ipAddress);
             return null;
         }
+
+        await _userManager.ResetAccessFailedCountAsync(user);
 
         user.LastLoginAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();

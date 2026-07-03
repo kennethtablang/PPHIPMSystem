@@ -125,6 +125,9 @@ public class ForecastService : IForecastService
 
     public async Task<ConsumptionRecordDto> UpsertConsumptionRecordAsync(CreateConsumptionRecordDto dto)
     {
+        _ = await _db.InventoryItems.FindAsync(dto.InventoryItemId)
+            ?? throw new InvalidOperationException("Item not found.");
+
         var existing = await _db.ConsumptionRecords.FirstOrDefaultAsync(c =>
             c.InventoryItemId == dto.InventoryItemId && c.Year == dto.Year && c.Month == dto.Month);
 
@@ -238,7 +241,17 @@ public class ForecastService : IForecastService
     // through the last complete month, filling unrecorded months with zero.
     private static List<decimal> BuildMonthlySeries(List<ConsumptionRecord> history)
     {
-        var byPeriod = history.ToDictionary(c => (c.Year, c.Month), c => c.QuantityConsumed);
+        // Defensive: drop rows that would make new DateTime(Year, Month, 1) throw
+        // (possible in data recorded before Year/Month validation existed), and
+        // collapse duplicate periods instead of letting ToDictionary throw.
+        history = history
+            .Where(c => c.Month is >= 1 and <= 12 && c.Year is >= 2000 and <= 2100)
+            .ToList();
+        if (history.Count == 0) return [];
+
+        var byPeriod = history
+            .GroupBy(c => (c.Year, c.Month))
+            .ToDictionary(g => g.Key, g => g.Sum(c => c.QuantityConsumed));
 
         var start = new DateTime(history[0].Year, history[0].Month, 1);
         var lastRecorded = new DateTime(history[^1].Year, history[^1].Month, 1);

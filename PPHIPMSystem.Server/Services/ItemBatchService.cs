@@ -60,6 +60,10 @@ public class ItemBatchService : IItemBatchService
 
     public async Task<ItemBatchDto> CreateAsync(CreateItemBatchDto dto, string userId)
     {
+        if (dto.PurchaseOrderId.HasValue &&
+            await _db.PurchaseOrders.FindAsync(dto.PurchaseOrderId.Value) is null)
+            throw new InvalidOperationException("Purchase order not found.");
+
         var entity = _mapper.Map<ItemBatch>(dto);
         _db.ItemBatches.Add(entity);
 

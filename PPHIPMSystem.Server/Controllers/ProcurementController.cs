@@ -128,10 +128,10 @@ public class ProcurementController : ControllerBase
 
     [HttpPatch("purchase-orders/{id}/confirm-delivery")]
     [Authorize(Roles = "SuperAdmin,HospitalAdministrator,InventoryOfficer")]
-    public async Task<IActionResult> ConfirmDelivery(int id)
+    public async Task<IActionResult> ConfirmDelivery(int id, [FromBody] ConfirmDeliveryDto? dto)
     {
         var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
-        var ok = await _procurement.ConfirmDeliveryAsync(id, userId);
+        var ok = await _procurement.ConfirmDeliveryAsync(id, dto, userId);
         return ok ? NoContent() : NotFound();
     }
 }

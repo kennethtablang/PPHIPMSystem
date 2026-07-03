@@ -87,7 +87,7 @@ public class NotificationService : INotificationService
         await _hubContext.Clients.User(userId).SendAsync("ReceiveNotification", dto);
 
         var user = await _userManager.FindByIdAsync(userId);
-        if (user != null && !string.IsNullOrEmpty(user.Email))
+        if (user != null && !string.IsNullOrEmpty(user.Email) && ShouldEmail(user, type))
         {
             var emailBody = $@"
                 <div style='font-family: Arial, sans-serif; padding: 20px; border: 1px solid #e0e0e0; border-radius: 5px; max-width: 600px; margin: 0 auto;'>
@@ -105,7 +105,12 @@ public class NotificationService : INotificationService
     {
         var usersData = await _db.Users
             .Where(u => u.Role == role && u.IsActive)
-            .Select(u => new { u.Id, u.Email })
+            .Select(u => new
+            {
+                u.Id, u.Email,
+                u.EmailNotificationsEnabled, u.EmailNotifyInventory,
+                u.EmailNotifyProcurement, u.EmailNotifyAdjustments
+            })
             .ToListAsync();
 
         var notifications = new List<Notification>();
@@ -140,8 +145,11 @@ public class NotificationService : INotificationService
             };
             await _hubContext.Clients.User(n.UserId).SendAsync("ReceiveNotification", dto);
             
-            var userEmail = usersData.FirstOrDefault(u => u.Id == n.UserId)?.Email;
-            if (!string.IsNullOrEmpty(userEmail))
+            var recipient = usersData.FirstOrDefault(u => u.Id == n.UserId);
+            var userEmail = recipient?.Email;
+            var allowEmail = recipient != null && recipient.EmailNotificationsEnabled && CategoryAllowed(
+                type, recipient.EmailNotifyInventory, recipient.EmailNotifyProcurement, recipient.EmailNotifyAdjustments);
+            if (!string.IsNullOrEmpty(userEmail) && allowEmail)
             {
                 var emailBody = $@"
                     <div style='font-family: Arial, sans-serif; padding: 20px; border: 1px solid #e0e0e0; border-radius: 5px; max-width: 600px; margin: 0 auto;'>
@@ -155,4 +163,21 @@ public class NotificationService : INotificationService
             }
         }
     }
+
+    // Whether an email should be sent to this user for the given notification type,
+    // honoring their master switch and per-category preferences.
+    private static bool ShouldEmail(ApplicationUser user, NotificationType type) =>
+        user.EmailNotificationsEnabled && CategoryAllowed(
+            type, user.EmailNotifyInventory, user.EmailNotifyProcurement, user.EmailNotifyAdjustments);
+
+    private static bool CategoryAllowed(NotificationType type, bool inventory, bool procurement, bool adjustments) => type switch
+    {
+        NotificationType.LowStock or NotificationType.ExpirationWarning => inventory,
+        NotificationType.ProcurementSubmitted or NotificationType.ProcurementApproved
+            or NotificationType.ProcurementRejected or NotificationType.ProcurementReturnedForRevision
+            or NotificationType.PurchaseOrderGenerated => procurement,
+        NotificationType.StockAdjustmentRequested or NotificationType.StockAdjustmentApproved
+            or NotificationType.StockAdjustmentRejected => adjustments,
+        _ => true, // General and anything else follows the master switch only
+    };
 }

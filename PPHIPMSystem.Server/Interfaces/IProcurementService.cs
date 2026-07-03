@@ -12,5 +12,5 @@ public interface IProcurementService
     Task<PurchaseOrderDto> GeneratePurchaseOrderAsync(int requestId, GeneratePurchaseOrderDto dto, string userId);
     Task<PurchaseOrderDto?> GetPurchaseOrderAsync(int id);
     Task<IEnumerable<PurchaseOrderDto>> GetAllPurchaseOrdersAsync();
-    Task<bool> ConfirmDeliveryAsync(int purchaseOrderId, string userId);
+    Task<bool> ConfirmDeliveryAsync(int purchaseOrderId, ConfirmDeliveryDto? dto, string userId);
 }

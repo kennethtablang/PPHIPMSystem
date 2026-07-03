@@ -1,3 +1,4 @@
+using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
@@ -122,4 +123,4 @@ public class UsersController : ControllerBase
     }
 }
 
-public record ResetPasswordDto(string NewPassword);
+public record ResetPasswordDto([Required, MinLength(8), MaxLength(128)] string NewPassword);
