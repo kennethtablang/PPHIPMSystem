@@ -1,11 +1,18 @@
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
+import { getResolvedLandingPage } from './utils/appPrefs';
 import Layout from './components/layout/Layout';
 
 import Login from './pages/Login';
 import ForgotPassword from './pages/auth/ForgotPassword';
 import ResetPassword from './pages/auth/ResetPassword';
-import Dashboard from './pages/Dashboard';
+
+// Chart-heavy pages are lazy-loaded so recharts lands in its own chunk
+// instead of the initial bundle.
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const ForecastPage = lazy(() => import('./pages/forecast/ForecastPage'));
+const ReportsPage = lazy(() => import('./pages/reports/ReportsPage'));
 
 import InventoryList from './pages/inventory/InventoryList';
 import ItemBatches from './pages/inventory/ItemBatches';
@@ -19,14 +26,13 @@ import PurchaseOrders from './pages/procurement/PurchaseOrders';
 import DepartmentRequestsPage from './pages/procurement/DepartmentRequestsPage';
 import MaterialsList from './pages/inventory/MaterialsList';
 
-import ForecastPage from './pages/forecast/ForecastPage';
-import ReportsPage from './pages/reports/ReportsPage';
 import NotificationsPage from './pages/notifications/NotificationsPage';
-import ProfileSettings from './pages/settings/ProfileSettings';
+import SettingsPage from './pages/settings/SettingsPage';
 
 import UsersPage from './pages/admin/UsersPage';
 import DepartmentsPage from './pages/admin/DepartmentsPage';
 import CategoriesPage from './pages/admin/CategoriesPage';
+import BackupManagementPage from './pages/admin/BackupManagementPage';
 import AuditLogPage from './pages/audit/AuditLogPage';
 
 function PrivateRoute({ children, roles }) {
@@ -43,15 +49,16 @@ function AdminRoute({ children }) {
 export default function App() {
   return (
     <BrowserRouter>
+      <Suspense fallback={<div className="loading-center"><div className="spinner" /></div>}>
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
 
         <Route path="/" element={<PrivateRoute><Layout /></PrivateRoute>}>
-          <Route index element={<Navigate to="/dashboard" replace />} />
+          <Route index element={<Navigate to={getResolvedLandingPage()} replace />} />
           <Route path="dashboard" element={<Dashboard />} />
-          <Route path="profile" element={<ProfileSettings />} />
+          <Route path="profile" element={<SettingsPage />} />
 
           <Route path="inventory" element={<InventoryList />} />
           <Route path="materials" element={<MaterialsList />} />
@@ -72,11 +79,13 @@ export default function App() {
           <Route path="users" element={<AdminRoute><UsersPage /></AdminRoute>} />
           <Route path="departments" element={<AdminRoute><DepartmentsPage /></AdminRoute>} />
           <Route path="categories" element={<AdminRoute><CategoriesPage /></AdminRoute>} />
+          <Route path="backups" element={<AdminRoute><BackupManagementPage /></AdminRoute>} />
           <Route path="audit-logs" element={<AdminRoute><AuditLogPage /></AdminRoute>} />
         </Route>
 
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
+      </Suspense>
     </BrowserRouter>
   );
 }

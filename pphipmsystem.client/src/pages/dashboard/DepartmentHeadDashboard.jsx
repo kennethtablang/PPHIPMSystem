@@ -13,6 +13,7 @@ import { getRequests } from '../../api/procurement';
 import { getNotifications } from '../../api/notifications';
 import { signalRService } from '../../api/signalrService';
 import { useAuth } from '../../context/AuthContext';
+import { getAppPrefs } from '../../utils/appPrefs';
 import StatusBadge from '../../components/common/StatusBadge';
 
 function StatCard({ label, value, icon: Icon, color, sub, onClick }) {
@@ -160,6 +161,7 @@ export default function DepartmentHeadDashboard() {
   return (
     <div className="fade-in slide-up">
       {/* Welcome Banner */}
+      {getAppPrefs().showWelcomeBanner && (
       <div style={{
         background: 'linear-gradient(135deg, var(--green-900) 0%, var(--green-700) 50%, var(--green-500) 100%)',
         borderRadius: 'var(--radius-lg)', padding: '24px 28px', marginBottom: 24,
@@ -202,6 +204,7 @@ export default function DepartmentHeadDashboard() {
           </button>
         </div>
       </div>
+      )}
 
       {/* Stat Cards */}
       <div className="grid-4" style={{ marginBottom: 24 }}>

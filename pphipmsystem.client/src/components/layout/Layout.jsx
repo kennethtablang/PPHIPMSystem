@@ -1,16 +1,22 @@
 import { useEffect, useRef, useState } from 'react';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
+import AnnouncementBanner from './AnnouncementBanner';
 import { Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { getAppPrefs, rememberLastPath } from '../../utils/appPrefs';
 
-const IDLE_MS    = 30 * 60 * 1000;
 const WARNING_MS =  2 * 60 * 1000;
 const EVENTS     = ['mousemove', 'mousedown', 'keydown', 'scroll', 'touchstart'];
 
 export default function Layout() {
   const { logout } = useAuth();
   const location = useLocation();
+  // Idle auto-logout window from user preference; 0 disables it entirely.
+  const [idleMs] = useState(() => {
+    const mins = getAppPrefs().sessionTimeoutMinutes;
+    return mins > 0 ? mins * 60 * 1000 : 0;
+  });
   const [warning, setWarning] = useState(false);
   const [countdown, setCountdown] = useState(WARNING_MS / 1000);
   const idleTimer    = useRef(null);
@@ -28,9 +34,9 @@ export default function Layout() {
   };
 
   const resetIdle = () => {
-    if (warningRef.current) return;
+    if (warningRef.current || !idleMs) return;
     clearTimeout(idleTimer.current);
-    idleTimer.current = setTimeout(showWarning, IDLE_MS);
+    idleTimer.current = setTimeout(showWarning, idleMs);
   };
 
   const stayLoggedIn = () => {
@@ -42,8 +48,9 @@ export default function Layout() {
   };
 
   useEffect(() => {
+    if (!idleMs) return;              // "Never" — no idle auto-logout
     EVENTS.forEach(e => window.addEventListener(e, resetIdle, { passive: true }));
-    idleTimer.current = setTimeout(showWarning, IDLE_MS);
+    idleTimer.current = setTimeout(showWarning, idleMs);
     return () => {
       EVENTS.forEach(e => window.removeEventListener(e, resetIdle));
       clearTimeout(idleTimer.current);
@@ -51,6 +58,9 @@ export default function Layout() {
       clearInterval(countdownRef.current);
     };
   }, []);
+
+  // Remember where the user is so the "Last visited page" landing option can resume it.
+  useEffect(() => { rememberLastPath(location.pathname); }, [location.pathname]);
 
   const mins = Math.floor(countdown / 60);
   const secs = String(countdown % 60).padStart(2, '0');
@@ -67,6 +77,7 @@ export default function Layout() {
         transition: 'margin-left 0.22s ease',
       }}>
         <Topbar />
+        <AnnouncementBanner />
         <main className="main-content" style={{ flex: 1, overflow: 'auto' }}>
           <div key={location.pathname} className="fade-in slide-up">
             <Outlet />
@@ -83,10 +94,10 @@ export default function Layout() {
           padding: 20,
         }}>
           <div style={{
-            background: 'rgba(255,255,255,0.96)',
+            background: 'var(--surface)',
             backdropFilter: 'blur(20px)', WebkitBackdropFilter: 'blur(20px)',
             borderRadius: 'var(--radius-lg)',
-            border: '1px solid rgba(255,255,255,.6)',
+            border: '1px solid var(--border)',
             boxShadow: '0 20px 60px rgba(5,46,16,.25)',
             padding: '36px 40px',
             maxWidth: 420, width: '100%',
@@ -105,7 +116,7 @@ export default function Layout() {
               Session Expiring Soon
             </h2>
             <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: 24 }}>
-              You've been inactive for 30 minutes. You will be automatically logged out in:
+              You've been inactive for {idleMs >= 3600000 ? `${idleMs / 3600000} hour${idleMs > 3600000 ? 's' : ''}` : `${Math.round(idleMs / 60000)} minutes`}. You will be automatically logged out in:
             </p>
             <div style={{
               fontSize: 40, fontWeight: 800,

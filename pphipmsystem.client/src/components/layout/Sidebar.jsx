@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { getDisplayPrefs } from '../../utils/displayPrefs';
 import {
   MdDashboard, MdInventory, MdWarehouse, MdSwapVert, MdTune,
   MdShoppingCart, MdLocalShipping, MdStore, MdBarChart,
   MdPeople, MdBusiness, MdCategory, MdHistory, MdAnalytics,
-  MdNotifications, MdChevronLeft, MdChevronRight, MdLogout,
-  MdGridView, MdPerson,
+  MdNotifications, MdChevronLeft, MdChevronRight,
+  MdGridView, MdBackup,
 } from 'react-icons/md';
 
 const W_OPEN   = 252;
@@ -29,11 +30,10 @@ const roleLabel = r => ({
 }[r] ?? r);
 
 export default function Sidebar() {
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const role = user?.role;
-  // Auto-collapse to the icon rail on narrow viewports; users can still expand manually.
-  const [collapsed, setCollapsed] = useState(() => window.matchMedia('(max-width: 900px)').matches);
-  const [confirmOpen, setConfirmOpen] = useState(false);
+  // Start collapsed if the user prefers it, or auto-collapse on narrow viewports; users can still expand manually.
+  const [collapsed, setCollapsed] = useState(() => getDisplayPrefs().sidebarCollapsed || window.matchMedia('(max-width: 900px)').matches);
   const is = (...roles) => roles.includes(role);
 
   useEffect(() => {
@@ -142,62 +142,12 @@ export default function Sidebar() {
               <Item to="/users"       Icon={MdPeople}   label="Users"       collapsed={collapsed} />
               <Item to="/departments" Icon={MdBusiness} label="Departments" collapsed={collapsed} />
               <Item to="/categories"  Icon={MdCategory} label="Categories"  collapsed={collapsed} />
+              <Item to="/backups"     Icon={MdBackup}   label="Backups"     collapsed={collapsed} />
               <Item to="/audit-logs"  Icon={MdHistory}  label="Audit Logs"  collapsed={collapsed} />
             </Group>
           )}
 
         </nav>
-
-        {/* ── Footer ── */}
-        <div className="sb-footer">
-          <nav className="sb-nav" style={{ padding: 0, marginBottom: 12 }}>
-            <Item to="/profile" Icon={MdPerson} label="Profile Settings" collapsed={collapsed} />
-          </nav>
-          {confirmOpen && (
-            <div style={{
-              background: 'rgba(30,10,10,0.92)',
-              border: '1px solid rgba(239,68,68,.3)',
-              borderRadius: 'var(--radius-md)',
-              padding: '12px 14px',
-              marginBottom: 8,
-            }}>
-              {!collapsed && (
-                <p style={{ fontSize: 11, color: 'rgba(255,255,255,.7)', lineHeight: 1.5, marginBottom: 10 }}>
-                  Are you sure you want to log out? You will need to sign in again to access your account.
-                </p>
-              )}
-              <div style={{ display: 'flex', gap: 6 }}>
-                <button
-                  onClick={() => setConfirmOpen(false)}
-                  style={{
-                    flex: 1, padding: '6px 0', borderRadius: 99,
-                    background: 'rgba(255,255,255,.08)',
-                    border: '1px solid rgba(255,255,255,.14)',
-                    color: 'rgba(255,255,255,.7)',
-                    fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                    fontFamily: "'Montserrat', sans-serif",
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={logout}
-                  style={{
-                    flex: 1, padding: '6px 0', borderRadius: 99,
-                    background: 'rgba(239,68,68,.18)',
-                    border: '1px solid rgba(239,68,68,.35)',
-                    color: '#fca5a5',
-                    fontSize: 11, fontWeight: 600, cursor: 'pointer',
-                    fontFamily: "'Montserrat', sans-serif",
-                  }}
-                >
-                  Sign Out
-                </button>
-              </div>
-            </div>
-          )}
-          <LogoutBtn collapsed={collapsed} active={confirmOpen} onClick={() => setConfirmOpen(v => !v)} />
-        </div>
 
       </aside>
     </>
@@ -245,23 +195,6 @@ function Item({ to, Icon, label, collapsed }) {
         </>
       )}
     </NavLink>
-  );
-}
-
-function LogoutBtn({ collapsed, active, onClick }) {
-  const [hov, setHov] = useState(false);
-  return (
-    <button
-      onClick={onClick}
-      title={collapsed ? 'Sign Out' : undefined}
-      onMouseEnter={() => setHov(true)}
-      onMouseLeave={() => setHov(false)}
-      className={`sb-logout${active ? ' sb-logout--hov' : hov ? ' sb-logout--hov' : ''}`}
-      style={{ justifyContent: collapsed ? 'center' : 'flex-start' }}
-    >
-      <MdLogout size={15} style={{ flexShrink: 0 }} />
-      {!collapsed && <span>Sign Out</span>}
-    </button>
   );
 }
 
@@ -458,26 +391,4 @@ const CSS = `
     box-shadow: 0 0 8px rgba(79,208,122,.8);
   }
 
-  /* ── Footer ── */
-  .sb-footer {
-    padding: 8px 8px 16px; flex-shrink: 0;
-    border-top: 1px solid rgba(255,255,255,.06);
-  }
-
-  .sb-logout {
-    display: flex; align-items: center; gap: 10;
-    padding: 8px 12px; width: 100%; border-radius: 50px;
-    background: transparent;
-    border: 1px solid rgba(255,255,255,.08);
-    color: rgba(255,255,255,.42);
-    font-size: 12.5px; font-weight: 600;
-    cursor: pointer; transition: all .15s;
-    white-space: nowrap; overflow: hidden;
-    font-family: 'Montserrat', sans-serif;
-  }
-  .sb-logout--hov {
-    background: rgba(239,68,68,.14);
-    border-color: rgba(239,68,68,.3);
-    color: #fca5a5;
-  }
 `;

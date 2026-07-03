@@ -2,8 +2,10 @@ import { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { toast } from '../../components/common/Toast';
 import { resetPasswordWithToken } from '../../api/auth';
+import { validatePassword, passwordHint, usePasswordPolicy } from '../../utils/password';
 
 export default function ResetPassword() {
+  const pwPolicy = usePasswordPolicy();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   
@@ -32,8 +34,9 @@ export default function ResetPassword() {
       toast.error('Passwords do not match.');
       return;
     }
-    if (newPassword.length < 8) {
-      toast.error('Password must be at least 8 characters long.');
+    const pwErr = validatePassword(newPassword, pwPolicy);
+    if (pwErr) {
+      toast.error(pwErr);
       return;
     }
 
@@ -138,6 +141,9 @@ export default function ResetPassword() {
                   required
                   disabled={loading}
                 />
+                <p style={{ fontSize: 11, color: 'rgba(255,255,255,.45)', marginTop: 8, lineHeight: 1.5 }}>
+                  {passwordHint(pwPolicy)}
+                </p>
               </div>
 
               <div>

@@ -7,4 +7,4 @@ export const approveRequest = (id, d) => api.patch(`/procurement/${id}/approve`,
 export const generatePO = (id, d) => api.post(`/procurement/${id}/purchase-order`, d);
 export const getPurchaseOrders = () => api.get('/procurement/purchase-orders');
 export const getPurchaseOrder = id => api.get(`/procurement/purchase-orders/${id}`);
-export const confirmDelivery = id => api.patch(`/procurement/purchase-orders/${id}/confirm-delivery`);
+export const confirmDelivery = (id, body = { lines: [] }) => api.patch(`/procurement/purchase-orders/${id}/confirm-delivery`, body);

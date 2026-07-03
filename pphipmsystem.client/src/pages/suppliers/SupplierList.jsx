@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { MdAdd, MdEdit, MdDelete, MdSearch, MdVerified, MdCancel, MdHistory } from 'react-icons/md';
-import { getSuppliers, createSupplier, updateSupplier, deleteSupplier, getSupplierOrders } from '../../api/suppliers';
+import { getSuppliers, createSupplier, updateSupplier, deleteSupplier, getSupplierOrders, getSupplierMetrics } from '../../api/suppliers';
 import Modal from '../../components/common/Modal';
 import { toast } from '../../components/common/Toast';
 import { useAuth } from '../../context/AuthContext';
@@ -9,12 +10,13 @@ const BLANK = { name: '', contactPerson: '', email: '', phone: '', address: '', 
 
 export default function SupplierList() {
   const { user } = useAuth();
+  const location = useLocation();
   const canEdit = ['SuperAdmin', 'HospitalAdministrator', 'ProcurementStaff'].includes(user?.role);
   const canDelete = ['SuperAdmin', 'HospitalAdministrator'].includes(user?.role);
 
   const [suppliers, setSuppliers] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(() => location.state?.search ?? ''); // pre-filled by global search
   const [modal, setModal] = useState(null);
   const [form, setForm] = useState(BLANK);
   const [saving, setSaving] = useState(false);
@@ -22,6 +24,8 @@ export default function SupplierList() {
   const [ordersModal, setOrdersModal] = useState(null);
   const [orders, setOrders] = useState([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
+  // Per-supplier performance figures keyed by supplier id.
+  const [metrics, setMetrics] = useState({});
 
   const load = () => {
     setLoading(true);
@@ -29,6 +33,11 @@ export default function SupplierList() {
   };
 
   useEffect(() => { load(); }, [search]);
+  useEffect(() => {
+    getSupplierMetrics()
+      .then(r => setMetrics(Object.fromEntries(r.data.map(m => [m.supplierId, m]))))
+      .catch(() => {}); // metrics are additive — the table still works without them
+  }, []);
 
   const openCreate = () => { setForm(BLANK); setModal('create'); };
   const openEdit = s => {
@@ -98,12 +107,13 @@ export default function SupplierList() {
                 <th>Accreditation</th>
                 <th>Expiry</th>
                 <th>Total Orders</th>
+                <th>Performance</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {suppliers.length === 0 ? (
-                <tr><td colSpan={8} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>No suppliers found.</td></tr>
+                <tr><td colSpan={9} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>No suppliers found.</td></tr>
               ) : suppliers.map(s => (
                 <tr key={s.id}>
                   <td>
@@ -131,6 +141,25 @@ export default function SupplierList() {
                     >
                       <MdHistory size={13} /> {s.totalOrders}
                     </button>
+                  </td>
+                  <td>
+                    {(() => {
+                      const m = metrics[s.id];
+                      if (!m || m.poCount === 0) return <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>—</span>;
+                      const pct = Math.round((m.deliveredCount / m.poCount) * 100);
+                      return (
+                        <div style={{ fontSize: 12 }}>
+                          <span className={`badge ${pct >= 80 ? 'badge-green' : pct >= 50 ? 'badge-amber' : 'badge-red'}`}>
+                            {pct}% delivered
+                          </span>
+                          {m.avgLeadTimeDays != null && (
+                            <div style={{ color: 'var(--text-muted)', fontSize: 11, marginTop: 3 }}>
+                              ~{m.avgLeadTimeDays} day{m.avgLeadTimeDays === 1 ? '' : 's'} lead time
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </td>
                   <td>
                     <div style={{ display: 'flex', gap: 4 }}>

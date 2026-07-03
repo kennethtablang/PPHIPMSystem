@@ -7,6 +7,7 @@ import {
 import { getNotifications, markRead, markAllRead } from '../../api/notifications';
 import { signalRService } from '../../api/signalrService';
 import { toast } from '../../components/common/Toast';
+import { fmtDateTime } from '../../utils/format';
 
 const TYPE_META = {
   LowStock:                    { icon: MdWarning,      color: '#f59e0b', label: 'Low Stock Alert',          group: 'inventory' },
@@ -217,7 +218,7 @@ export default function NotificationsPage() {
                     </span>
                     <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{timeAgo(n.createdAt)}</span>
                     <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                      · {new Date(n.createdAt).toLocaleString('en-PH')}
+                      · {fmtDateTime(n.createdAt)}
                     </span>
                     {!n.isRead && (
                       <MdCircle size={7} color={meta.color} style={{ marginLeft: 2 }} />

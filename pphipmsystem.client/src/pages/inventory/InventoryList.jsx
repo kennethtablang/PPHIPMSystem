@@ -1,26 +1,45 @@
 import { useEffect, useState } from 'react';
-import { MdAdd, MdEdit, MdDelete, MdSearch, MdWarning } from 'react-icons/md';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { MdAdd, MdEdit, MdDelete, MdSearch, MdWarning, MdFileDownload, MdShoppingCart } from 'react-icons/md';
 import { getItems, createItem, updateItem, deleteItem } from '../../api/inventory';
 import { getCategories } from '../../api/categories';
+import { getSystemSettings } from '../../api/systemSettings';
+import { exportInventorySnapshot } from '../../api/reports';
 import Modal from '../../components/common/Modal';
 import { toast } from '../../components/common/Toast';
+import Pagination, { usePagination } from '../../components/common/Pagination';
 import { useAuth } from '../../context/AuthContext';
 
 const BLANK = { name: '', itemCode: '', description: '', unit: '', categoryId: '', reorderThreshold: 0, expirationWarningDays: 30, preferredForecastMethod: 'MovingAverage', movingAverageWindow: 3, smoothingConstant: 0.3 };
 
 export default function InventoryList() {
   const { user } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
   const canEdit = ['HospitalAdministrator', 'InventoryOfficer'].includes(user?.role);
+  // Matches the ReportsController role guard.
+  const canExport = ['SuperAdmin', 'HospitalAdministrator', 'ProcurementStaff', 'InventoryOfficer'].includes(user?.role);
+  // Roles allowed to create procurement requests (matches ProcurementList.canCreate).
+  const canRequest = ['SuperAdmin', 'HospitalAdministrator', 'DepartmentHead'].includes(user?.role);
+
+  // Restock to roughly twice the reorder threshold — editable in the request form.
+  const suggestedQty = item => Math.max(Math.ceil(item.reorderThreshold * 2 - item.quantityOnHand), 1);
+  const reorderPrefill = list => ({
+    prefillItems: list.map(i => ({ id: i.id, name: i.name, suggestedQty: suggestedQty(i) })),
+  });
 
   const [items, setItems] = useState([]);
   const [cats, setCats] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(() => location.state?.search ?? ''); // pre-filled by global search
   const [catFilter, setCatFilter] = useState('');
   const [lowStockOnly, setLowStockOnly] = useState(false);
   const [modal, setModal] = useState(null); // null | 'create' | item
   const [form, setForm] = useState(BLANK);
   const [saving, setSaving] = useState(false);
+  // Admin-configured defaults for new items (Settings → System); falls back to BLANK's values.
+  const [itemDefaults, setItemDefaults] = useState(null);
+  const pager = usePagination(items);
 
   const load = () => {
     setLoading(true);
@@ -32,9 +51,18 @@ export default function InventoryList() {
   };
 
   useEffect(() => { getCategories().then(r => setCats(r.data)); }, []);
+  useEffect(() => {
+    if (!canEdit) return;
+    getSystemSettings()
+      .then(r => setItemDefaults({
+        reorderThreshold: r.data.defaultReorderThreshold,
+        expirationWarningDays: r.data.defaultExpirationWarningDays,
+      }))
+      .catch(() => {}); // non-fatal — BLANK's built-in defaults still apply
+  }, [canEdit]);
   useEffect(() => { load(); }, [search, catFilter, lowStockOnly]);
 
-  const openCreate = () => { setForm(BLANK); setModal('create'); };
+  const openCreate = () => { setForm({ ...BLANK, ...itemDefaults }); setModal('create'); };
   const openEdit = item => {
     setForm({
       name: item.name, itemCode: item.itemCode ?? '', description: item.description ?? '',
@@ -80,11 +108,21 @@ export default function InventoryList() {
           <h1 className="page-title">Inventory Items</h1>
           <p className="page-subtitle">Manage all hospital supply and pharmaceutical items</p>
         </div>
-        {canEdit && (
-          <button className="btn btn-primary" onClick={openCreate}>
-            <MdAdd size={16} /> Add Item
-          </button>
-        )}
+        <div style={{ display: 'flex', gap: 8 }}>
+          {canExport && (
+            <button
+              className="btn btn-secondary"
+              onClick={() => exportInventorySnapshot().then(() => toast.success('Snapshot downloaded.')).catch(() => toast.error('Failed to export snapshot.'))}
+            >
+              <MdFileDownload size={16} /> Export Snapshot
+            </button>
+          )}
+          {canEdit && (
+            <button className="btn btn-primary" onClick={openCreate}>
+              <MdAdd size={16} /> Add Item
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Filters */}
@@ -101,11 +139,21 @@ export default function InventoryList() {
           <input type="checkbox" checked={lowStockOnly} onChange={e => setLowStockOnly(e.target.checked)} />
           Low Stock Only
         </label>
+        {canRequest && lowStockOnly && items.length > 0 && (
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={() => navigate('/procurement', { state: reorderPrefill(items) })}
+            title="Create one procurement request covering every low-stock item shown"
+          >
+            <MdShoppingCart size={14} /> Request Replenishment ({items.length})
+          </button>
+        )}
       </div>
 
       {loading ? (
         <div className="loading-center"><div className="spinner" /></div>
       ) : (
+        <>
         <div className="table-wrap">
           <table>
             <thead>
@@ -118,13 +166,13 @@ export default function InventoryList() {
                 <th>Reorder At</th>
                 <th>Forecast Method</th>
                 <th>Status</th>
-                {canEdit && <th>Actions</th>}
+                {(canEdit || canRequest) && <th>Actions</th>}
               </tr>
             </thead>
             <tbody>
               {items.length === 0 ? (
                 <tr><td colSpan={9} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>No items found.</td></tr>
-              ) : items.map(item => (
+              ) : pager.pageItems.map(item => (
                 <tr key={item.id}>
                   <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{item.itemCode ?? '—'}</td>
                   <td>
@@ -154,11 +202,25 @@ export default function InventoryList() {
                       <span className="badge badge-red">Not Available</span>
                     )}
                   </td>
-                  {canEdit && (
+                  {(canEdit || canRequest) && (
                     <td>
                       <div style={{ display: 'flex', gap: 4 }}>
-                        <button className="btn btn-ghost btn-icon btn-sm" onClick={() => openEdit(item)} title="Edit"><MdEdit size={15} /></button>
-                        <button className="btn btn-danger btn-icon btn-sm" onClick={() => remove(item.id)} title="Delete"><MdDelete size={15} /></button>
+                        {canRequest && item.isBelowReorder && item.isActive && (
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => navigate('/procurement', { state: reorderPrefill([item]) })}
+                            title="Create a replenishment request for this item"
+                            style={{ fontSize: 11 }}
+                          >
+                            <MdShoppingCart size={13} /> Reorder
+                          </button>
+                        )}
+                        {canEdit && (
+                          <>
+                            <button className="btn btn-ghost btn-icon btn-sm" onClick={() => openEdit(item)} title="Edit"><MdEdit size={15} /></button>
+                            <button className="btn btn-danger btn-icon btn-sm" onClick={() => remove(item.id)} title="Delete"><MdDelete size={15} /></button>
+                          </>
+                        )}
                       </div>
                     </td>
                   )}
@@ -167,6 +229,8 @@ export default function InventoryList() {
             </tbody>
           </table>
         </div>
+        <Pagination {...pager} />
+        </>
       )}
 
       {modal && (

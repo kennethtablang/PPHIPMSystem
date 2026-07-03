@@ -3,6 +3,7 @@ import { MdAdd, MdWarning, MdDeleteForever } from 'react-icons/md';
 import { getAllBatches, getExpiringBatches, createBatch, disposeBatch } from '../../api/batches';
 import { getItems } from '../../api/inventory';
 import Modal from '../../components/common/Modal';
+import SearchSelect from '../../components/common/SearchSelect';
 import { toast } from '../../components/common/Toast';
 import { useAuth } from '../../context/AuthContext';
 
@@ -177,7 +178,7 @@ export default function ItemBatches() {
             </>
           }
         >
-          <div style={{ background: '#fef2f2', border: '1px solid #fca5a5', borderRadius: 12, padding: '12px 16px', fontSize: 13, color: '#b91c1c', marginBottom: 4 }}>
+          <div className="alert alert-danger" style={{ marginBottom: 4, display: 'block' }}>
             <strong>Item:</strong> {disposeModal.itemName}<br />
             <strong>Lot:</strong> {disposeModal.lotNumber ?? 'N/A'} &nbsp;·&nbsp;
             <strong>Quantity to dispose:</strong> {disposeModal.remainingQuantity} units<br />
@@ -226,10 +227,12 @@ export default function ItemBatches() {
         >
           <div className="form-group">
             <label className="form-label">Inventory Item *</label>
-            <select className="form-control" value={form.inventoryItemId} onChange={set('inventoryItemId')} required>
-              <option value="">Select item</option>
-              {items.map(i => <option key={i.id} value={i.id}>{i.name} ({i.unit})</option>)}
-            </select>
+            <SearchSelect
+              value={form.inventoryItemId}
+              onChange={set('inventoryItemId')}
+              placeholder="Search items…"
+              options={items.map(i => ({ value: i.id, label: `${i.name} (${i.unit})` }))}
+            />
           </div>
           <div className="grid-2">
             <div className="form-group">

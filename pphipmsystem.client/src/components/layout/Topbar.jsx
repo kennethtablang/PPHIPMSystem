@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
-import { MdNotifications, MdRefresh, MdLock, MdVisibility, MdVisibilityOff, MdPerson } from 'react-icons/md';
+import { MdNotifications, MdRefresh, MdLogout, MdPerson } from 'react-icons/md';
 import { getUnreadCount } from '../../api/notifications';
 import { signalRService } from '../../api/signalrService';
-import { changePassword } from '../../api/auth';
 import { useAuth } from '../../context/AuthContext';
-import Modal from '../common/Modal';
+import GlobalSearch from './GlobalSearch';
 import { toast } from '../common/Toast';
+import { getAppPrefs } from '../../utils/appPrefs';
+import { playNotificationSound } from '../../utils/sound';
 
 const TITLES = {
   '/dashboard': 'Dashboard',
@@ -23,21 +24,17 @@ const TITLES = {
   '/users': 'User Management',
   '/departments': 'Departments',
   '/categories': 'Categories',
+  '/backups': 'Backup Management',
   '/audit-logs': 'Audit Logs',
 };
 
-const BLANK_PW = { current: '', next: '', confirm: '' };
-
 export default function Topbar() {
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
   const [unread, setUnread] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [pwModal, setPwModal] = useState(false);
-  const [pwForm, setPwForm] = useState(BLANK_PW);
-  const [showPw, setShowPw] = useState({ current: false, next: false, confirm: false });
-  const [saving, setSaving] = useState(false);
+  const [confirmOut, setConfirmOut] = useState(false);
   const menuRef = useRef(null);
 
   const title = TITLES[location.pathname] ?? 'IPMS';
@@ -49,7 +46,13 @@ export default function Topbar() {
 
     const handleNotification = (notif) => {
       setUnread(u => u + 1);
-      
+
+      const prefs = getAppPrefs();
+      if (prefs.notificationSound) playNotificationSound();
+
+      // Respect the user's "notification pop-ups" preference; the badge still updates.
+      if (!prefs.notificationToasts) return;
+
       const type = notif.type;
       const message = `${notif.title}: ${notif.message}`;
 
@@ -66,31 +69,15 @@ export default function Topbar() {
   }, []);
 
   useEffect(() => {
-    const handler = e => { if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false); };
+    const handler = e => {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
+        setMenuOpen(false);
+        setConfirmOut(false);
+      }
+    };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, []);
-
-  const openChangePw = () => { setMenuOpen(false); setPwForm(BLANK_PW); setShowPw({ current: false, next: false, confirm: false }); setPwModal(true); };
-
-  const submitChangePw = async () => {
-    if (!pwForm.current || !pwForm.next || !pwForm.confirm) { toast.error('All fields are required.'); return; }
-    if (pwForm.next !== pwForm.confirm) { toast.error('New passwords do not match.'); return; }
-    if (pwForm.next.length < 8) { toast.error('New password must be at least 8 characters.'); return; }
-    setSaving(true);
-    try {
-      await changePassword({ currentPassword: pwForm.current, newPassword: pwForm.next });
-      toast.success('Password changed successfully.');
-      setPwModal(false);
-    } catch (e) {
-      toast.error(e.response?.data?.message ?? 'Current password is incorrect.');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const setPw = k => e => setPwForm(p => ({ ...p, [k]: e.target.value }));
-  const toggleShow = k => setShowPw(p => ({ ...p, [k]: !p[k] }));
 
   return (
     <>
@@ -113,6 +100,7 @@ export default function Topbar() {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <GlobalSearch />
           <button
             className="btn btn-ghost btn-icon"
             onClick={() => window.location.reload()}
@@ -144,7 +132,7 @@ export default function Topbar() {
           {/* User chip — clickable */}
           <div ref={menuRef} style={{ position: 'relative' }}>
             <button
-              onClick={() => setMenuOpen(v => !v)}
+              onClick={() => { setMenuOpen(v => !v); setConfirmOut(false); }}
               style={{
                 display: 'flex', alignItems: 'center', gap: 8,
                 padding: '6px 14px 6px 6px', borderRadius: 99,
@@ -175,7 +163,7 @@ export default function Topbar() {
             {menuOpen && (
               <div style={{
                 position: 'absolute', top: 'calc(100% + 8px)', right: 0,
-                background: 'rgba(255,255,255,0.96)', backdropFilter: 'blur(20px)',
+                background: 'var(--surface)', backdropFilter: 'blur(20px)',
                 WebkitBackdropFilter: 'blur(20px)',
                 border: '1px solid var(--border)',
                 borderRadius: 'var(--radius-md)',
@@ -204,75 +192,53 @@ export default function Topbar() {
                   <MdPerson size={15} color="var(--green-600)" />
                   Profile Settings
                 </Link>
-                <button
-                  onClick={openChangePw}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 10,
-                    width: '100%', padding: '11px 16px',
-                    background: 'none', border: 'none', cursor: 'pointer',
-                    fontSize: 13, fontWeight: 500, color: 'var(--text-primary)',
-                    transition: 'background .12s', textAlign: 'left',
-                  }}
-                  onMouseEnter={e => e.currentTarget.style.background = 'var(--green-50)'}
-                  onMouseLeave={e => e.currentTarget.style.background = 'none'}
-                >
-                  <MdLock size={15} color="var(--green-600)" />
-                  Change Password
-                </button>
+                {confirmOut ? (
+                  <div style={{ padding: '10px 12px', borderTop: '1px solid var(--border)' }}>
+                    <p style={{ margin: '0 0 8px', fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+                      Sign out of your account?
+                    </p>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button
+                        className="btn btn-secondary btn-sm"
+                        style={{ flex: 1 }}
+                        onClick={() => setConfirmOut(false)}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        className="btn btn-danger btn-sm"
+                        style={{ flex: 1 }}
+                        onClick={logout}
+                      >
+                        Sign Out
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setConfirmOut(true)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 10,
+                      width: '100%', padding: '11px 16px',
+                      background: 'none', border: 'none', cursor: 'pointer',
+                      fontSize: 13, fontWeight: 500, color: '#dc2626',
+                      textAlign: 'left', fontFamily: 'inherit',
+                      borderTop: '1px solid var(--border)',
+                      transition: 'background .12s',
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(239,68,68,.06)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                  >
+                    <MdLogout size={15} />
+                    Sign Out
+                  </button>
+                )}
               </div>
             )}
           </div>
         </div>
       </header>
-
-      {pwModal && (
-        <Modal
-          title="Change Password"
-          onClose={() => setPwModal(false)}
-          footer={
-            <>
-              <button className="btn btn-secondary" onClick={() => setPwModal(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={submitChangePw} disabled={saving}>
-                {saving ? 'Saving…' : 'Change Password'}
-              </button>
-            </>
-          }
-        >
-          <PwField label="Current Password" value={pwForm.current} onChange={setPw('current')} show={showPw.current} toggle={() => toggleShow('current')} />
-          <PwField label="New Password" value={pwForm.next} onChange={setPw('next')} show={showPw.next} toggle={() => toggleShow('next')} hint="Minimum 8 characters" />
-          <PwField label="Confirm New Password" value={pwForm.confirm} onChange={setPw('confirm')} show={showPw.confirm} toggle={() => toggleShow('confirm')} />
-        </Modal>
-      )}
     </>
-  );
-}
-
-function PwField({ label, value, onChange, show, toggle, hint }) {
-  return (
-    <div className="form-group">
-      <label className="form-label">{label} *</label>
-      <div style={{ position: 'relative' }}>
-        <input
-          className="form-control"
-          type={show ? 'text' : 'password'}
-          value={value}
-          onChange={onChange}
-          style={{ paddingRight: 40 }}
-        />
-        <button
-          type="button"
-          onClick={toggle}
-          style={{
-            position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)',
-            background: 'none', border: 'none', cursor: 'pointer',
-            color: 'var(--text-muted)', display: 'flex', alignItems: 'center', padding: 2,
-          }}
-          tabIndex={-1}
-        >
-          {show ? <MdVisibilityOff size={16} /> : <MdVisibility size={16} />}
-        </button>
-      </div>
-      {hint && <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{hint}</div>}
-    </div>
   );
 }

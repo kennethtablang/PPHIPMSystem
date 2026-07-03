@@ -33,7 +33,7 @@ export default function ToastContainer() {
         return (
           <div key={t.id} style={{
             minWidth: 280, maxWidth: 360, padding: '14px 18px',
-            background: '#fff', borderRadius: 'var(--radius-md)',
+            background: 'var(--surface)', borderRadius: 'var(--radius-md)',
             boxShadow: 'var(--shadow-lg)', borderLeft: `4px solid ${COLORS[t.type]}`,
             animation: 'slideInRight .25s ease',
             display: 'flex', alignItems: 'flex-start', gap: 10,

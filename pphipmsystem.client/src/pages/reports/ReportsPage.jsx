@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from 'recharts';
-import { MdBarChart, MdShowChart, MdPieChart, MdPrint } from 'react-icons/md';
-import { getConsumptionReport, getProcurementReport, getForecastAccuracyReport } from '../../api/reports';
+import { MdBarChart, MdShowChart, MdPieChart, MdPrint, MdFileDownload } from 'react-icons/md';
+import { getConsumptionReport, getProcurementReport, getForecastAccuracyReport, exportReportExcel } from '../../api/reports';
 import { toast } from '../../components/common/Toast';
 
 const COLORS = ['#1a6a36', '#2d9b5a', '#3bb870', '#5ece8a', '#82e8a8', '#a7f3c5', '#3b82f6', '#60a5fa', '#f59e0b', '#fcd34d'];
@@ -104,8 +104,26 @@ export default function ReportsPage() {
   });
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   const set = k => e => setParams(p => ({ ...p, [k]: e.target.value }));
+
+  // Same filters the on-screen report used, mapped to the export endpoint.
+  const exportExcel = async () => {
+    const type = tab === 'forecast' ? 'forecast-accuracy' : tab;
+    const p = tab === 'procurement'
+      ? { startDate: params.startDate, endDate: params.endDate }
+      : { year: params.year };
+    setExporting(true);
+    try {
+      await exportReportExcel(type, p);
+      toast.success('Report downloaded.');
+    } catch {
+      toast.error('Failed to export report.');
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const generate = async () => {
     setLoading(true);
@@ -134,9 +152,14 @@ export default function ReportsPage() {
           <p className="page-subtitle">Generate consumption, procurement, and forecast accuracy reports</p>
         </div>
         {data && (
-          <button className="btn btn-secondary" onClick={() => printReport(tab)}>
-            <MdPrint size={16} /> Export / Print
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-primary" onClick={exportExcel} disabled={exporting}>
+              <MdFileDownload size={16} /> {exporting ? 'Exporting…' : 'Export Excel'}
+            </button>
+            <button className="btn btn-secondary" onClick={() => printReport(tab)}>
+              <MdPrint size={16} /> Print / PDF
+            </button>
+          </div>
         )}
       </div>
 

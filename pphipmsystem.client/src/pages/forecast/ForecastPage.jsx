@@ -5,8 +5,10 @@ import { getForecasts, generateForecast, getConsumptionRecords, upsertConsumptio
 import { getItems } from '../../api/inventory';
 import { signalRService } from '../../api/signalrService';
 import { toast } from '../../components/common/Toast';
+import { fmtDateTime } from '../../utils/format';
 import { useAuth } from '../../context/AuthContext';
 import Modal from '../../components/common/Modal';
+import SearchSelect from '../../components/common/SearchSelect';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -179,10 +181,13 @@ export default function ForecastPage() {
       </div>
 
       <div className="filter-bar">
-        <select className="form-control" value={selectedItem} onChange={onSelect} style={{ minWidth: 300 }}>
-          <option value="">Select an inventory item to view forecast</option>
-          {items.map(i => <option key={i.id} value={i.id}>{i.name} ({i.unit})</option>)}
-        </select>
+        <SearchSelect
+          value={selectedItem}
+          onChange={onSelect}
+          placeholder="Search an inventory item to view forecast…"
+          style={{ minWidth: 300 }}
+          options={items.map(i => ({ value: i.id, label: `${i.name} (${i.unit})` }))}
+        />
         {selectedItem && <button className="btn btn-ghost btn-sm" onClick={() => load(selectedItem)}><MdRefresh size={14} /></button>}
       </div>
 
@@ -304,7 +309,7 @@ export default function ForecastPage() {
                           <td>{f.actualQuantity != null ? f.actualQuantity.toFixed(2) : <span style={{ color: 'var(--text-muted)' }}>—</span>}</td>
                           <td>{f.forecastError != null ? f.forecastError.toFixed(2) : <span style={{ color: 'var(--text-muted)' }}>—</span>}</td>
                           <td style={{ color: 'var(--green-700)', fontWeight: 600 }}>{f.suggestedReorderQuantity?.toFixed(2)}</td>
-                          <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{new Date(f.generatedAt).toLocaleString('en-PH')}</td>
+                          <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{fmtDateTime(f.generatedAt)}</td>
                         </tr>
                       ))}
                     </tbody>

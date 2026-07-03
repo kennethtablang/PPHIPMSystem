@@ -39,8 +39,10 @@ export default function Login() {
           navigate('/');
         }
       }
-    } catch {
-      setError(needs2Fa ? 'Invalid or expired verification code.' : 'Invalid username or password, or account is inactive.');
+    } catch (err) {
+      // Surface the server's message (e.g. account lockout) when it has one.
+      setError(err.response?.data?.message
+        ?? (needs2Fa ? 'Invalid or expired verification code.' : 'Invalid username or password, or account is inactive.'));
     } finally {
       setLoading(false);
     }

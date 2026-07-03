@@ -11,6 +11,8 @@ import {
 } from 'react-icons/md';
 import Modal from '../components/common/Modal';
 import { toast } from '../components/common/Toast';
+import { fmtDateTime } from '../utils/format';
+import { getAppPrefs } from '../utils/appPrefs';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer,
   PieChart, Pie, Cell
@@ -132,6 +134,7 @@ export default function Dashboard() {
   return (
     <div>
       {/* Welcome banner */}
+      {getAppPrefs().showWelcomeBanner && (
       <div style={{
         background: 'linear-gradient(135deg, var(--green-900) 0%, var(--green-700) 50%, var(--green-500) 100%)',
         borderRadius: 'var(--radius-lg)', padding: '24px 28px', marginBottom: 24,
@@ -153,6 +156,7 @@ export default function Dashboard() {
           <div style={{ color: '#4fd07a', fontSize: 13, fontWeight: 600, marginTop: 2 }}>● All Systems Operational</div>
         </div>
       </div>
+      )}
 
       {/* Stat cards */}
       <div className="grid-stat" style={{ marginBottom: 24 }}>
@@ -351,7 +355,7 @@ export default function Dashboard() {
                       <td>{t.description}</td>
                       <td>{t.performedBy}</td>
                       <td style={{ color: 'var(--text-muted)', fontSize: 12 }}>
-                        {new Date(t.timestamp).toLocaleString('en-PH')}
+                        {fmtDateTime(t.timestamp)}
                       </td>
                       <td>
                         {REPEATABLE.includes(t.transactionType) && t.inventoryItemId && (

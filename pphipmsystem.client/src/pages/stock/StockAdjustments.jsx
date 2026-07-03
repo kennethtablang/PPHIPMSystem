@@ -3,6 +3,7 @@ import { MdAdd } from 'react-icons/md';
 import { getAdjustments, createAdjustment, approveAdjustment } from '../../api/stockAdjustments';
 import { getItems } from '../../api/inventory';
 import Modal from '../../components/common/Modal';
+import SearchSelect from '../../components/common/SearchSelect';
 import StatusBadge from '../../components/common/StatusBadge';
 import { toast } from '../../components/common/Toast';
 import { useAuth } from '../../context/AuthContext';
@@ -148,10 +149,12 @@ export default function StockAdjustments() {
         >
           <div className="form-group">
             <label className="form-label">Inventory Item *</label>
-            <select className="form-control" value={form.inventoryItemId} onChange={set('inventoryItemId')} required>
-              <option value="">Select item</option>
-              {items.map(i => <option key={i.id} value={i.id}>{i.name} (Current: {i.quantityOnHand} {i.unit})</option>)}
-            </select>
+            <SearchSelect
+              value={form.inventoryItemId}
+              onChange={set('inventoryItemId')}
+              placeholder="Search items…"
+              options={items.map(i => ({ value: i.id, label: i.name, sublabel: `Current: ${i.quantityOnHand} ${i.unit}` }))}
+            />
             {selectedItem && (
               <div style={{ marginTop: 8, padding: '8px 12px', borderRadius: 8, background: 'var(--green-50)', border: '1px solid var(--green-200)', fontSize: 13, display: 'flex', gap: 20 }}>
                 <div><span style={{ color: 'var(--text-muted)' }}>Recorded Qty:</span> <strong>{selectedItem.quantityOnHand} {selectedItem.unit}</strong></div>

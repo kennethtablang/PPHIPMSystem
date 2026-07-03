@@ -64,7 +64,64 @@
 
   --sidebar-width: 240px;
   --topbar-height: 64px;
+
+  --surface: #ffffff;
+  --card-border: rgba(255,255,255,0.6);
+  --card-highlight: rgba(255,255,255,0.7);
 }
+
+/* ── Dark theme (see utils/displayPrefs.js — set via html[data-theme="dark"]) ── */
+html[data-theme="dark"] {
+  --sidebar-bg: linear-gradient(175deg, #04130a 0%, #071d0f 45%, #0b2c16 100%);
+  --page-bg: linear-gradient(140deg, #0a1410 0%, #0c1712 50%, #0a1511 100%);
+  --card-bg: rgba(23,34,28,0.72);
+  --topbar-bg: rgba(13,21,17,0.82);
+  --bg-muted: #16211b;
+  --surface: #18241d;
+  --card-border: rgba(255,255,255,0.08);
+  --card-highlight: rgba(255,255,255,0.04);
+
+  --text-primary: #e7f1ea;
+  --text-secondary: #aac3b4;
+  --text-muted: #7f9a89;
+  --text-inverse: #0a140e;
+
+  --border: #263a2e;
+  --shadow-sm: 0 1px 3px rgba(0,0,0,.45);
+  --shadow-md: 0 4px 12px rgba(0,0,0,.5);
+  --shadow-lg: 0 8px 24px rgba(0,0,0,.6);
+
+  --green-50:  #0f2417;
+  --green-100: #143120;
+}
+
+/* Surfaces that hardcode white in light mode need explicit dark values. */
+html[data-theme="dark"] .modal { background: rgba(24,36,29,0.96); border-color: var(--border); }
+html[data-theme="dark"] .modal-footer { background: rgba(255,255,255,0.03); }
+html[data-theme="dark"] .form-control {
+  background: rgba(255,255,255,0.05); color: var(--text-primary); border-color: var(--border);
+}
+html[data-theme="dark"] tbody tr:hover { background: rgba(255,255,255,0.04); }
+html[data-theme="dark"] .btn-secondary {
+  background: rgba(255,255,255,0.06); color: var(--green-200); border-color: var(--border);
+}
+html[data-theme="dark"] .btn-danger { background: rgba(239,68,68,.12); color: #fca5a5; border-color: rgba(239,68,68,.3); }
+
+/* Badges: swap pastel fills for translucent tints with light text. */
+html[data-theme="dark"] .badge-green  { background: rgba(51,181,96,.16);  color: var(--green-200); }
+html[data-theme="dark"] .badge-red    { background: rgba(239,68,68,.16);  color: #fca5a5; }
+html[data-theme="dark"] .badge-amber  { background: rgba(245,158,11,.16); color: #fcd34d; }
+html[data-theme="dark"] .badge-blue   { background: rgba(59,130,246,.16); color: #93c5fd; }
+html[data-theme="dark"] .badge-purple { background: rgba(139,92,246,.16); color: #c4b5fd; }
+html[data-theme="dark"] .badge-teal   { background: rgba(20,184,166,.16); color: #5eead4; }
+html[data-theme="dark"] .badge-gray   { background: rgba(255,255,255,.08); color: #cbd5cf; }
+
+/* Alerts */
+html[data-theme="dark"] .alert-warning { background: rgba(245,158,11,.12); border-color: rgba(245,158,11,.3); color: #fcd34d; }
+html[data-theme="dark"] .alert-error,
+html[data-theme="dark"] .alert-danger  { background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.3); color: #fca5a5; }
+html[data-theme="dark"] .alert-success { background: rgba(51,181,96,.12); border-color: rgba(51,181,96,.3); color: var(--green-200); }
+html[data-theme="dark"] .alert-info    { background: rgba(59,130,246,.12); border-color: rgba(59,130,246,.3); color: #93c5fd; }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -123,12 +180,12 @@ a { color: inherit; text-decoration: none; }
 
 /* ── Cards ── */
 .card {
-  background: rgba(255,255,255,0.82);
+  background: var(--card-bg);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   border-radius: var(--radius-md);
-  border: 1px solid rgba(255,255,255,0.6);
-  box-shadow: 0 4px 24px rgba(5,46,16,.07), inset 0 1px 0 rgba(255,255,255,.7);
+  border: 1px solid var(--card-border);
+  box-shadow: 0 4px 24px rgba(5,46,16,.07), inset 0 1px 0 var(--card-highlight);
 }
 .card-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
 .card-title { font-size: 15px; font-weight: 600; color: var(--text-primary); }
@@ -247,10 +304,10 @@ textarea.form-control { resize: vertical; min-height: 80px; }
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
   border-radius: var(--radius-md);
-  border: 1px solid rgba(255,255,255,0.6); padding: 20px;
+  border: 1px solid var(--card-border); padding: 20px;
   display: flex; flex-direction: column; gap: 10px;
   position: relative; overflow: hidden;
-  box-shadow: 0 4px 24px rgba(5,46,16,.07), inset 0 1px 0 rgba(255,255,255,.7);
+  box-shadow: 0 4px 24px rgba(5,46,16,.07), inset 0 1px 0 var(--card-highlight);
 }
 .stat-card::before {
   content: ''; position: absolute;
@@ -305,6 +362,49 @@ textarea.form-control { resize: vertical; min-height: 80px; }
 
 /* ── Divider ── */
 .divider { height: 1px; background: var(--border); margin: 4px 0; }
+
+/* ── Settings tabs (vertical, left side) ── */
+.settings-layout { display: flex; align-items: flex-start; gap: 24px; }
+.settings-tabs {
+  display: flex; flex-direction: column; gap: 4px;
+  flex: 0 0 200px; position: sticky; top: 24px;
+}
+.settings-content { flex: 1; min-width: 0; }
+.settings-tab {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%; padding: 11px 16px; border-radius: var(--radius-md);
+  border: none; background: none; cursor: pointer; text-align: left;
+  font-family: inherit; font-size: 13px; font-weight: 600; color: var(--text-muted);
+  border-left: 3px solid transparent;
+  transition: color .15s, background .15s, border-color .15s;
+}
+.settings-tab:hover { color: var(--green-700); background: var(--green-50); }
+.settings-tab.active {
+  color: var(--green-700); background: var(--green-50);
+  border-left-color: var(--green-600);
+}
+
+@media (max-width: 640px) {
+  .settings-layout { flex-direction: column; gap: 16px; }
+  .settings-tabs {
+    flex: none; width: 100%; flex-direction: row; flex-wrap: wrap;
+    position: static;
+  }
+  .settings-tab { width: auto; border-left: none; }
+  .settings-tab.active { border-left: none; }
+}
+
+/* ── Display preferences (see utils/displayPrefs.js) ── */
+html[data-reduce-motion="true"] *,
+html[data-reduce-motion="true"] *::before,
+html[data-reduce-motion="true"] *::after {
+  animation-duration: .001ms !important;
+  animation-delay: 0ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: .001ms !important;
+}
+html[data-density="compact"] tbody td,
+html[data-density="compact"] thead th { padding: 6px 12px; }
 
 /* ── Animations ── */
 @keyframes fadeIn   { from { opacity: 0; } to { opacity: 1; } }

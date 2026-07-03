@@ -3,7 +3,10 @@ import { MdAdd, MdTrendingUp } from 'react-icons/md';
 import { getMovements, createMovement } from '../../api/stockMovements';
 import { getItems } from '../../api/inventory';
 import Modal from '../../components/common/Modal';
+import SearchSelect from '../../components/common/SearchSelect';
 import { toast } from '../../components/common/Toast';
+import Pagination, { usePagination } from '../../components/common/Pagination';
+import { fmtDateTime } from '../../utils/format';
 import { useAuth } from '../../context/AuthContext';
 
 const TYPES = ['Receipt', 'Issuance', 'Return', 'Disposal'];
@@ -23,6 +26,7 @@ export default function StockMovements() {
   const [modal, setModal] = useState(false);
   const [form, setForm] = useState(BLANK);
   const [saving, setSaving] = useState(false);
+  const pager = usePagination(movements);
 
   const load = () => {
     setLoading(true);
@@ -99,10 +103,13 @@ export default function StockMovements() {
 
       {/* Filters */}
       <div className="filter-bar" style={{ flexWrap: 'wrap' }}>
-        <select className="form-control" value={itemFilter} onChange={e => setItemFilter(e.target.value)} style={{ minWidth: 220 }}>
-          <option value="">All Items</option>
-          {items.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
-        </select>
+        <SearchSelect
+          value={itemFilter}
+          onChange={e => setItemFilter(e.target.value)}
+          placeholder="All items — search to filter…"
+          style={{ minWidth: 260 }}
+          options={items.map(i => ({ value: i.id, label: i.name, sublabel: `${i.quantityOnHand} ${i.unit} in stock` }))}
+        />
         <div style={{ display: 'flex', gap: 6 }}>
           {['', ...TYPES].map(t => (
             <button
@@ -117,6 +124,7 @@ export default function StockMovements() {
       {loading ? (
         <div className="loading-center"><div className="spinner" /></div>
       ) : (
+        <>
         <div className="table-wrap">
           <table>
             <thead>
@@ -134,7 +142,7 @@ export default function StockMovements() {
             <tbody>
               {movements.length === 0 ? (
                 <tr><td colSpan={8} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>No movements found.</td></tr>
-              ) : movements.map(m => (
+              ) : pager.pageItems.map(m => (
                 <tr key={m.id}>
                   <td><span className={`badge badge-${TYPE_COLOR[m.movementType] ?? 'gray'}`}>{m.movementType}</span></td>
                   <td>
@@ -154,12 +162,14 @@ export default function StockMovements() {
                     {m.remarks ?? '—'}
                   </td>
                   <td style={{ fontSize: 13 }}>{m.performedByFullName}</td>
-                  <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{new Date(m.movementDate).toLocaleString('en-PH')}</td>
+                  <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{fmtDateTime(m.movementDate)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+        <Pagination {...pager} />
+        </>
       )}
 
       {modal && (
@@ -175,12 +185,16 @@ export default function StockMovements() {
         >
           <div className="form-group">
             <label className="form-label">Inventory Item *</label>
-            <select className="form-control" value={form.inventoryItemId} onChange={set('inventoryItemId')} required>
-              <option value="">Select item</option>
-              {items.map(i => (
-                <option key={i.id} value={i.id}>{i.name} — {i.quantityOnHand > 0 ? 'Available' : 'Not Available'} ({i.quantityOnHand} {i.unit})</option>
-              ))}
-            </select>
+            <SearchSelect
+              value={form.inventoryItemId}
+              onChange={set('inventoryItemId')}
+              placeholder="Search items…"
+              options={items.map(i => ({
+                value: i.id,
+                label: i.name,
+                sublabel: `${i.quantityOnHand > 0 ? 'Available' : 'Not Available'} — ${i.quantityOnHand} ${i.unit}`,
+              }))}
+            />
             {/* Live stock card */}
             {selectedItem && (
               <div style={{

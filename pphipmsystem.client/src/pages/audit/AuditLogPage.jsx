@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react';
 import { MdSearch, MdFilterList, MdDownload } from 'react-icons/md';
 import { getAuditLogs } from '../../api/auditLogs';
 import { toast } from '../../components/common/Toast';
+import Pagination, { usePagination } from '../../components/common/Pagination';
+import { fmtDateTime } from '../../utils/format';
 
 function exportCSV(logs) {
   const headers = ['Timestamp', 'User', 'Username', 'Action', 'Table', 'Record ID', 'Details', 'IP Address'];
   const rows = logs.map(l => [
-    new Date(l.timestamp).toLocaleString('en-PH'),
+    fmtDateTime(l.timestamp),
     l.userFullName ?? '',
     l.username ?? '',
     l.action ?? '',
@@ -51,6 +53,7 @@ export default function AuditLogPage() {
     endDate: now.toISOString().split('T')[0],
   });
   const [applied, setApplied] = useState(null);
+  const pager = usePagination(logs);
 
   const load = async (f) => {
     setLoading(true);
@@ -129,9 +132,9 @@ export default function AuditLogPage() {
               <tbody>
                 {logs.length === 0 ? (
                   <tr><td colSpan={7} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>No audit records found for the selected filters.</td></tr>
-                ) : logs.map(l => (
+                ) : pager.pageItems.map(l => (
                   <tr key={l.id}>
-                    <td style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{new Date(l.timestamp).toLocaleString('en-PH')}</td>
+                    <td style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{fmtDateTime(l.timestamp)}</td>
                     <td>
                       <div style={{ fontSize: 13, fontWeight: 500 }}>{l.userFullName ?? '—'}</div>
                       {l.username && <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'monospace' }}>{l.username}</div>}
@@ -148,6 +151,7 @@ export default function AuditLogPage() {
               </tbody>
             </table>
           </div>
+          <Pagination {...pager} />
         </>
       )}
     </div>

@@ -4,8 +4,10 @@ import { MdAdd, MdVisibility } from 'react-icons/md';
 import { getRequests, createRequest, approveRequest, submitRequest } from '../../api/procurement';
 import { getItems } from '../../api/inventory';
 import Modal from '../../components/common/Modal';
+import SearchSelect from '../../components/common/SearchSelect';
 import StatusBadge from '../../components/common/StatusBadge';
 import { toast } from '../../components/common/Toast';
+import { fmtDateTime } from '../../utils/format';
 import { useAuth } from '../../context/AuthContext';
 
 const BLANK_FORM = { justification: '', items: [{ inventoryItemId: '', quantityRequested: '', estimatedUnitCost: '', remarks: '' }] };
@@ -36,17 +38,27 @@ export default function ProcurementList() {
   useEffect(() => { getItems().then(r => setItems(r.data)); }, []);
   useEffect(() => { load(); }, [statusFilter]);
 
-  // FR-3.4: pre-fill from Dashboard "Create PR" navigation
+  // FR-3.4: pre-fill from Dashboard / Inventory "reorder" navigation.
+  // Accepts a single item (prefillItem) or a batch (prefillItems with suggested quantities).
   useEffect(() => {
-    const prefill = location.state?.prefillItem;
-    if (prefill && canCreate) {
-      setForm({
-        justification: `Reorder request for low-stock item: ${prefill.name}`,
-        items: [{ inventoryItemId: String(prefill.id), quantityRequested: '', estimatedUnitCost: '', remarks: `Low stock alert — ${prefill.name}` }],
-      });
-      setCreateModal(true);
-      navigate(location.pathname, { replace: true, state: null }); // clear state so refresh doesn't re-open
-    }
+    const single = location.state?.prefillItem;
+    const many = location.state?.prefillItems;
+    if (!canCreate || (!single && !many?.length)) return;
+
+    const lines = (many ?? [single]).map(p => ({
+      inventoryItemId: String(p.id),
+      quantityRequested: p.suggestedQty ? String(p.suggestedQty) : '',
+      estimatedUnitCost: '',
+      remarks: `Low stock alert — ${p.name}`,
+    }));
+    setForm({
+      justification: many?.length > 1
+        ? `Replenishment request for ${many.length} low-stock items.`
+        : `Reorder request for low-stock item: ${(many?.[0] ?? single).name}`,
+      items: lines,
+    });
+    setCreateModal(true);
+    navigate(location.pathname, { replace: true, state: null }); // clear state so refresh doesn't re-open
   }, [location.state]);
 
   const addLine = () => setForm(p => ({ ...p, items: [...p.items, { inventoryItemId: '', quantityRequested: '', estimatedUnitCost: '', remarks: '' }] }));
@@ -222,14 +234,16 @@ export default function ProcurementList() {
                 <div key={i} style={{ display: 'grid', gridTemplateColumns: isDeptHead ? '2fr 1.2fr 2fr auto' : '2fr 1fr 1fr 2fr auto', gap: 8, marginBottom: 8, alignItems: 'end' }}>
                   <div className="form-group" style={{ margin: 0 }}>
                     {i === 0 && <label className="form-label">Item</label>}
-                    <select className="form-control" value={line.inventoryItemId} onChange={setLine(i, 'inventoryItemId')} required>
-                      <option value="">Select item</option>
-                      {items.map(it => (
-                        <option key={it.id} value={it.id}>
-                          {it.name} ({it.unit}) — {it.quantityOnHand > 0 ? 'Available' : 'Not Available'} ({it.quantityOnHand} in stock)
-                        </option>
-                      ))}
-                    </select>
+                    <SearchSelect
+                      value={line.inventoryItemId}
+                      onChange={setLine(i, 'inventoryItemId')}
+                      placeholder="Search items…"
+                      options={items.map(it => ({
+                        value: it.id,
+                        label: `${it.name} (${it.unit})`,
+                        sublabel: `${it.quantityOnHand > 0 ? 'Available' : 'Not Available'} — ${it.quantityOnHand} in stock`,
+                      }))}
+                    />
                   </div>
                   <div className="form-group" style={{ margin: 0 }}>
                     {i === 0 && <label className="form-label">Qty</label>}
@@ -299,7 +313,7 @@ export default function ProcurementList() {
                 <div key={a.id} style={{ padding: '8px 12px', background: 'var(--green-50)', borderRadius: 'var(--radius-sm)', marginTop: 6, fontSize: 13 }}>
                   <strong>{a.approverFullName}</strong> ({a.approverRole}) — <span className={`badge badge-${a.actionName === 'Approved' ? 'green' : a.actionName === 'Rejected' ? 'red' : 'amber'}`}>{a.actionName}</span>
                   {a.remarks && <div style={{ color: 'var(--text-muted)', marginTop: 2 }}>{a.remarks}</div>}
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{new Date(a.actedAt).toLocaleString('en-PH')}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{fmtDateTime(a.actedAt)}</div>
                 </div>
               ))}
             </div>

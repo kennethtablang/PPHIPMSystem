@@ -31,6 +31,10 @@ export default function PurchaseOrders() {
   const [genModal, setGenModal] = useState(false);
   const [genForm, setGenForm] = useState({ requestId: '', supplierId: '', itemCosts: [] });
   const [saving, setSaving] = useState(false);
+  // Delivery confirmation modal: PO detail + per-line lot/expiry inputs.
+  const [deliverModal, setDeliverModal] = useState(null);
+  const [deliverLines, setDeliverLines] = useState([]);
+  const [delivering, setDelivering] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -71,10 +75,41 @@ export default function PurchaseOrders() {
     finally { setSaving(false); }
   };
 
-  const deliver = async id => {
-    if (!confirm('Confirm delivery? Stock quantities will be updated.')) return;
-    try { await confirmDelivery(id); toast.success('Delivery confirmed and stock updated.'); load(); }
-    catch { toast.error('Failed to confirm delivery.'); }
+  const openDeliver = async id => {
+    try {
+      const { data } = await getPurchaseOrder(id);
+      setDeliverLines(data.items.map(i => ({
+        purchaseOrderItemId: i.id, itemName: i.itemName, unit: i.unit,
+        quantityOrdered: i.quantityOrdered, lotNumber: '', expirationDate: '',
+      })));
+      setDeliverModal(data);
+    } catch { toast.error('Failed to load purchase order.'); }
+  };
+
+  const setDeliverLine = (i, k) => e => setDeliverLines(lines => {
+    const next = [...lines];
+    next[i] = { ...next[i], [k]: e.target.value };
+    return next;
+  });
+
+  const deliver = async () => {
+    setDelivering(true);
+    try {
+      await confirmDelivery(deliverModal.id, {
+        lines: deliverLines.map(l => ({
+          purchaseOrderItemId: l.purchaseOrderItemId,
+          lotNumber: l.lotNumber || null,
+          expirationDate: l.expirationDate || null,
+        })),
+      });
+      toast.success('Delivery confirmed — stock updated and batches recorded.');
+      setDeliverModal(null);
+      load();
+    } catch (e) {
+      toast.error(e.response?.data?.message ?? 'Failed to confirm delivery.');
+    } finally {
+      setDelivering(false);
+    }
   };
 
   const printPO = () => {
@@ -185,7 +220,7 @@ export default function PurchaseOrders() {
                         <MdVisibility size={14} /> View
                       </button>
                       {canDeliver && !po.isDelivered && (
-                        <button className="btn btn-primary btn-sm" onClick={() => deliver(po.id)}>
+                        <button className="btn btn-primary btn-sm" onClick={() => openDeliver(po.id)}>
                           <MdLocalShipping size={14} /> Deliver
                         </button>
                       )}
@@ -283,6 +318,44 @@ export default function PurchaseOrders() {
                 </tbody>
               </table>
             </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Confirm Delivery Modal — capture lot/expiry so batches are recorded */}
+      {deliverModal && (
+        <Modal title={`Confirm Delivery: ${deliverModal.poNumber}`} onClose={() => setDeliverModal(null)} size="modal-lg"
+          footer={
+            <>
+              <button className="btn btn-secondary" onClick={() => setDeliverModal(null)}>Cancel</button>
+              <button className="btn btn-primary" onClick={deliver} disabled={delivering}>
+                <MdLocalShipping size={16} /> {delivering ? 'Confirming…' : 'Confirm Delivery'}
+              </button>
+            </>
+          }
+        >
+          <div className="alert alert-info">
+            Stock will be added and a batch recorded for each line. Enter the lot number and
+            expiration date from the physical delivery — leave blank if not applicable.
+          </div>
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Item</th><th>Qty</th><th>Lot / Batch No.</th><th>Expiration Date</th></tr></thead>
+              <tbody>
+                {deliverLines.map((l, i) => (
+                  <tr key={l.purchaseOrderItemId}>
+                    <td>{l.itemName} <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>({l.unit})</span></td>
+                    <td style={{ fontWeight: 600 }}>{l.quantityOrdered}</td>
+                    <td>
+                      <input className="form-control" value={l.lotNumber} onChange={setDeliverLine(i, 'lotNumber')} placeholder="e.g. LOT-2026-001" maxLength={100} />
+                    </td>
+                    <td>
+                      <input className="form-control" type="date" value={l.expirationDate} onChange={setDeliverLine(i, 'expirationDate')} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </Modal>
       )}
