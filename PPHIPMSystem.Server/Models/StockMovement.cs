@@ -32,4 +32,19 @@ public class StockMovement
     public PurchaseOrder? PurchaseOrder { get; set; }
 
     public DateTime MovementDate { get; set; } = DateTime.UtcNow;
+
+    // Void tracking. A voided movement keeps its ledger row but is flagged and
+    // neutralised by a compensating reversal movement (see ReversalOfMovementId).
+    public bool IsVoided { get; set; }
+    public DateTime? VoidedAt { get; set; }
+    public string? VoidedByUserId { get; set; }
+    public ApplicationUser? VoidedByUser { get; set; }
+
+    [MaxLength(500)]
+    public string? VoidReason { get; set; }
+
+    // Set on the compensating entry created by a void; points at the movement
+    // it reverses. Non-null identifies this row as a reversal, not a real movement.
+    public int? ReversalOfMovementId { get; set; }
+    public StockMovement? ReversalOfMovement { get; set; }
 }

@@ -86,6 +86,16 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
              .WithMany(u => u.StockMovements)
              .HasForeignKey(m => m.PerformedByUserId)
              .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasOne(m => m.VoidedByUser)
+             .WithMany()
+             .HasForeignKey(m => m.VoidedByUserId)
+             .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasOne(m => m.ReversalOfMovement)
+             .WithMany()
+             .HasForeignKey(m => m.ReversalOfMovementId)
+             .OnDelete(DeleteBehavior.Restrict);
         });
 
         builder.Entity<PurchaseOrder>(e =>

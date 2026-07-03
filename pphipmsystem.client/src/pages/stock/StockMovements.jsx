@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { MdAdd, MdTrendingUp } from 'react-icons/md';
-import { getMovements, createMovement } from '../../api/stockMovements';
+import { MdAdd, MdTrendingUp, MdUndo } from 'react-icons/md';
+import { getMovements, createMovement, voidMovement } from '../../api/stockMovements';
 import { getItems } from '../../api/inventory';
 import Modal from '../../components/common/Modal';
 import SearchSelect from '../../components/common/SearchSelect';
@@ -26,6 +26,9 @@ export default function StockMovements() {
   const [modal, setModal] = useState(false);
   const [form, setForm] = useState(BLANK);
   const [saving, setSaving] = useState(false);
+  const [voidTarget, setVoidTarget] = useState(null);
+  const [voidReason, setVoidReason] = useState('');
+  const [voiding, setVoiding] = useState(false);
   const pager = usePagination(movements);
 
   const load = () => {
@@ -53,6 +56,24 @@ export default function StockMovements() {
     } finally { setSaving(false); }
   };
 
+  const submitVoid = async () => {
+    if (!voidReason.trim()) { toast.error('A reason is required to void a movement.'); return; }
+    setVoiding(true);
+    try {
+      await voidMovement(voidTarget.id, voidReason.trim());
+      toast.success('Movement voided and reversed.');
+      setVoidTarget(null);
+      setVoidReason('');
+      load();
+    } catch (e) {
+      toast.error(e.response?.data?.message ?? 'Failed to void movement.');
+    } finally { setVoiding(false); }
+  };
+
+  // A movement can be voided once, isn't itself a reversal, and isn't PO-linked
+  // (those are corrected through the delivery flow).
+  const canVoid = m => canCreate && !m.isVoided && !m.isReversal && !m.purchaseOrderId;
+
   // Selected item for preview
   const selectedItem = form.inventoryItemId ? items.find(i => i.id === +form.inventoryItemId) : null;
   const isOutbound = ['Issuance', 'Disposal'].includes(form.movementType);
@@ -62,9 +83,11 @@ export default function StockMovements() {
       : selectedItem.quantityOnHand + +form.quantity
     : null;
 
-  // Summaries
-  const totalReceipts = movements.filter(m => m.movementType === 'Receipt').reduce((s, m) => s + m.quantity, 0);
-  const totalIssuances = movements.filter(m => m.movementType === 'Issuance').reduce((s, m) => s + m.quantity, 0);
+  // Summaries — exclude voided originals and their reversals so the totals
+  // reflect net stock activity rather than double-counting corrections.
+  const effective = movements.filter(m => !m.isVoided && !m.isReversal);
+  const totalReceipts = effective.filter(m => m.movementType === 'Receipt').reduce((s, m) => s + m.quantity, 0);
+  const totalIssuances = effective.filter(m => m.movementType === 'Issuance').reduce((s, m) => s + m.quantity, 0);
 
   return (
     <div>
@@ -96,7 +119,7 @@ export default function StockMovements() {
           <div className="stat-label">Units Issued</div>
         </div>
         <div className="stat-card teal">
-          <div className="stat-value">{movements.filter(m => m.movementType === 'Disposal').length}</div>
+          <div className="stat-value">{effective.filter(m => m.movementType === 'Disposal').length}</div>
           <div className="stat-label">Disposal Records</div>
         </div>
       </div>
@@ -137,34 +160,56 @@ export default function StockMovements() {
                 <th>Remarks</th>
                 <th>Performed By</th>
                 <th>Date & Time</th>
+                {canCreate && <th />}
               </tr>
             </thead>
             <tbody>
               {movements.length === 0 ? (
-                <tr><td colSpan={8} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>No movements found.</td></tr>
-              ) : pager.pageItems.map(m => (
-                <tr key={m.id}>
-                  <td><span className={`badge badge-${TYPE_COLOR[m.movementType] ?? 'gray'}`}>{m.movementType}</span></td>
+                <tr><td colSpan={canCreate ? 9 : 8} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>No movements found.</td></tr>
+              ) : pager.pageItems.map(m => {
+                // Direction is derived from the actual before/after delta so that
+                // reversals (which keep the original type) show the correct sign.
+                const delta = m.quantityAfterMovement - m.quantityBeforeMovement;
+                return (
+                <tr key={m.id} style={m.isVoided ? { opacity: 0.55 } : undefined}>
                   <td>
-                    <div style={{ fontWeight: 500 }}>{m.itemName}</div>
+                    <span className={`badge badge-${TYPE_COLOR[m.movementType] ?? 'gray'}`}>{m.movementType}</span>
+                    {m.isReversal && <span className="badge badge-gray" style={{ marginLeft: 4 }}>Reversal</span>}
+                    {m.isVoided && <span className="badge badge-red" style={{ marginLeft: 4 }}>Voided</span>}
+                  </td>
+                  <td>
+                    <div style={{ fontWeight: 500, textDecoration: m.isVoided ? 'line-through' : undefined }}>{m.itemName}</div>
                     {m.itemCode && <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'monospace' }}>{m.itemCode}</div>}
                   </td>
                   <td style={{ textAlign: 'right', fontWeight: 700 }}>
-                    <span style={{ color: ['Issuance', 'Disposal'].includes(m.movementType) ? '#dc2626' : '#059669' }}>
-                      {['Issuance', 'Disposal'].includes(m.movementType) ? '−' : '+'}{m.quantity}
+                    <span style={{ color: delta < 0 ? '#dc2626' : '#059669' }}>
+                      {delta < 0 ? '−' : '+'}{m.quantity}
                     </span>
                   </td>
                   <td style={{ textAlign: 'right', color: 'var(--text-muted)' }}>{m.quantityBeforeMovement}</td>
                   <td style={{ textAlign: 'right', fontWeight: 600, color: m.quantityAfterMovement < m.quantityBeforeMovement ? '#dc2626' : '#059669' }}>
                     {m.quantityAfterMovement}
                   </td>
-                  <td style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-muted)', fontSize: 12 }}>
+                  <td style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-muted)', fontSize: 12 }}
+                      title={m.isVoided ? `Voided by ${m.voidedByFullName}: ${m.voidReason}` : (m.remarks ?? '')}>
                     {m.remarks ?? '—'}
                   </td>
                   <td style={{ fontSize: 13 }}>{m.performedByFullName}</td>
                   <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{fmtDateTime(m.movementDate)}</td>
+                  {canCreate && (
+                    <td style={{ textAlign: 'right' }}>
+                      {canVoid(m) && (
+                        <button
+                          className="btn btn-sm btn-secondary"
+                          title="Void this movement"
+                          onClick={() => { setVoidTarget(m); setVoidReason(''); }}
+                        ><MdUndo size={14} /> Void</button>
+                      )}
+                    </td>
+                  )}
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -237,6 +282,41 @@ export default function StockMovements() {
               This movement will <strong>decrease</strong> the item's quantity on hand.
             </div>
           )}
+        </Modal>
+      )}
+
+      {voidTarget && (
+        <Modal
+          title="Void Stock Movement"
+          onClose={() => setVoidTarget(null)}
+          footer={
+            <>
+              <button className="btn btn-secondary" onClick={() => setVoidTarget(null)}>Cancel</button>
+              <button className="btn btn-danger" onClick={submitVoid} disabled={voiding}>{voiding ? 'Voiding…' : 'Void Movement'}</button>
+            </>
+          }
+        >
+          <div className="alert alert-warning">
+            This posts a compensating entry that reverses the movement's effect on stock
+            {['Issuance', 'Disposal'].includes(voidTarget.movementType) ? ' (restoring batch quantities)' : ''}.
+            The original stays on record, marked as voided.
+          </div>
+          <div style={{ margin: '12px 0', fontSize: 13 }}>
+            <div><span style={{ color: 'var(--text-muted)' }}>Type:</span> <strong>{voidTarget.movementType}</strong></div>
+            <div><span style={{ color: 'var(--text-muted)' }}>Item:</span> <strong>{voidTarget.itemName}</strong></div>
+            <div><span style={{ color: 'var(--text-muted)' }}>Quantity:</span> <strong>{voidTarget.quantity}</strong></div>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Reason for voiding *</label>
+            <textarea
+              className="form-control"
+              value={voidReason}
+              onChange={e => setVoidReason(e.target.value)}
+              rows={3}
+              maxLength={500}
+              placeholder="e.g. Wrong item selected, duplicate entry…"
+            />
+          </div>
         </Modal>
       )}
     </div>

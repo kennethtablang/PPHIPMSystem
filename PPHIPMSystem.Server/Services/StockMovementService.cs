@@ -29,6 +29,7 @@ public class StockMovementService : IStockMovementService
             .Include(m => m.InventoryItem)
             .Include(m => m.PerformedByUser)
             .Include(m => m.PurchaseOrder)
+            .Include(m => m.VoidedByUser)
             .AsQueryable();
 
         if (itemId.HasValue) query = query.Where(m => m.InventoryItemId == itemId.Value);
@@ -128,6 +129,114 @@ public class StockMovementService : IStockMovementService
         await _db.Entry(movement).Reference(m => m.InventoryItem).LoadAsync();
         await _db.Entry(movement).Reference(m => m.PerformedByUser).LoadAsync();
         return _mapper.Map<StockMovementDto>(movement);
+    }
+
+    public async Task<StockMovementDto> VoidAsync(int movementId, string reason, string userId)
+    {
+        var original = await _db.StockMovements
+            .Include(m => m.InventoryItem)
+            .FirstOrDefaultAsync(m => m.Id == movementId)
+            ?? throw new InvalidOperationException("Stock movement not found.");
+
+        if (original.IsVoided)
+            throw new InvalidOperationException("This movement has already been voided.");
+        if (original.ReversalOfMovementId.HasValue)
+            throw new InvalidOperationException("A reversal entry cannot itself be voided.");
+        if (original.PurchaseOrderId.HasValue)
+            throw new InvalidOperationException(
+                "PO-linked movements can't be voided here — correct them through the delivery flow.");
+
+        var item = original.InventoryItem;
+        var qty = original.Quantity;
+        var before = item.QuantityOnHand;
+        decimal after;
+
+        switch (original.MovementType)
+        {
+            case StockMovementType.Receipt:
+            case StockMovementType.Return:
+                // Original added stock; reversing removes it. Guard against the
+                // stock having since been drawn down below what we must claw back.
+                if (qty > before)
+                    throw new InvalidOperationException(
+                        "Can't void: on-hand stock has since dropped below the quantity to reverse.");
+                after = before - qty;
+                break;
+            case StockMovementType.Issuance:
+            case StockMovementType.Disposal:
+                // Original removed stock and consumed batches; reversing restores both.
+                after = before + qty;
+                await RestoreBatchesFefoAsync(original.InventoryItemId, qty);
+                break;
+            default:
+                throw new InvalidOperationException("This movement type can't be voided.");
+        }
+
+        item.QuantityOnHand = after;
+        item.UpdatedAt = DateTime.UtcNow;
+
+        var now = DateTime.UtcNow;
+        original.IsVoided = true;
+        original.VoidedAt = now;
+        original.VoidedByUserId = userId;
+        original.VoidReason = reason;
+
+        var reversal = new StockMovement
+        {
+            InventoryItemId = original.InventoryItemId,
+            MovementType = original.MovementType,
+            Quantity = qty,
+            QuantityBeforeMovement = before,
+            QuantityAfterMovement = after,
+            Remarks = $"Void of movement #{original.Id}. Reason: {reason}",
+            PerformedByUserId = userId,
+            ReversalOfMovementId = original.Id,
+            MovementDate = now
+        };
+        _db.StockMovements.Add(reversal);
+
+        // Undo the consumption an issuance recorded, against the month it landed in.
+        if (original.MovementType == StockMovementType.Issuance)
+        {
+            var (yr, mo) = (original.MovementDate.Year, original.MovementDate.Month);
+            var record = await _db.ConsumptionRecords.FirstOrDefaultAsync(c =>
+                c.InventoryItemId == original.InventoryItemId && c.Year == yr && c.Month == mo);
+            if (record is not null)
+                record.QuantityConsumed = Math.Max(0, record.QuantityConsumed - qty);
+        }
+
+        await _db.SaveChangesAsync();
+
+        await _audit.LogAsync(userId, "StockMovement_Void", "StockMovement", original.Id,
+            $"Item: {item.Name}, Qty: {qty}, Reason: {reason}");
+        await _notifications.BroadcastStockChangedAsync();
+
+        await _db.Entry(reversal).Reference(m => m.InventoryItem).LoadAsync();
+        await _db.Entry(reversal).Reference(m => m.PerformedByUser).LoadAsync();
+        return _mapper.Map<StockMovementDto>(reversal);
+    }
+
+    // Reverse of ConsumeBatchesFefoAsync: put voided stock back onto the batches
+    // it was most likely drawn from — earliest-expiring first, never past a
+    // batch's original received quantity. Any surplus with no batch to hold it
+    // simply lifts QuantityOnHand (mirroring pre-batch stock on the way out).
+    private async Task RestoreBatchesFefoAsync(int inventoryItemId, decimal quantity)
+    {
+        var batches = await _db.ItemBatches
+            .Where(b => b.InventoryItemId == inventoryItemId && b.RemainingQuantity < b.Quantity)
+            .OrderBy(b => b.ExpirationDate == null)   // dated batches first
+            .ThenBy(b => b.ExpirationDate)
+            .ThenBy(b => b.ReceivedDate)
+            .ToListAsync();
+
+        var remaining = quantity;
+        foreach (var batch in batches)
+        {
+            if (remaining <= 0) break;
+            var restore = Math.Min(batch.Quantity - batch.RemainingQuantity, remaining);
+            batch.RemainingQuantity += restore;
+            remaining -= restore;
+        }
     }
 
     // FEFO (First-Expire-First-Out): consume issued/disposed stock from the

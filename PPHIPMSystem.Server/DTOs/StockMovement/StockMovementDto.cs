@@ -19,4 +19,11 @@ public class StockMovementDto
     public int? PurchaseOrderId { get; set; }
     public string? PONumber { get; set; }
     public DateTime MovementDate { get; set; }
+
+    public bool IsVoided { get; set; }
+    public DateTime? VoidedAt { get; set; }
+    public string? VoidReason { get; set; }
+    public string? VoidedByFullName { get; set; }
+    public int? ReversalOfMovementId { get; set; }
+    public bool IsReversal => ReversalOfMovementId.HasValue;
 }

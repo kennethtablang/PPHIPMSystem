@@ -6,4 +6,5 @@ public interface IStockMovementService
 {
     Task<IEnumerable<StockMovementDto>> GetAllAsync(int? itemId, DateTime? from, DateTime? to);
     Task<StockMovementDto> CreateAsync(CreateStockMovementDto dto, string userId);
+    Task<StockMovementDto> VoidAsync(int movementId, string reason, string userId);
 }

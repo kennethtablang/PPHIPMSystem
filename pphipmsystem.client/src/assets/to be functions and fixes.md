@@ -14,7 +14,11 @@ Effort: **S** (hours) · **M** (days) · **L** (a week or more).
 > ✅ #9 (partial deliveries), ✅ #1 (bulk item import), ✅ F2 (retention cleanup),
 > ✅ #13 (monthly summary emails), ✅ #15 (forecast anomaly alerts), ✅ #16 (live
 > dashboard), ✅ #21 (announcement scheduling), ✅ #22 (search keyboard), ✅ #23 (health).
-> Still open: #2 cycle counts, #3 dept transfers, #5 valuation, #6 void movements,
+>
+> **Batch 3 (post-order-of-attack):** ✅ #6 (void / reverse stock movement — a
+> voided movement keeps its ledger row, is flagged, and is neutralised by a
+> compensating reversal entry that restores batch quantities and consumption records).
+> Still open: #2 cycle counts, #3 dept transfers, #5 valuation,
 > #3 bulk expired disposal, #11 attachments, #12 RIS forms, #17 TOTP 2FA,
 > #19 refresh tokens, #20 backup restore UI, F4 concurrency tokens, F5 server-side
 > pagination, F6 lint cleanup, F7 search a11y (partially covered by #22).
@@ -28,7 +32,6 @@ Effort: **S** (hours) · **M** (days) · **L** (a week or more).
 | # | Function | Why it matters | Effort |
 |---|----------|----------------|--------|
 | 1 | **Bulk item import from Excel/CSV** — upload a spreadsheet of items (name, code, unit, category, thresholds) with a validation preview before committing | Hospitals migrate from spreadsheets; hand-encoding hundreds of items through the Add Item modal is the single biggest onboarding barrier. ClosedXML is already a dependency, so reading .xlsx costs nothing new | M |
-| 2 | **Void / reverse a stock movement** — an authorized user voids a mistaken movement; the system posts a compensating entry (and restores batch quantities), both audit-logged | Data-entry mistakes are currently permanent; staff work around them with untracked "adjustments", which corrupts consumption history and therefore forecasts | M |
 | 3 | **Bulk expired-batch disposal + disposal certificate** — one action disposes all expired batches, producing a signed disposal document (Excel/print) listing lots, quantities, and reasons | Expired batches must be disposed one at a time today; pharmacies dispose in batches monthly and need the certificate for COA audits. `ReportExportService` building blocks make the document cheap | M |
 | 4 | **Batch correction** — edit a batch's lot number / expiration date after receiving (audit-logged) | A typo in the delivery modal is currently permanent; wrong expiry dates poison FEFO ordering and expiration warnings | S |
 | 5 | **Physical count / cycle-count worksheet** *(carried)* — enter counted quantities for many items at once, generating adjustments in bulk | Real inventory counts cover hundreds of items; the one-at-a-time adjustment flow doesn't scale to a count day | M |
