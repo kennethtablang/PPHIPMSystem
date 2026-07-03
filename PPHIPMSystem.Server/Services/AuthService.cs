@@ -96,7 +96,8 @@ public class AuthService : IAuthService
             FullName = $"{user.FirstName} {user.LastName}",
             Role = user.Role.ToString(),
             DepartmentName = user.Department?.Name,
-            DepartmentId = user.DepartmentId
+            DepartmentId = user.DepartmentId,
+            MustChangePassword = user.MustChangePassword
         };
     }
 
@@ -140,7 +141,8 @@ public class AuthService : IAuthService
             FullName = $"{user.FirstName} {user.LastName}",
             Role = user.Role.ToString(),
             DepartmentName = user.Department?.Name,
-            DepartmentId = user.DepartmentId
+            DepartmentId = user.DepartmentId,
+            MustChangePassword = user.MustChangePassword
         };
     }
 
@@ -149,7 +151,15 @@ public class AuthService : IAuthService
         var user = await _userManager.FindByIdAsync(userId);
         if (user is null) return false;
         var result = await _userManager.ChangePasswordAsync(user, dto.CurrentPassword, dto.NewPassword);
-        if (result.Succeeded) await _audit.LogAsync(userId, "PasswordChanged", "User", null);
+        if (result.Succeeded)
+        {
+            if (user.MustChangePassword)
+            {
+                user.MustChangePassword = false;
+                await _db.SaveChangesAsync();
+            }
+            await _audit.LogAsync(userId, "PasswordChanged", "User", null);
+        }
         return result.Succeeded;
     }
 
@@ -159,7 +169,13 @@ public class AuthService : IAuthService
         if (user is null) return false;
         var token = await _userManager.GeneratePasswordResetTokenAsync(user);
         var result = await _userManager.ResetPasswordAsync(user, token, newPassword);
-        if (result.Succeeded) await _audit.LogAsync(userId, "PasswordReset", "User", null);
+        if (result.Succeeded)
+        {
+            // The admin knows this password — force the user to pick their own.
+            user.MustChangePassword = true;
+            await _db.SaveChangesAsync();
+            await _audit.LogAsync(userId, "PasswordReset", "User", null);
+        }
         return result.Succeeded;
     }
 
@@ -198,6 +214,12 @@ public class AuthService : IAuthService
         var result = await _userManager.ResetPasswordAsync(user, dto.Token, dto.NewPassword);
         if (result.Succeeded)
         {
+            // The user chose this password themselves — no forced change needed.
+            if (user.MustChangePassword)
+            {
+                user.MustChangePassword = false;
+                await _db.SaveChangesAsync();
+            }
             await _audit.LogAsync(user.Id, "PasswordResetWithToken", "User", null);
         }
         return result.Succeeded;

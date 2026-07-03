@@ -16,6 +16,11 @@ public class ApplicationUser : IdentityUser
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? LastLoginAt { get; set; }
 
+    // Set when the account starts with a password someone else knows
+    // (seeded accounts, admin-created users, admin resets); the client forces
+    // a password change before entering the app, and ChangePassword clears it.
+    public bool MustChangePassword { get; set; }
+
     // Email notification preferences (master + per-category).
     public bool EmailNotificationsEnabled { get; set; } = true;
     public bool EmailNotifyInventory { get; set; } = true;      // low stock, expiry

@@ -7,6 +7,7 @@ import Layout from './components/layout/Layout';
 import Login from './pages/Login';
 import ForgotPassword from './pages/auth/ForgotPassword';
 import ResetPassword from './pages/auth/ResetPassword';
+import ForcePasswordChange from './pages/auth/ForcePasswordChange';
 
 // Chart-heavy pages are lazy-loaded so recharts lands in its own chunk
 // instead of the initial bundle.
@@ -38,6 +39,8 @@ import AuditLogPage from './pages/audit/AuditLogPage';
 function PrivateRoute({ children, roles }) {
   const { user } = useAuth();
   if (!user) return <Navigate to="/login" replace />;
+  // Accounts with an assigned password must set their own before entering the app.
+  if (user.mustChangePassword) return <Navigate to="/force-password" replace />;
   if (roles && !roles.includes(user?.role)) return <Navigate to="/" replace />;
   return children;
 }
@@ -54,6 +57,7 @@ export default function App() {
         <Route path="/login" element={<Login />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/force-password" element={<ForcePasswordChange />} />
 
         <Route path="/" element={<PrivateRoute><Layout /></PrivateRoute>}>
           <Route index element={<Navigate to={getResolvedLandingPage()} replace />} />

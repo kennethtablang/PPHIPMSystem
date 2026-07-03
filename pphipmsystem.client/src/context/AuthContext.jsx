@@ -38,8 +38,18 @@ export function AuthProvider({ children }) {
     window.location.href = '/login';
   }, []);
 
+  // Patch the stored user (e.g. clear mustChangePassword after a forced change).
+  const updateUser = useCallback(patch => {
+    setUser(prev => {
+      if (!prev) return prev;
+      const next = { ...prev, ...patch };
+      localStorage.setItem('user', JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, login, loginWith2Fa, logout }}>
+    <AuthContext.Provider value={{ user, login, loginWith2Fa, logout, updateUser }}>
       {children}
     </AuthContext.Provider>
   );

@@ -78,7 +78,8 @@ public static class DataSeeder
             UserName = "superadmin",
             Email = "superadmin@pph.gov.ph",
             Role = UserRole.SuperAdmin,
-            DepartmentId = adminDept.Id
+            DepartmentId = adminDept.Id,
+            MustChangePassword = true
         };
 
         var result = await userManager.CreateAsync(superAdmin, "PPHipm@2025!");
@@ -154,6 +155,8 @@ public static class DataSeeder
 
         foreach (var user in users)
         {
+            // Seeded accounts share a known password — force a change at first login.
+            user.MustChangePassword = true;
             var result = await userManager.CreateAsync(user, "PPHipm@2025!");
             if (!result.Succeeded)
             {

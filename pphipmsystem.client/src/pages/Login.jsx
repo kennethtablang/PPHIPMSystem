@@ -29,14 +29,14 @@ export default function Login() {
     setLoading(true);
     try {
       if (needs2Fa) {
-        await loginWith2Fa(form.username, form.code);
-        navigate('/');
+        const result = await loginWith2Fa(form.username, form.code);
+        navigate(result.mustChangePassword ? '/force-password' : '/');
       } else {
         const result = await login(form.username, form.password);
         if (result.requiresTwoFactor) {
           setNeeds2Fa(true);
         } else {
-          navigate('/');
+          navigate(result.mustChangePassword ? '/force-password' : '/');
         }
       }
     } catch (err) {

@@ -3,6 +3,7 @@ using System.Text;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
@@ -169,6 +170,16 @@ namespace PPHIPMSystem.Server
                 });
             });
 
+            // Behind a reverse proxy (IIS/nginx) every request arrives from the proxy's
+            // IP; honor X-Forwarded-For so per-IP rate limiting and audit logging see
+            // the real client. Restrict KnownProxies/Networks if exposed beyond the LAN.
+            builder.Services.Configure<ForwardedHeadersOptions>(options =>
+            {
+                options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+                options.KnownNetworks.Clear();
+                options.KnownProxies.Clear();
+            });
+
             // Throttle credential guessing and email-sending abuse per client IP.
             builder.Services.AddRateLimiter(options =>
             {
@@ -206,6 +217,7 @@ namespace PPHIPMSystem.Server
 
             var app = builder.Build();
 
+            app.UseForwardedHeaders();
             app.UseDefaultFiles();
             app.MapStaticAssets();
 

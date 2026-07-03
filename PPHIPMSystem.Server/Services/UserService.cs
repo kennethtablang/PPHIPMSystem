@@ -53,7 +53,9 @@ public class UserService : IUserService
             Email = dto.Email,
             Role = dto.Role,
             DepartmentId = dto.DepartmentId,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = DateTime.UtcNow,
+            // The admin picked this password — the user must set their own at first login.
+            MustChangePassword = true
         };
         var result = await _userManager.CreateAsync(user, dto.Password);
         if (!result.Succeeded)

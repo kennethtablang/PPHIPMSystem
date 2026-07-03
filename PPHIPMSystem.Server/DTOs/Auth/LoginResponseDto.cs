@@ -11,4 +11,6 @@ public class LoginResponseDto
     public string? DepartmentName { get; set; }
     public int? DepartmentId { get; set; }
     public bool RequiresTwoFactor { get; set; } = false;
+    // Client must route to the forced password-change screen before the app.
+    public bool MustChangePassword { get; set; } = false;
 }
