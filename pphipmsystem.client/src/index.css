@@ -1,6 +1,7 @@
 @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800&display=swap');
 
 :root {
+  color-scheme: light;
   --green-950: #052e10;
   --green-900: #0d3d1a;
   --green-800: #14522a;
@@ -72,6 +73,9 @@
 
 /* ── Dark theme (see utils/displayPrefs.js — set via html[data-theme="dark"]) ── */
 html[data-theme="dark"] {
+  /* Render native controls dark: <select> option popups, date pickers, and
+     scrollbars are drawn by the browser and ignore our .form-control styles. */
+  color-scheme: dark;
   --sidebar-bg: linear-gradient(175deg, #04130a 0%, #071d0f 45%, #0b2c16 100%);
   --page-bg: linear-gradient(140deg, #0a1410 0%, #0c1712 50%, #0a1511 100%);
   --card-bg: rgba(23,34,28,0.72);
@@ -100,6 +104,12 @@ html[data-theme="dark"] .modal { background: rgba(24,36,29,0.96); border-color: 
 html[data-theme="dark"] .modal-footer { background: rgba(255,255,255,0.03); }
 html[data-theme="dark"] .form-control {
   background: rgba(255,255,255,0.05); color: var(--text-primary); border-color: var(--border);
+}
+/* The <option> popup is drawn against the control's own colors on some browsers,
+   so give it a solid dark surface instead of inheriting a translucent white. */
+html[data-theme="dark"] select.form-control option,
+html[data-theme="dark"] select.form-control optgroup {
+  background-color: var(--surface); color: var(--text-primary);
 }
 html[data-theme="dark"] tbody tr:hover { background: rgba(255,255,255,0.04); }
 html[data-theme="dark"] .btn-secondary {
