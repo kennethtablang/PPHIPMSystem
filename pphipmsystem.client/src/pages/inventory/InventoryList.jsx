@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { MdAdd, MdEdit, MdDelete, MdSearch, MdWarning, MdFileDownload, MdShoppingCart } from 'react-icons/md';
-import { getItems, createItem, updateItem, deleteItem } from '../../api/inventory';
+import { MdAdd, MdEdit, MdDelete, MdSearch, MdWarning, MdFileDownload, MdShoppingCart, MdUploadFile } from 'react-icons/md';
+import { getItems, createItem, updateItem, deleteItem, importPreview, importItems, downloadImportTemplate } from '../../api/inventory';
 import { getCategories } from '../../api/categories';
 import { getSystemSettings } from '../../api/systemSettings';
 import { exportInventorySnapshot } from '../../api/reports';
@@ -40,6 +40,11 @@ export default function InventoryList() {
   // Admin-configured defaults for new items (Settings → System); falls back to BLANK's values.
   const [itemDefaults, setItemDefaults] = useState(null);
   const pager = usePagination(items);
+  // Bulk import: pick file → preview validation results → import valid rows.
+  const [importModal, setImportModal] = useState(false);
+  const [importFile, setImportFile] = useState(null);
+  const [importRows, setImportRows] = useState(null);
+  const [importing, setImporting] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -63,6 +68,33 @@ export default function InventoryList() {
   useEffect(() => { load(); }, [search, catFilter, lowStockOnly]);
 
   const openCreate = () => { setForm({ ...BLANK, ...itemDefaults }); setModal('create'); };
+
+  const openImport = () => { setImportFile(null); setImportRows(null); setImportModal(true); };
+
+  const pickFile = e => { setImportFile(e.target.files?.[0] ?? null); setImportRows(null); };
+
+  const runPreview = async () => {
+    if (!importFile) { toast.error('Choose an .xlsx file first.'); return; }
+    setImporting(true);
+    try {
+      const { data } = await importPreview(importFile);
+      setImportRows(data.rows);
+    } catch (e) {
+      toast.error(e.response?.data?.message ?? 'Failed to read the file.');
+    } finally { setImporting(false); }
+  };
+
+  const runImport = async () => {
+    setImporting(true);
+    try {
+      const { data } = await importItems(importFile);
+      toast.success(`Imported ${data.imported} item(s)${data.skipped ? `, skipped ${data.skipped}` : ''}.`);
+      setImportModal(false);
+      load();
+    } catch (e) {
+      toast.error(e.response?.data?.message ?? 'Import failed.');
+    } finally { setImporting(false); }
+  };
   const openEdit = item => {
     setForm({
       name: item.name, itemCode: item.itemCode ?? '', description: item.description ?? '',
@@ -118,9 +150,14 @@ export default function InventoryList() {
             </button>
           )}
           {canEdit && (
-            <button className="btn btn-primary" onClick={openCreate}>
-              <MdAdd size={16} /> Add Item
-            </button>
+            <>
+              <button className="btn btn-secondary" onClick={openImport}>
+                <MdUploadFile size={16} /> Import
+              </button>
+              <button className="btn btn-primary" onClick={openCreate}>
+                <MdAdd size={16} /> Add Item
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -231,6 +268,86 @@ export default function InventoryList() {
         </div>
         <Pagination {...pager} />
         </>
+      )}
+
+      {importModal && (
+        <Modal
+          title="Import Items from Excel"
+          onClose={() => setImportModal(false)}
+          size="modal-lg"
+          footer={
+            <>
+              <button className="btn btn-secondary" onClick={() => setImportModal(false)}>Cancel</button>
+              {importRows === null ? (
+                <button className="btn btn-primary" onClick={runPreview} disabled={importing || !importFile}>
+                  {importing ? 'Checking…' : 'Preview'}
+                </button>
+              ) : (
+                <button
+                  className="btn btn-primary"
+                  onClick={runImport}
+                  disabled={importing || importRows.every(r => !r.isValid)}
+                >
+                  {importing ? 'Importing…' : `Import ${importRows.filter(r => r.isValid).length} Valid Item(s)`}
+                </button>
+              )}
+            </>
+          }
+        >
+          <div className="alert alert-info" style={{ fontSize: 12 }}>
+            Upload an .xlsx file with columns <strong>Name, Item Code, Description, Unit, Category,
+            Reorder Threshold, Expiration Warning Days</strong>. Categories must already exist.
+            {' '}
+            <button
+              type="button"
+              onClick={() => downloadImportTemplate().catch(() => toast.error('Failed to download template.'))}
+              style={{ background: 'none', border: 'none', color: 'var(--green-700)', fontWeight: 600, cursor: 'pointer', textDecoration: 'underline', padding: 0, font: 'inherit', fontSize: 12 }}
+            >
+              Download the template
+            </button>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Spreadsheet (.xlsx) *</label>
+            <input className="form-control" type="file" accept=".xlsx" onChange={pickFile} />
+          </div>
+
+          {importRows && (
+            <>
+              <div style={{ fontSize: 12, color: 'var(--text-muted)', margin: '4px 0 8px' }}>
+                {importRows.filter(r => r.isValid).length} of {importRows.length} row(s) ready to import.
+                Rows with errors will be skipped.
+              </div>
+              <div className="table-wrap" style={{ maxHeight: 300, overflowY: 'auto' }}>
+                <table>
+                  <thead>
+                    <tr><th>Row</th><th>Name</th><th>Unit</th><th>Category</th><th>Status</th></tr>
+                  </thead>
+                  <tbody>
+                    {importRows.map(r => (
+                      <tr key={r.row}>
+                        <td style={{ color: 'var(--text-muted)', fontSize: 12 }}>{r.row}</td>
+                        <td style={{ fontWeight: 500 }}>{r.name || <span style={{ color: 'var(--text-muted)' }}>—</span>}</td>
+                        <td>{r.unit || '—'}</td>
+                        <td>{r.category || '—'}</td>
+                        <td>
+                          {r.isValid
+                            ? <span className="badge badge-green">Ready</span>
+                            : <div>
+                                <span className="badge badge-red">Error</span>
+                                <div style={{ fontSize: 11, color: '#dc2626', marginTop: 3, lineHeight: 1.4 }}>
+                                  {r.errors.join(' ')}
+                                </div>
+                              </div>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+        </Modal>
       )}
 
       {modal && (

@@ -133,6 +133,7 @@ namespace PPHIPMSystem.Server
             builder.Services.AddScoped<IForecastService, ForecastService>();
             builder.Services.AddScoped<IReportService, ReportService>();
             builder.Services.AddScoped<IReportExportService, ReportExportService>();
+            builder.Services.AddScoped<IInventoryImportService, InventoryImportService>();
             builder.Services.AddScoped<IBackupService, BackupService>();
             builder.Services.AddScoped<ISystemSettingsService, SystemSettingsService>();
 
