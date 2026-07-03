@@ -8,10 +8,16 @@ items marked **(carried)** survive from the previous list, the rest are newly id
 
 Effort: **S** (hours) · **M** (days) · **L** (a week or more).
 
-> **Progress (2026-07-03):** ✅ F1 (deactivation now revokes access immediately),
-> ✅ #18 (forced password change for assigned passwords), ✅ F3 (forwarded headers),
-> ✅ #4 (batch lot/expiry correction), ✅ #10 (approval aging indicators).
-> Next per the order of attack: #9 partial deliveries, then #1 bulk item import.
+> **Progress (2026-07-03):** the entire order of attack (steps 1–7) is DONE —
+> ✅ F1 (deactivation revokes access immediately), ✅ #18 (forced password change),
+> ✅ F3 (forwarded headers), ✅ #4 (batch correction), ✅ #10 (approval aging),
+> ✅ #9 (partial deliveries), ✅ #1 (bulk item import), ✅ F2 (retention cleanup),
+> ✅ #13 (monthly summary emails), ✅ #15 (forecast anomaly alerts), ✅ #16 (live
+> dashboard), ✅ #21 (announcement scheduling), ✅ #22 (search keyboard), ✅ #23 (health).
+> Still open: #2 cycle counts, #3 dept transfers, #5 valuation, #6 void movements,
+> #3 bulk expired disposal, #11 attachments, #12 RIS forms, #17 TOTP 2FA,
+> #19 refresh tokens, #20 backup restore UI, F4 concurrency tokens, F5 server-side
+> pagination, F6 lint cleanup, F7 search a11y (partially covered by #22).
 
 ---
 
