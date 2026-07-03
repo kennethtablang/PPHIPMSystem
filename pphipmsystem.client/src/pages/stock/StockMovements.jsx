@@ -5,7 +5,8 @@ import { getItems } from '../../api/inventory';
 import Modal from '../../components/common/Modal';
 import SearchSelect from '../../components/common/SearchSelect';
 import { toast } from '../../components/common/Toast';
-import Pagination, { usePagination } from '../../components/common/Pagination';
+import Pagination from '../../components/common/Pagination';
+import { getAppPrefs } from '../../utils/appPrefs';
 import { fmtDateTime } from '../../utils/format';
 import { useAuth } from '../../context/AuthContext';
 
@@ -29,14 +30,25 @@ export default function StockMovements() {
   const [voidTarget, setVoidTarget] = useState(null);
   const [voidReason, setVoidReason] = useState('');
   const [voiding, setVoiding] = useState(false);
-  const pager = usePagination(movements);
+  // Server-side paging + whole-filter aggregates for the stat cards.
+  const [page, setPage] = useState(1);
+  const [pageSize] = useState(() => getAppPrefs().tablePageSize);
+  const [total, setTotal] = useState(0);
+  const [stats, setStats] = useState({ unitsReceived: 0, unitsIssued: 0, disposalCount: 0 });
 
-  const load = () => {
+  const load = (p = 1) => {
     setLoading(true);
-    const p = {};
-    if (itemFilter) p.itemId = itemFilter;
-    if (typeFilter) p.type = typeFilter;
-    getMovements(p).then(r => setMovements(r.data)).finally(() => setLoading(false));
+    const params = { page: p, pageSize };
+    if (itemFilter) params.itemId = itemFilter;
+    if (typeFilter) params.type = typeFilter;
+    getMovements(params)
+      .then(r => {
+        setMovements(r.data.items);
+        setTotal(r.data.total);
+        setPage(r.data.page);
+        setStats({ unitsReceived: r.data.unitsReceived, unitsIssued: r.data.unitsIssued, disposalCount: r.data.disposalCount });
+      })
+      .finally(() => setLoading(false));
   };
 
   useEffect(() => { getItems().then(r => setItems(r.data)); }, []);
@@ -64,7 +76,7 @@ export default function StockMovements() {
       toast.success('Movement voided and reversed.');
       setVoidTarget(null);
       setVoidReason('');
-      load();
+      load(page); // stay on the current page
     } catch (e) {
       toast.error(e.response?.data?.message ?? 'Failed to void movement.');
     } finally { setVoiding(false); }
@@ -83,11 +95,6 @@ export default function StockMovements() {
       : selectedItem.quantityOnHand + +form.quantity
     : null;
 
-  // Summaries — exclude voided originals and their reversals so the totals
-  // reflect net stock activity rather than double-counting corrections.
-  const effective = movements.filter(m => !m.isVoided && !m.isReversal);
-  const totalReceipts = effective.filter(m => m.movementType === 'Receipt').reduce((s, m) => s + m.quantity, 0);
-  const totalIssuances = effective.filter(m => m.movementType === 'Issuance').reduce((s, m) => s + m.quantity, 0);
 
   return (
     <div>
@@ -107,19 +114,19 @@ export default function StockMovements() {
       <div className="grid-stat" style={{ marginBottom: 20 }}>
         <div className="stat-card green">
           <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}><MdTrendingUp size={18} /></div>
-          <div className="stat-value">{movements.length}</div>
+          <div className="stat-value">{total}</div>
           <div className="stat-label">Total Movements</div>
         </div>
         <div className="stat-card green">
-          <div className="stat-value">{totalReceipts.toLocaleString()}</div>
+          <div className="stat-value">{stats.unitsReceived.toLocaleString()}</div>
           <div className="stat-label">Units Received</div>
         </div>
         <div className="stat-card blue">
-          <div className="stat-value">{totalIssuances.toLocaleString()}</div>
+          <div className="stat-value">{stats.unitsIssued.toLocaleString()}</div>
           <div className="stat-label">Units Issued</div>
         </div>
         <div className="stat-card teal">
-          <div className="stat-value">{effective.filter(m => m.movementType === 'Disposal').length}</div>
+          <div className="stat-value">{stats.disposalCount}</div>
           <div className="stat-label">Disposal Records</div>
         </div>
       </div>
@@ -166,7 +173,7 @@ export default function StockMovements() {
             <tbody>
               {movements.length === 0 ? (
                 <tr><td colSpan={canCreate ? 9 : 8} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>No movements found.</td></tr>
-              ) : pager.pageItems.map(m => {
+              ) : movements.map(m => {
                 // Direction is derived from the actual before/after delta so that
                 // reversals (which keep the original type) show the correct sign.
                 const delta = m.quantityAfterMovement - m.quantityBeforeMovement;
@@ -213,7 +220,13 @@ export default function StockMovements() {
             </tbody>
           </table>
         </div>
-        <Pagination {...pager} />
+        <Pagination
+          page={page}
+          setPage={load}
+          totalPages={Math.max(1, Math.ceil(total / pageSize))}
+          total={total}
+          pageSize={pageSize}
+        />
         </>
       )}
 

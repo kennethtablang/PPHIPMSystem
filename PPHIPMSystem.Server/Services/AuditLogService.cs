@@ -2,6 +2,7 @@ using AutoMapper;
 using Microsoft.EntityFrameworkCore;
 using PPHIPMSystem.Server.Data;
 using PPHIPMSystem.Server.DTOs.AuditLog;
+using PPHIPMSystem.Server.DTOs.Common;
 using PPHIPMSystem.Server.Interfaces;
 using PPHIPMSystem.Server.Models;
 
@@ -33,7 +34,8 @@ public class AuditLogService : IAuditLogService
         await _db.SaveChangesAsync();
     }
 
-    public async Task<IEnumerable<AuditLogDto>> GetAllAsync(string? search = null, string? action = null, DateTime? startDate = null, DateTime? endDate = null)
+    public async Task<PagedResultDto<AuditLogDto>> GetAllAsync(string? search = null, string? action = null,
+        DateTime? startDate = null, DateTime? endDate = null, int page = 1, int pageSize = 50)
     {
         var query = _db.AuditLogs.Include(l => l.User).AsQueryable();
 
@@ -47,7 +49,20 @@ public class AuditLogService : IAuditLogService
                 l.EntityType.Contains(search) ||
                 (l.Details != null && l.Details.Contains(search)));
 
-        var logs = await query.OrderByDescending(l => l.Timestamp).Take(1000).ToListAsync();
-        return _mapper.Map<IEnumerable<AuditLogDto>>(logs);
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 1000); // 1000 = the old unpaged cap, used by CSV export
+
+        var total = await query.CountAsync();
+        var logs = await query.OrderByDescending(l => l.Timestamp)
+            .Skip((page - 1) * pageSize).Take(pageSize)
+            .ToListAsync();
+
+        return new PagedResultDto<AuditLogDto>
+        {
+            Items = _mapper.Map<IEnumerable<AuditLogDto>>(logs),
+            Total = total,
+            Page = page,
+            PageSize = pageSize,
+        };
     }
 }

@@ -18,9 +18,12 @@ public class StockMovementsController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> GetAll(
         [FromQuery] int? itemId,
+        [FromQuery] string? type,
         [FromQuery] DateTime? from,
-        [FromQuery] DateTime? to)
-        => Ok(await _movements.GetAllAsync(itemId, from, to));
+        [FromQuery] DateTime? to,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50)
+        => Ok(await _movements.GetAllAsync(itemId, type, from, to, page, pageSize));
 
     [HttpPost]
     [Authorize(Roles = "HospitalAdministrator,InventoryOfficer")]

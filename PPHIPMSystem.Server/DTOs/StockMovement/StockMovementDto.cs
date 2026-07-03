@@ -1,6 +1,16 @@
+using PPHIPMSystem.Server.DTOs.Common;
 using PPHIPMSystem.Server.Models.Enums;
 
 namespace PPHIPMSystem.Server.DTOs.StockMovement;
+
+// Paged movements plus whole-filter aggregates for the page's stat cards
+// (voided originals and reversal entries excluded from the aggregates).
+public class StockMovementPageDto : PagedResultDto<StockMovementDto>
+{
+    public decimal UnitsReceived { get; set; }
+    public decimal UnitsIssued { get; set; }
+    public int DisposalCount { get; set; }
+}
 
 public class StockMovementDto
 {

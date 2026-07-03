@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { MdSearch, MdFilterList, MdDownload } from 'react-icons/md';
 import { getAuditLogs } from '../../api/auditLogs';
 import { toast } from '../../components/common/Toast';
-import Pagination, { usePagination } from '../../components/common/Pagination';
+import Pagination from '../../components/common/Pagination';
+import { getAppPrefs } from '../../utils/appPrefs';
 import { fmtDateTime } from '../../utils/format';
 
 function exportCSV(logs) {
@@ -45,6 +46,9 @@ const ACTION_COLOR = {
 export default function AuditLogPage() {
   const now = new Date();
   const [logs, setLogs] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize] = useState(() => getAppPrefs().tablePageSize);
   const [loading, setLoading] = useState(false);
   const [filters, setFilters] = useState({
     search: '',
@@ -53,18 +57,24 @@ export default function AuditLogPage() {
     endDate: now.toISOString().split('T')[0],
   });
   const [applied, setApplied] = useState(null);
-  const pager = usePagination(logs);
 
-  const load = async (f) => {
+  const buildParams = f => {
+    const params = {};
+    if (f.search) params.search = f.search;
+    if (f.action) params.action = f.action;
+    if (f.startDate) params.startDate = f.startDate;
+    if (f.endDate) params.endDate = f.endDate;
+    return params;
+  };
+
+  // Server-side paging: only the requested page travels over the wire.
+  const load = async (f, p = 1) => {
     setLoading(true);
     try {
-      const params = {};
-      if (f.search) params.search = f.search;
-      if (f.action) params.action = f.action;
-      if (f.startDate) params.startDate = f.startDate;
-      if (f.endDate) params.endDate = f.endDate;
-      const { data } = await getAuditLogs(params);
-      setLogs(data);
+      const { data } = await getAuditLogs({ ...buildParams(f), page: p, pageSize });
+      setLogs(data.items);
+      setTotal(data.total);
+      setPage(data.page);
       setApplied(f);
     } catch { toast.error('Failed to load audit logs.'); }
     finally { setLoading(false); }
@@ -74,6 +84,14 @@ export default function AuditLogPage() {
 
   const set = k => e => setFilters(p => ({ ...p, [k]: e.target.value }));
 
+  // CSV export covers the whole filtered set (up to the server's 1000-row cap).
+  const exportAll = async () => {
+    try {
+      const { data } = await getAuditLogs({ ...buildParams(applied ?? filters), page: 1, pageSize: 1000 });
+      exportCSV(data.items);
+    } catch { toast.error('Failed to export audit logs.'); }
+  };
+
   return (
     <div>
       <div className="page-header">
@@ -81,8 +99,8 @@ export default function AuditLogPage() {
           <h1 className="page-title">Audit Log</h1>
           <p className="page-subtitle">Read-only record of all system actions and changes</p>
         </div>
-        {logs.length > 0 && (
-          <button className="btn btn-secondary" onClick={() => exportCSV(logs)}>
+        {total > 0 && (
+          <button className="btn btn-secondary" onClick={exportAll}>
             <MdDownload size={16} /> Export CSV
           </button>
         )}
@@ -123,7 +141,7 @@ export default function AuditLogPage() {
         <div className="loading-center"><div className="spinner" /></div>
       ) : (
         <>
-          {applied && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>{logs.length} records found</div>}
+          {applied && <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>{total} records found</div>}
           <div className="table-wrap">
             <table>
               <thead>
@@ -132,7 +150,7 @@ export default function AuditLogPage() {
               <tbody>
                 {logs.length === 0 ? (
                   <tr><td colSpan={7} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>No audit records found for the selected filters.</td></tr>
-                ) : pager.pageItems.map(l => (
+                ) : logs.map(l => (
                   <tr key={l.id}>
                     <td style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{fmtDateTime(l.timestamp)}</td>
                     <td>
@@ -151,7 +169,13 @@ export default function AuditLogPage() {
               </tbody>
             </table>
           </div>
-          <Pagination {...pager} />
+          <Pagination
+            page={page}
+            setPage={p => load(applied ?? filters, p)}
+            totalPages={Math.max(1, Math.ceil(total / pageSize))}
+            total={total}
+            pageSize={pageSize}
+          />
         </>
       )}
     </div>

@@ -23,7 +23,7 @@ public class StockMovementService : IStockMovementService
         _audit = audit;
     }
 
-    public async Task<IEnumerable<StockMovementDto>> GetAllAsync(int? itemId, DateTime? from, DateTime? to)
+    public async Task<StockMovementPageDto> GetAllAsync(int? itemId, string? type, DateTime? from, DateTime? to, int page = 1, int pageSize = 50)
     {
         var query = _db.StockMovements
             .Include(m => m.InventoryItem)
@@ -33,11 +33,40 @@ public class StockMovementService : IStockMovementService
             .AsQueryable();
 
         if (itemId.HasValue) query = query.Where(m => m.InventoryItemId == itemId.Value);
+        if (Enum.TryParse<StockMovementType>(type, ignoreCase: true, out var movementType))
+            query = query.Where(m => m.MovementType == movementType);
         if (from.HasValue) query = query.Where(m => m.MovementDate >= from.Value);
         if (to.HasValue) query = query.Where(m => m.MovementDate <= to.Value);
 
-        var items = await query.OrderByDescending(m => m.MovementDate).ToListAsync();
-        return _mapper.Map<IEnumerable<StockMovementDto>>(items);
+        page = Math.Max(1, page);
+        pageSize = Math.Clamp(pageSize, 1, 1000);
+
+        // Stat-card aggregates cover the whole filtered set — not just the
+        // visible page — and exclude voided originals plus their reversals.
+        var effective = query.Where(m => !m.IsVoided && m.ReversalOfMovementId == null);
+        var unitsReceived = await effective
+            .Where(m => m.MovementType == StockMovementType.Receipt)
+            .SumAsync(m => (decimal?)m.Quantity) ?? 0;
+        var unitsIssued = await effective
+            .Where(m => m.MovementType == StockMovementType.Issuance)
+            .SumAsync(m => (decimal?)m.Quantity) ?? 0;
+        var disposalCount = await effective.CountAsync(m => m.MovementType == StockMovementType.Disposal);
+
+        var total = await query.CountAsync();
+        var items = await query.OrderByDescending(m => m.MovementDate)
+            .Skip((page - 1) * pageSize).Take(pageSize)
+            .ToListAsync();
+
+        return new StockMovementPageDto
+        {
+            Items = _mapper.Map<IEnumerable<StockMovementDto>>(items),
+            Total = total,
+            Page = page,
+            PageSize = pageSize,
+            UnitsReceived = unitsReceived,
+            UnitsIssued = unitsIssued,
+            DisposalCount = disposalCount,
+        };
     }
 
     public async Task<StockMovementDto> CreateAsync(CreateStockMovementDto dto, string userId)

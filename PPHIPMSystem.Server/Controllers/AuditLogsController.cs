@@ -18,6 +18,8 @@ public class AuditLogsController : ControllerBase
         [FromQuery] string? search,
         [FromQuery] string? action,
         [FromQuery] DateTime? startDate,
-        [FromQuery] DateTime? endDate)
-        => Ok(await _audit.GetAllAsync(search, action, startDate, endDate));
+        [FromQuery] DateTime? endDate,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 50)
+        => Ok(await _audit.GetAllAsync(search, action, startDate, endDate, page, pageSize));
 }
