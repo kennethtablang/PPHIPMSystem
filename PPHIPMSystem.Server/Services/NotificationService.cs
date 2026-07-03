@@ -59,6 +59,9 @@ public class NotificationService : INotificationService
         await _db.SaveChangesAsync();
     }
 
+    public Task BroadcastStockChangedAsync()
+        => _hubContext.Clients.All.SendAsync("StockChanged");
+
     public async Task CreateAsync(string userId, NotificationType type, string title, string message, int? referenceId = null, string? referenceType = null)
     {
         var notification = new Notification

@@ -92,6 +92,7 @@ public class ItemBatchService : IItemBatchService
         }
 
         await _db.Entry(entity).Reference(b => b.InventoryItem).LoadAsync();
+        await _notifications.BroadcastStockChangedAsync();
         return _mapper.Map<ItemBatchDto>(entity);
     }
 

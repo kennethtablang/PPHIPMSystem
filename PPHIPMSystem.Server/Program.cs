@@ -244,6 +244,12 @@ namespace PPHIPMSystem.Server
             app.UseRateLimiter();
             app.UseAuthentication();
             app.UseAuthorization();
+            // Ops monitoring hook: 200 when the app and database are reachable.
+            app.MapGet("/health", async (ApplicationDbContext db) =>
+                await db.Database.CanConnectAsync()
+                    ? Results.Ok(new { status = "healthy" })
+                    : Results.Json(new { status = "unhealthy" }, statusCode: StatusCodes.Status503ServiceUnavailable));
+
             app.MapControllers();
             app.MapHub<NotificationHub>("/hubs/notifications");
             app.MapHub<ForecastHub>("/hubs/forecast");

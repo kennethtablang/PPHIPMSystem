@@ -50,6 +50,20 @@ class SignalRService {
         }
     }
 
+    // Fired whenever any stock-changing action completes (movement, batch
+    // receipt, PO delivery) so live views can refresh.
+    onStockChanged(callback) {
+        if (this.notificationConnection) {
+            this.notificationConnection.on('StockChanged', callback);
+        }
+    }
+
+    offStockChanged(callback) {
+        if (this.notificationConnection) {
+            this.notificationConnection.off('StockChanged', callback);
+        }
+    }
+
     offNotificationReceived(callback) {
         if (this.notificationConnection) {
             this.notificationConnection.off('ReceiveNotification', callback);

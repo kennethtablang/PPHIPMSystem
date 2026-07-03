@@ -16,13 +16,27 @@ export default function GlobalSearch() {
   const [q, setQ] = useState('');
   const [results, setResults] = useState(null);
   const [open, setOpen] = useState(false);
+  const [activeIdx, setActiveIdx] = useState(-1);
   const rootRef = useRef(null);
+  const inputRef = useRef(null);
   const debounceRef = useRef(null);
 
   useEffect(() => {
     const handler = e => { if (rootRef.current && !rootRef.current.contains(e.target)) setOpen(false); };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  // Ctrl+K (or Cmd+K) focuses the search from anywhere in the app.
+  useEffect(() => {
+    const handler = e => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        inputRef.current?.focus();
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
   }, []);
 
   const onChange = e => {
@@ -34,6 +48,7 @@ export default function GlobalSearch() {
       try {
         const { data } = await api.get('/search', { params: { q: value.trim() } });
         setResults(data);
+        setActiveIdx(-1);
         setOpen(true);
       } catch { /* transient search failure — just don't show results */ }
     }, 300);
@@ -47,18 +62,33 @@ export default function GlobalSearch() {
     navigate(path, state ? { state } : undefined);
   };
 
-  const total = results ? GROUPS.reduce((n, g) => n + (results[g.key]?.length ?? 0), 0) : 0;
+  // Flat list of visible rows in render order, for arrow-key navigation.
+  const flat = results ? GROUPS.flatMap(g => (results[g.key] ?? []).map(r => ({ group: g, r }))) : [];
+  const total = flat.length;
+
+  const onKeyDown = e => {
+    if (!open || total === 0) {
+      if (e.key === 'Escape') e.currentTarget.blur();
+      return;
+    }
+    if (e.key === 'ArrowDown') { setActiveIdx(i => Math.min(i + 1, total - 1)); e.preventDefault(); }
+    else if (e.key === 'ArrowUp') { setActiveIdx(i => Math.max(i - 1, 0)); e.preventDefault(); }
+    else if (e.key === 'Enter' && activeIdx >= 0) { const { group, r } = flat[activeIdx]; go(group, r); e.preventDefault(); }
+    else if (e.key === 'Escape') { setOpen(false); e.currentTarget.blur(); }
+  };
 
   return (
     <div ref={rootRef} style={{ position: 'relative' }}>
       <MdSearch size={15} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none' }} />
       <input
+        ref={inputRef}
         className="form-control"
         value={q}
         onChange={onChange}
         onFocus={() => { if (results) setOpen(true); }}
-        onKeyDown={e => { if (e.key === 'Escape') { setOpen(false); e.currentTarget.blur(); } }}
-        placeholder="Search items, suppliers, PR/PO…"
+        onKeyDown={onKeyDown}
+        placeholder="Search…  (Ctrl+K)"
+        title="Search items, suppliers, PR/PO — Ctrl+K"
         style={{ width: 240, paddingLeft: 34, borderRadius: 99, fontSize: 12.5 }}
       />
 
@@ -82,18 +112,20 @@ export default function GlobalSearch() {
                 <div style={{ padding: '8px 12px 4px', fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
                   {g.label}
                 </div>
-                {rows.map(r => (
+                {rows.map(r => {
+                  const flatIdx = flat.findIndex(f => f.group.key === g.key && f.r.id === r.id);
+                  return (
                   <button
                     key={`${g.key}-${r.id}`}
                     type="button"
                     onClick={() => go(g, r)}
                     style={{
                       display: 'flex', alignItems: 'center', gap: 10, width: '100%',
-                      padding: '8px 12px', borderRadius: 8, border: 'none', background: 'none',
+                      padding: '8px 12px', borderRadius: 8, border: 'none',
+                      background: flatIdx === activeIdx ? 'var(--green-50)' : 'none',
                       cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit',
                     }}
-                    onMouseEnter={e => e.currentTarget.style.background = 'var(--green-50)'}
-                    onMouseLeave={e => e.currentTarget.style.background = 'none'}
+                    onMouseEnter={() => setActiveIdx(flatIdx)}
                   >
                     <g.Icon size={15} color="var(--green-600)" style={{ flexShrink: 0 }} />
                     <span style={{ minWidth: 0 }}>
@@ -101,7 +133,8 @@ export default function GlobalSearch() {
                       {r.subtitle && <span style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)' }}>{r.subtitle}</span>}
                     </span>
                   </button>
-                ))}
+                  );
+                })}
               </div>
             );
           })}

@@ -358,6 +358,7 @@ public class ProcurementService : IProcurementService
         await _db.SaveChangesAsync();
         await _audit.LogAsync(userId, "DeliveryConfirmed", "PurchaseOrder", purchaseOrderId,
             $"{po.PONumber} ({(fullyDelivered ? "fully delivered" : "partial delivery")})");
+        await _notifications.BroadcastStockChangedAsync();
         return true;
     }
 }

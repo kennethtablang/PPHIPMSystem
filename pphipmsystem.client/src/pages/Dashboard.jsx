@@ -95,7 +95,13 @@ export default function Dashboard() {
     if (isDeptHead) return;
     const handleNotification = () => loadDashboard();
     signalRService.onNotificationReceived(handleNotification);
-    return () => signalRService.offNotificationReceived(handleNotification);
+    // Any stock-changing action (movement, batch receipt, PO delivery) by any
+    // user pushes StockChanged — keep the dashboard live without refreshes.
+    signalRService.onStockChanged(handleNotification);
+    return () => {
+      signalRService.offNotificationReceived(handleNotification);
+      signalRService.offStockChanged(handleNotification);
+    };
   }, [isDeptHead]);
 
   const openRepeat = tx => {

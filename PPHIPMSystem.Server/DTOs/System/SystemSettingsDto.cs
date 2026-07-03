@@ -25,6 +25,10 @@ public class SystemSettingsDto
     [MaxLength(300)]
     public string AnnouncementMessage { get; set; } = string.Empty;
 
+    // Optional display window; null bounds mean "immediately" / "until cleared".
+    public DateTime? AnnouncementStartsAt { get; set; }
+    public DateTime? AnnouncementEndsAt { get; set; }
+
     // Password policy enforced by SystemPasswordValidator (8 is the hard floor).
     [Range(8, 64)]
     public int PasswordMinLength { get; set; } = 8;

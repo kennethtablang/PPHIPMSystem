@@ -124,6 +124,19 @@ export default function SystemTab() {
             {settings.announcementMessage.length}/300
           </div>
         </Field>
+
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+          <Field label="Show from" desc="Optional — banner appears at this time.">
+            <input type="datetime-local" className="form-control" style={{ width: 220 }}
+              value={settings.announcementStartsAt ? settings.announcementStartsAt.slice(0, 16) : ''}
+              onChange={e => setSettings(s => ({ ...s, announcementStartsAt: e.target.value || null }))} />
+          </Field>
+          <Field label="Show until" desc="Optional — banner disappears after this time.">
+            <input type="datetime-local" className="form-control" style={{ width: 220 }}
+              value={settings.announcementEndsAt ? settings.announcementEndsAt.slice(0, 16) : ''}
+              onChange={e => setSettings(s => ({ ...s, announcementEndsAt: e.target.value || null }))} />
+          </Field>
+        </div>
       </div>
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 24 }}>

@@ -13,7 +13,12 @@ export default function AnnouncementBanner() {
     getSystemSettings()
       .then(({ data }) => {
         const msg = (data.announcementMessage ?? '').trim();
-        if (msg && localStorage.getItem(DISMISSED_KEY) !== msg) setMessage(msg);
+        if (!msg || localStorage.getItem(DISMISSED_KEY) === msg) return;
+        // Respect the optional display window set in Settings → System.
+        const now = Date.now();
+        if (data.announcementStartsAt && now < new Date(data.announcementStartsAt).getTime()) return;
+        if (data.announcementEndsAt && now > new Date(data.announcementEndsAt).getTime()) return;
+        setMessage(msg);
       })
       .catch(() => {}); // no banner is a fine fallback
   }, []);

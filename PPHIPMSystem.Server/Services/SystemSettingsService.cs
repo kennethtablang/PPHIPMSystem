@@ -16,6 +16,8 @@ public class SystemSettingsService : ISystemSettingsService
     public const string DefaultExpWarnDaysKey = "DefaultExpirationWarningDays";
     public const string DefaultReorderThresholdKey = "DefaultReorderThreshold";
     public const string AnnouncementKey = "AnnouncementMessage";
+    public const string AnnouncementStartsKey = "AnnouncementStartsAt";
+    public const string AnnouncementEndsKey = "AnnouncementEndsAt";
     public const string PasswordMinLengthKey = "PasswordMinLength";
     public const string PasswordRequireSpecialKey = "PasswordRequireSpecial";
     public const string NotificationRetentionKey = "NotificationRetentionDays";
@@ -46,6 +48,8 @@ public class SystemSettingsService : ISystemSettingsService
             DefaultExpirationWarningDays = int.TryParse(all.GetValueOrDefault(DefaultExpWarnDaysKey), out var e) ? e : DefaultExpWarnDays,
             DefaultReorderThreshold = int.TryParse(all.GetValueOrDefault(DefaultReorderThresholdKey), out var r) ? r : DefaultReorderThreshold,
             AnnouncementMessage = all.GetValueOrDefault(AnnouncementKey, string.Empty),
+            AnnouncementStartsAt = DateTime.TryParse(all.GetValueOrDefault(AnnouncementStartsKey), out var ast) ? ast : null,
+            AnnouncementEndsAt = DateTime.TryParse(all.GetValueOrDefault(AnnouncementEndsKey), out var aen) ? aen : null,
             PasswordMinLength = int.TryParse(all.GetValueOrDefault(PasswordMinLengthKey), out var p) ? p : DefaultPasswordMinLength,
             PasswordRequireSpecial = !bool.TryParse(all.GetValueOrDefault(PasswordRequireSpecialKey), out var s) || s,
             NotificationRetentionDays = int.TryParse(all.GetValueOrDefault(NotificationRetentionKey), out var nr) ? nr : 90,
@@ -62,6 +66,8 @@ public class SystemSettingsService : ISystemSettingsService
         await SetAsync(DefaultExpWarnDaysKey, dto.DefaultExpirationWarningDays.ToString());
         await SetAsync(DefaultReorderThresholdKey, dto.DefaultReorderThreshold.ToString());
         await SetAsync(AnnouncementKey, dto.AnnouncementMessage?.Trim() ?? string.Empty);
+        await SetAsync(AnnouncementStartsKey, dto.AnnouncementStartsAt?.ToString("O") ?? string.Empty);
+        await SetAsync(AnnouncementEndsKey, dto.AnnouncementEndsAt?.ToString("O") ?? string.Empty);
         await SetAsync(PasswordMinLengthKey, dto.PasswordMinLength.ToString());
         await SetAsync(PasswordRequireSpecialKey, dto.PasswordRequireSpecial.ToString());
         await SetAsync(NotificationRetentionKey, dto.NotificationRetentionDays.ToString());

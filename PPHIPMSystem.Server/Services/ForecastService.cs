@@ -15,15 +15,22 @@ public class ForecastService : IForecastService
     private const int MaxForecastPeriods = 12;
     private const decimal ReorderBuffer = 1.1m;
 
+    // Anomaly alert thresholds: actual differs from forecast by more than 50%
+    // AND by at least 10 units (filters noise on low-volume items).
+    private const decimal AnomalyRatio = 0.5m;
+    private const decimal AnomalyMinDiff = 10m;
+
     private readonly ApplicationDbContext _db;
     private readonly IMapper _mapper;
     private readonly IHubContext<ForecastHub> _hubContext;
+    private readonly INotificationService _notifications;
 
-    public ForecastService(ApplicationDbContext db, IMapper mapper, IHubContext<ForecastHub> hubContext)
+    public ForecastService(ApplicationDbContext db, IMapper mapper, IHubContext<ForecastHub> hubContext, INotificationService notifications)
     {
         _db = db;
         _mapper = mapper;
         _hubContext = hubContext;
+        _notifications = notifications;
     }
 
     public async Task<IEnumerable<DemandForecastDto>> GetForecastsAsync(int? itemId, int? year)
@@ -232,8 +239,32 @@ public class ForecastService : IForecastService
 
         foreach (var f in pastForecasts)
         {
-            if (consumptionByPeriod.TryGetValue((f.ForecastYear, f.ForecastMonth), out var actual))
-                f.ActualQuantity = actual;
+            if (!consumptionByPeriod.TryGetValue((f.ForecastYear, f.ForecastMonth), out var actual))
+                continue;
+
+            // Alert only on the transition from "not yet evaluated" so a
+            // re-generated forecast doesn't re-notify for the same month.
+            var firstEvaluation = f.ActualQuantity is null;
+            f.ActualQuantity = actual;
+
+            if (firstEvaluation && f.ForecastedQuantity > 0)
+            {
+                var diff = Math.Abs(actual - f.ForecastedQuantity);
+                if (diff >= AnomalyMinDiff && diff / f.ForecastedQuantity >= AnomalyRatio)
+                {
+                    var itemName = await _db.InventoryItems
+                        .Where(i => i.Id == itemId).Select(i => i.Name).FirstOrDefaultAsync() ?? $"Item #{itemId}";
+                    var direction = actual > f.ForecastedQuantity ? "above" : "below";
+                    await _notifications.CreateForRoleAsync(
+                        UserRole.InventoryOfficer,
+                        NotificationType.LowStock,
+                        "Consumption Anomaly",
+                        $"{itemName}: {f.ForecastYear}-{f.ForecastMonth:D2} consumption was {actual:N0}, " +
+                        $"{diff / f.ForecastedQuantity:P0} {direction} the forecast of {f.ForecastedQuantity:N0}. " +
+                        "Review the demand forecast and reorder settings.",
+                        itemId, "InventoryItem");
+                }
+            }
         }
     }
 

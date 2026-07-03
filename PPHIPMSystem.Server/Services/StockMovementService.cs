@@ -123,6 +123,7 @@ public class StockMovementService : IStockMovementService
 
         await _audit.LogAsync(userId, $"StockMovement_{dto.MovementType}", "StockMovement", movement.Id,
             $"Item: {item.Name}, Qty: {dto.Quantity}");
+        await _notifications.BroadcastStockChangedAsync();
 
         await _db.Entry(movement).Reference(m => m.InventoryItem).LoadAsync();
         await _db.Entry(movement).Reference(m => m.PerformedByUser).LoadAsync();

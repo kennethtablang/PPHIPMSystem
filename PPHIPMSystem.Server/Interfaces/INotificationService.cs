@@ -11,4 +11,8 @@ public interface INotificationService
     Task MarkAllAsReadAsync(string userId);
     Task CreateAsync(string userId, NotificationType type, string title, string message, int? referenceId = null, string? referenceType = null);
     Task CreateForRoleAsync(UserRole role, NotificationType type, string title, string message, int? referenceId = null, string? referenceType = null);
+
+    // Realtime ping (no persistence): tells connected clients stock levels
+    // changed so live views (dashboard) can refresh.
+    Task BroadcastStockChangedAsync();
 }
