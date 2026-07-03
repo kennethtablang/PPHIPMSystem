@@ -59,4 +59,18 @@ public class ReportsController : ControllerBase
     public async Task<IActionResult> ExportDisposalCertificate([FromQuery] DateTime startDate, [FromQuery] DateTime endDate)
         => File(await _exports.ExportDisposalCertificateAsync(startDate, endDate), XlsxMime,
             $"disposal-certificate-{DateTime.Now:yyyyMMdd}.xlsx");
+
+    [HttpGet("requests/{id}/ris")]
+    public async Task<IActionResult> ExportRis(int id)
+    {
+        var bytes = await _exports.ExportRequisitionSlipAsync(id);
+        return bytes is null ? NotFound() : File(bytes, XlsxMime, $"ris-{id}.xlsx");
+    }
+
+    [HttpGet("requests/{id}/purchase-request")]
+    public async Task<IActionResult> ExportPurchaseRequest(int id)
+    {
+        var bytes = await _exports.ExportPurchaseRequestAsync(id);
+        return bytes is null ? NotFound() : File(bytes, XlsxMime, $"purchase-request-{id}.xlsx");
+    }
 }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { MdAdd, MdVisibility, MdSchedule } from 'react-icons/md';
+import { MdAdd, MdVisibility, MdSchedule, MdFileDownload } from 'react-icons/md';
+import { exportRisForm, exportPurchaseRequestForm } from '../../api/reports';
 import { getRequests, createRequest, approveRequest, submitRequest } from '../../api/procurement';
 import { getItems } from '../../api/inventory';
 import Modal from '../../components/common/Modal';
@@ -292,7 +293,25 @@ export default function ProcurementList() {
       {/* View Modal */}
       {viewModal && (
         <Modal title={`Request: ${viewModal.requestNumber}`} onClose={() => setViewModal(null)} size="modal-lg"
-          footer={<button className="btn btn-secondary" onClick={() => setViewModal(null)}>Close</button>}
+          footer={
+            <>
+              <button
+                className="btn btn-secondary"
+                onClick={() => exportRisForm(viewModal.id).then(() => toast.success('RIS downloaded.')).catch(() => toast.error('Failed to export RIS.'))}
+                title="Requisition and Issue Slip (Excel)"
+              >
+                <MdFileDownload size={15} /> RIS
+              </button>
+              <button
+                className="btn btn-secondary"
+                onClick={() => exportPurchaseRequestForm(viewModal.id).then(() => toast.success('Purchase Request downloaded.')).catch(() => toast.error('Failed to export PR.'))}
+                title="Purchase Request form (Excel)"
+              >
+                <MdFileDownload size={15} /> PR Form
+              </button>
+              <button className="btn btn-secondary" onClick={() => setViewModal(null)} style={{ marginLeft: 'auto' }}>Close</button>
+            </>
+          }
         >
           <div className="grid-2">
             <div><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Department</span><br /><strong>{viewModal.departmentName}</strong></div>

@@ -10,4 +10,8 @@ public interface IReportExportService
     Task<byte[]> ExportForecastAccuracyAsync(ReportFilterDto filter);
     Task<byte[]> ExportInventorySnapshotAsync();
     Task<byte[]> ExportDisposalCertificateAsync(DateTime startDate, DateTime endDate);
+
+    // LGU forms for a procurement request; null when the request doesn't exist.
+    Task<byte[]?> ExportRequisitionSlipAsync(int requestId);
+    Task<byte[]?> ExportPurchaseRequestAsync(int requestId);
 }

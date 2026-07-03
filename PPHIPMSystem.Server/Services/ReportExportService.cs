@@ -257,6 +257,135 @@ public class ReportExportService : IReportExportService
         return ToBytes(wb);
     }
 
+    // ── LGU forms ────────────────────────────────────────────────────────────
+
+    // Requisition and Issue Slip (patterned on Appendix 63). Quantities issued
+    // and stock numbers are left for manual completion where the system has no data.
+    public async Task<byte[]?> ExportRequisitionSlipAsync(int requestId)
+    {
+        var request = await LoadRequestAsync(requestId);
+        if (request is null) return null;
+        var org = (await _settings.GetAsync()).OrganizationName;
+
+        using var wb = new XLWorkbook();
+        var ws = wb.AddWorksheet("RIS");
+        var row = WriteDocumentHeader(ws, org, "REQUISITION AND ISSUE SLIP (RIS)", lastCol: 6);
+
+        row = WriteKeyValueBlock(ws, row, "Details", new (string, object)[]
+        {
+            ("Division / Department", request.Department.Name),
+            ("RIS No.", request.RequestNumber),
+            ("Date", request.RequestedAt.ToString("yyyy-MM-dd")),
+            ("Fund Cluster", "____________"),
+        });
+
+        row = WriteTable(ws, row, "Requisition",
+            ["Stock No.", "Unit", "Description", "Quantity Requested", "Quantity Issued", "Remarks"],
+            request.Items.Select(i => new object[]
+            {
+                i.InventoryItem.ItemCode ?? "—",
+                i.InventoryItem.Unit,
+                i.InventoryItem.Name,
+                i.QuantityRequested,
+                "", // completed by the issuing officer on the printed copy
+                i.Remarks ?? "",
+            }));
+
+        ws.Cell(row, 1).Value = $"Purpose: {request.Justification}";
+        ws.Cell(row, 1).Style.Alignment.SetWrapText();
+        row += 2;
+
+        row = WriteSignatureBlock(ws, row, request,
+            ["Requested by", "Approved by", "Issued by", "Received by"]);
+
+        ws.Columns().AdjustToContents();
+        ws.Column(3).Width = Math.Max(ws.Column(3).Width, 40);
+        return ToBytes(wb);
+    }
+
+    // Purchase Request (patterned on Appendix 60), with estimated costs.
+    public async Task<byte[]?> ExportPurchaseRequestAsync(int requestId)
+    {
+        var request = await LoadRequestAsync(requestId);
+        if (request is null) return null;
+        var org = (await _settings.GetAsync()).OrganizationName;
+
+        using var wb = new XLWorkbook();
+        var ws = wb.AddWorksheet("Purchase Request");
+        var row = WriteDocumentHeader(ws, org, "PURCHASE REQUEST (PR)", lastCol: 6);
+
+        row = WriteKeyValueBlock(ws, row, "Details", new (string, object)[]
+        {
+            ("Office / Section", request.Department.Name),
+            ("PR No.", request.RequestNumber),
+            ("Date", request.RequestedAt.ToString("yyyy-MM-dd")),
+            ("Fund Cluster", "____________"),
+        });
+
+        row = WriteTable(ws, row, "Items",
+            ["Stock No.", "Unit", "Item Description", "Quantity", "Est. Unit Cost (PHP)", "Est. Total (PHP)"],
+            request.Items.Select(i => new object[]
+            {
+                i.InventoryItem.ItemCode ?? "—",
+                i.InventoryItem.Unit,
+                i.InventoryItem.Name,
+                i.QuantityRequested,
+                i.EstimatedUnitCost is decimal c ? c : "—",
+                i.EstimatedUnitCost is decimal c2 ? Math.Round(i.QuantityRequested * c2, 2) : "—",
+            }));
+
+        var total = request.Items.Where(i => i.EstimatedUnitCost.HasValue)
+            .Sum(i => i.QuantityRequested * i.EstimatedUnitCost!.Value);
+        ws.Cell(row, 1).Value = $"Estimated total: PHP {total:N2}";
+        ws.Cell(row, 1).Style.Font.SetBold();
+        row += 2;
+
+        ws.Cell(row, 1).Value = $"Purpose: {request.Justification}";
+        ws.Cell(row, 1).Style.Alignment.SetWrapText();
+        row += 2;
+
+        row = WriteSignatureBlock(ws, row, request, ["Requested by", "Approved by"]);
+
+        ws.Columns().AdjustToContents();
+        ws.Column(3).Width = Math.Max(ws.Column(3).Width, 40);
+        return ToBytes(wb);
+    }
+
+    private Task<Models.ProcurementRequest?> LoadRequestAsync(int requestId) =>
+        _db.ProcurementRequests.AsNoTracking()
+            .Include(r => r.Department)
+            .Include(r => r.RequestedByUser)
+            .Include(r => r.Items).ThenInclude(i => i.InventoryItem)
+            .Include(r => r.Approvals).ThenInclude(a => a.ApproverUser)
+            .FirstOrDefaultAsync(r => r.Id == requestId);
+
+    // Names the system knows are pre-printed; the rest stay blank for ink.
+    private static int WriteSignatureBlock(IXLWorksheet ws, int row, Models.ProcurementRequest request, string[] roles)
+    {
+        var finalApprover = request.Approvals
+            .Where(a => a.Action == Models.Enums.ApprovalAction.Approved)
+            .OrderByDescending(a => a.ApprovalLevel)
+            .FirstOrDefault();
+
+        foreach (var role in roles)
+        {
+            var name = role switch
+            {
+                "Requested by" => $"{request.RequestedByUser.FirstName} {request.RequestedByUser.LastName}",
+                "Approved by" when finalApprover is not null =>
+                    $"{finalApprover.ApproverUser.FirstName} {finalApprover.ApproverUser.LastName}",
+                _ => "_________________________",
+            };
+            ws.Cell(row, 1).Value = $"{role}:";
+            ws.Cell(row, 1).Style.Font.SetBold();
+            ws.Cell(row, 2).Value = name;
+            ws.Cell(row, 4).Value = "Signature: _______________";
+            ws.Cell(row, 5).Value = "Date: _______________";
+            row += 2;
+        }
+        return row;
+    }
+
     // ── workbook building blocks ─────────────────────────────────────────────
 
     private static int WriteDocumentHeader(IXLWorksheet ws, string org, string title, int lastCol)

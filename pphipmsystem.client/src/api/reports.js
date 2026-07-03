@@ -31,3 +31,13 @@ export const exportDisposalCertificate = async (startDate, endDate) => {
   const res = await api.get('/reports/disposals/export', { params: { startDate, endDate }, responseType: 'blob' });
   downloadBlob(res.data, res.headers, 'disposal-certificate.xlsx');
 };
+
+// LGU forms for a procurement request
+export const exportRisForm = async id => {
+  const res = await api.get(`/reports/requests/${id}/ris`, { responseType: 'blob' });
+  downloadBlob(res.data, res.headers, `ris-${id}.xlsx`);
+};
+export const exportPurchaseRequestForm = async id => {
+  const res = await api.get(`/reports/requests/${id}/purchase-request`, { responseType: 'blob' });
+  downloadBlob(res.data, res.headers, `purchase-request-${id}.xlsx`);
+};
