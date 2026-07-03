@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { MdAdd, MdWarning, MdDeleteForever } from 'react-icons/md';
-import { getAllBatches, getExpiringBatches, createBatch, disposeBatch } from '../../api/batches';
+import { MdAdd, MdWarning, MdDeleteForever, MdEdit } from 'react-icons/md';
+import { getAllBatches, getExpiringBatches, createBatch, disposeBatch, updateBatchDetails } from '../../api/batches';
 import { getItems } from '../../api/inventory';
 import Modal from '../../components/common/Modal';
 import SearchSelect from '../../components/common/SearchSelect';
@@ -31,6 +31,9 @@ export default function ItemBatches() {
   const [disposeModal, setDisposeModal] = useState(null); // batch to dispose
   const [disposeReason, setDisposeReason] = useState(DISPOSE_REASONS[0]);
   const [disposeCustom, setDisposeCustom] = useState('');
+  // Correction of lot/expiry typos made at receiving (audit-logged server-side).
+  const [editModal, setEditModal] = useState(null);
+  const [editForm, setEditForm] = useState({ lotNumber: '', expirationDate: '' });
 
   const load = () => {
     setLoading(true);
@@ -59,6 +62,29 @@ export default function ItemBatches() {
     setDisposeModal(batch);
     setDisposeReason(DISPOSE_REASONS[0]);
     setDisposeCustom('');
+  };
+
+  const openEdit = batch => {
+    setEditForm({
+      lotNumber: batch.lotNumber ?? '',
+      expirationDate: batch.expirationDate ? batch.expirationDate.split('T')[0] : '',
+    });
+    setEditModal(batch);
+  };
+
+  const saveEdit = async () => {
+    setSaving(true);
+    try {
+      await updateBatchDetails(editModal.id, {
+        lotNumber: editForm.lotNumber || null,
+        expirationDate: editForm.expirationDate || null,
+      });
+      toast.success('Batch details corrected.');
+      setEditModal(null);
+      load();
+    } catch (e) {
+      toast.error(e.response?.data?.message ?? 'Failed to update batch.');
+    } finally { setSaving(false); }
   };
 
   const confirmDispose = async () => {
@@ -151,11 +177,16 @@ export default function ItemBatches() {
                   </td>
                   {canEdit && (
                     <td>
-                      {b.remainingQuantity > 0 && (
-                        <button className="btn btn-danger btn-sm" onClick={() => openDispose(b)} title="Mark for disposal / write-off">
-                          <MdDeleteForever size={14} /> Dispose
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <button className="btn btn-ghost btn-icon btn-sm" onClick={() => openEdit(b)} title="Correct lot / expiry">
+                          <MdEdit size={15} />
                         </button>
-                      )}
+                        {b.remainingQuantity > 0 && (
+                          <button className="btn btn-danger btn-sm" onClick={() => openDispose(b)} title="Mark for disposal / write-off">
+                            <MdDeleteForever size={14} /> Dispose
+                          </button>
+                        )}
+                      </div>
                     </td>
                   )}
                 </tr>
@@ -163,6 +194,36 @@ export default function ItemBatches() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {editModal && (
+        <Modal
+          title={`Correct Batch: ${editModal.itemName}`}
+          onClose={() => setEditModal(null)}
+          footer={
+            <>
+              <button className="btn btn-secondary" onClick={() => setEditModal(null)}>Cancel</button>
+              <button className="btn btn-primary" onClick={saveEdit} disabled={saving}>
+                {saving ? 'Saving…' : 'Save Correction'}
+              </button>
+            </>
+          }
+        >
+          <div className="alert alert-info" style={{ fontSize: 12 }}>
+            Use this to fix a lot number or expiration date typed incorrectly at receiving.
+            The change is recorded in the audit log.
+          </div>
+          <div className="grid-2">
+            <div className="form-group">
+              <label className="form-label">Lot / Batch Number</label>
+              <input className="form-control" value={editForm.lotNumber} onChange={e => setEditForm(p => ({ ...p, lotNumber: e.target.value }))} maxLength={100} placeholder="e.g. LOT-2026-001" />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Expiration Date</label>
+              <input className="form-control" type="date" value={editForm.expirationDate} onChange={e => setEditForm(p => ({ ...p, expirationDate: e.target.value }))} />
+            </div>
+          </div>
+        </Modal>
       )}
 
       {disposeModal && (

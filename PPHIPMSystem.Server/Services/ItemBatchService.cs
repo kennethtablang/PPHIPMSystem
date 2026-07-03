@@ -95,6 +95,25 @@ public class ItemBatchService : IItemBatchService
         return _mapper.Map<ItemBatchDto>(entity);
     }
 
+    public async Task<ItemBatchDto?> UpdateDetailsAsync(int batchId, UpdateItemBatchDetailsDto dto, string userId)
+    {
+        var batch = await _db.ItemBatches.Include(b => b.InventoryItem).FirstOrDefaultAsync(b => b.Id == batchId);
+        if (batch is null) return null;
+
+        var oldLot = batch.LotNumber ?? "—";
+        var oldExp = batch.ExpirationDate?.ToString("yyyy-MM-dd") ?? "—";
+
+        batch.LotNumber = string.IsNullOrWhiteSpace(dto.LotNumber) ? null : dto.LotNumber.Trim();
+        batch.ExpirationDate = dto.ExpirationDate;
+        await _db.SaveChangesAsync();
+
+        await _audit.LogAsync(userId, "BatchCorrected", "ItemBatch", batch.Id,
+            $"Item: {batch.InventoryItem.Name}, Lot: {oldLot} → {batch.LotNumber ?? "—"}, " +
+            $"Expiry: {oldExp} → {batch.ExpirationDate?.ToString("yyyy-MM-dd") ?? "—"}");
+
+        return _mapper.Map<ItemBatchDto>(batch);
+    }
+
     public async Task<bool> MarkExpiredForDisposalAsync(int batchId, string userId, string reason)
     {
         var batch = await _db.ItemBatches.Include(b => b.InventoryItem).FirstOrDefaultAsync(b => b.Id == batchId);

@@ -3,4 +3,5 @@ export const getAllBatches = () => api.get('/itembatches');
 export const getBatchesByItem = id => api.get(`/itembatches/by-item/${id}`);
 export const getExpiringBatches = days => api.get('/itembatches/expiring', { params: { warningDays: days } });
 export const createBatch = d => api.post('/itembatches', d);
+export const updateBatchDetails = (id, d) => api.patch(`/itembatches/${id}`, d);
 export const disposeBatch = (id, reason) => api.patch(`/itembatches/${id}/dispose`, JSON.stringify(reason), { headers: { 'Content-Type': 'application/json' } });

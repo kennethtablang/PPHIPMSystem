@@ -43,6 +43,15 @@ public class ItemBatchesController : ControllerBase
         }
     }
 
+    [HttpPatch("{id}")]
+    [Authorize(Roles = "HospitalAdministrator,InventoryOfficer")]
+    public async Task<IActionResult> UpdateDetails(int id, [FromBody] UpdateItemBatchDetailsDto dto)
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        var result = await _batches.UpdateDetailsAsync(id, dto, userId);
+        return result is null ? NotFound() : Ok(result);
+    }
+
     [HttpPatch("{id}/dispose")]
     [Authorize(Roles = "SuperAdmin,HospitalAdministrator,InventoryOfficer")]
     public async Task<IActionResult> Dispose(int id, [FromBody] string reason)

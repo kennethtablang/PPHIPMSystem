@@ -18,3 +18,13 @@ public class CreateItemBatchDto
     [Range(1, int.MaxValue)]
     public int? PurchaseOrderId { get; set; }
 }
+
+// Correction of details captured at receiving — lot/expiry typos happen and
+// wrong expiry dates poison FEFO ordering and expiration warnings.
+public class UpdateItemBatchDetailsDto
+{
+    [MaxLength(100)]
+    public string? LotNumber { get; set; }
+
+    public DateTime? ExpirationDate { get; set; }
+}

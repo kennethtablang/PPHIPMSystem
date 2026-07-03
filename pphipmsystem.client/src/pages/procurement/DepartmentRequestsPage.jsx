@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { MdAdd, MdVisibility, MdSend, MdCheckCircle, MdCancel, MdWarning } from 'react-icons/md';
+import { MdAdd, MdVisibility, MdSend, MdCheckCircle, MdCancel, MdWarning, MdSchedule } from 'react-icons/md';
 import { getRequests, createRequest, submitRequest } from '../../api/procurement';
 import { getItems } from '../../api/inventory';
 import Modal from '../../components/common/Modal';
@@ -8,6 +8,12 @@ import StatusBadge from '../../components/common/StatusBadge';
 import { toast } from '../../components/common/Toast';
 import { fmtDateTime } from '../../utils/format';
 import { useAuth } from '../../context/AuthContext';
+
+// Aging indicator for requests waiting on someone to act (mirrors ProcurementList).
+const PENDING_STATUSES = ['SubmittedByDepartment', 'SubmittedToProcurement', 'ApprovedByProcurement', 'ApprovedByInventoryOfficer', 'ReturnedForRevision'];
+const AGING_WARN_DAYS = 7;
+const daysWaiting = r => Math.floor((Date.now() - new Date(r.updatedAt ?? r.requestedAt).getTime()) / 86400000);
+const isStalled = r => PENDING_STATUSES.includes(r.status) && daysWaiting(r) >= AGING_WARN_DAYS;
 
 const BLANK_FORM = { justification: '', items: [{ inventoryItemId: '', quantityRequested: '', remarks: '' }] };
 
@@ -151,7 +157,14 @@ export default function DepartmentRequestsPage() {
                   <td style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: 12 }}>{r.requestNumber}</td>
                   <td>{r.requestedByFullName}</td>
                   <td><span className="badge badge-blue">{r.items?.length ?? 0} items</span></td>
-                  <td><StatusBadge status={r.status} /></td>
+                  <td>
+                    <StatusBadge status={r.status} />
+                    {isStalled(r) && (
+                      <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 600, color: daysWaiting(r) >= 14 ? '#dc2626' : '#d97706' }}>
+                        <MdSchedule size={12} /> waiting {daysWaiting(r)}d
+                      </div>
+                    )}
+                  </td>
                   <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{new Date(r.requestedAt).toLocaleDateString('en-PH')}</td>
                   <td>
                     <div style={{ display: 'flex', gap: 4 }}>
