@@ -20,9 +20,14 @@ Effort: **S** (hours) · **M** (days) · **L** (a week or more).
 > compensating reversal entry that restores batch quantities and consumption records),
 > ✅ #3 (bulk expired disposal + COA disposal certificate export),
 > ✅ #2 (cycle-count worksheet → bulk pending adjustments).
-> Still open: #5 valuation, #8 dept transfers, #11 attachments, #12 RIS forms,
+> **Batch 4:** ✅ #5 (inventory valuation — batch unit costs + valuation sheet),
+> ✅ #12 (RIS / Purchase Request form exports), ✅ F4 (optimistic concurrency on
+> item edits), ✅ F5 (server-side pagination for audit logs & movements, plus a
+> fix for the movement Type filter that had never worked), ✅ F6 (lint at zero).
+>
+> **Still open (each a session of its own):** #8 dept transfers, #11 attachments,
 > #13 budgets, #17 TOTP 2FA, #19 refresh tokens, #20 backup restore UI,
-> F4 concurrency tokens, F5 server-side pagination, F6 lint cleanup.
+> #6 barcode/QR labels.
 
 ---
 
