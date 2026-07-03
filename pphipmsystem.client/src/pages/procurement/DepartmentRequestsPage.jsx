@@ -48,6 +48,7 @@ export default function DepartmentRequestsPage() {
 
   useEffect(() => {
     load();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: reload only when these inputs change
   }, [statusFilter, user]);
 
   // Build an item lookup map for availability display

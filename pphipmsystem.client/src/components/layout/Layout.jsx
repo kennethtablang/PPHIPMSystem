@@ -57,6 +57,7 @@ export default function Layout() {
       clearTimeout(warnTimer.current);
       clearInterval(countdownRef.current);
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: reload only when these inputs change
   }, []);
 
   // Remember where the user is so the "Last visited page" landing option can resume it.

@@ -33,6 +33,7 @@ export default function UsersPage() {
   };
 
   useEffect(() => { getDepartments().then(r => setDepartments(r.data)); }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: reload only when these inputs change
   useEffect(() => { load(); }, [search]);
 
   const openCreate = () => { setForm(BLANK); setErrors({}); setModal('create'); };

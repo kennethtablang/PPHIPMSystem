@@ -22,6 +22,7 @@ export default function MaterialsList() {
   };
 
   useEffect(() => { getCategories().then(r => setCats(r.data)); }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: reload only when these inputs change
   useEffect(() => { load(); }, [search, catFilter]);
 
   const filtered = items.filter(item => {

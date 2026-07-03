@@ -32,6 +32,7 @@ export default function SupplierList() {
     getSuppliers(search ? { search } : {}).then(r => setSuppliers(r.data)).finally(() => setLoading(false));
   };
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: reload only when these inputs change
   useEffect(() => { load(); }, [search]);
   useEffect(() => {
     getSupplierMetrics()

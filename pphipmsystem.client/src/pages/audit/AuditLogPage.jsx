@@ -80,6 +80,7 @@ export default function AuditLogPage() {
     finally { setLoading(false); }
   };
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: reload only when these inputs change
   useEffect(() => { load(filters); }, []);
 
   const set = k => e => setFilters(p => ({ ...p, [k]: e.target.value }));

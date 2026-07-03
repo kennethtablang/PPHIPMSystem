@@ -56,6 +56,7 @@ export default function NotificationsPage() {
       .finally(() => setLoading(false));
   };
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: reload only when these inputs change
   useEffect(() => { load(); }, [unreadOnly]);
 
   // Real-time: prepend new notifications to the list the moment they arrive

@@ -26,6 +26,7 @@ export default function MaterialsPage() {
 
   useEffect(() => {
     load();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: reload only when these inputs change
   }, [search, catFilter]);
 
   return (

@@ -65,6 +65,7 @@ export default function InventoryList() {
       }))
       .catch(() => {}); // non-fatal — BLANK's built-in defaults still apply
   }, [canEdit]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: reload only when these inputs change
   useEffect(() => { load(); }, [search, catFilter, lowStockOnly]);
 
   const openCreate = () => { setForm({ ...BLANK, ...itemDefaults }); setModal('create'); };

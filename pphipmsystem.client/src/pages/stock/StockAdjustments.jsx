@@ -37,6 +37,7 @@ export default function StockAdjustments() {
   };
 
   useEffect(() => { getItems().then(r => setItems(r.data)); }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: reload only when these inputs change
   useEffect(() => { load(); }, [statusFilter]);
 
   const set = k => e => setForm(p => ({ ...p, [k]: e.target.value }));

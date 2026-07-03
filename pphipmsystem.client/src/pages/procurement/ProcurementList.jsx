@@ -44,6 +44,7 @@ export default function ProcurementList() {
   };
 
   useEffect(() => { getItems().then(r => setItems(r.data)); }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: reload only when these inputs change
   useEffect(() => { load(); }, [statusFilter]);
 
   // FR-3.4: pre-fill from Dashboard / Inventory "reorder" navigation.
@@ -67,6 +68,7 @@ export default function ProcurementList() {
     });
     setCreateModal(true);
     navigate(location.pathname, { replace: true, state: null }); // clear state so refresh doesn't re-open
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: reload only when these inputs change
   }, [location.state]);
 
   const addLine = () => setForm(p => ({ ...p, items: [...p.items, { inventoryItemId: '', quantityRequested: '', estimatedUnitCost: '', remarks: '' }] }));
