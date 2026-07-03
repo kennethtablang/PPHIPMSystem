@@ -17,11 +17,12 @@ Effort: **S** (hours) · **M** (days) · **L** (a week or more).
 >
 > **Batch 3 (post-order-of-attack):** ✅ #6 (void / reverse stock movement — a
 > voided movement keeps its ledger row, is flagged, and is neutralised by a
-> compensating reversal entry that restores batch quantities and consumption records).
-> Still open: #2 cycle counts, #3 dept transfers, #5 valuation,
-> #3 bulk expired disposal, #11 attachments, #12 RIS forms, #17 TOTP 2FA,
-> #19 refresh tokens, #20 backup restore UI, F4 concurrency tokens, F5 server-side
-> pagination, F6 lint cleanup, F7 search a11y (partially covered by #22).
+> compensating reversal entry that restores batch quantities and consumption records),
+> ✅ #3 (bulk expired disposal + COA disposal certificate export),
+> ✅ #2 (cycle-count worksheet → bulk pending adjustments).
+> Still open: #5 valuation, #8 dept transfers, #11 attachments, #12 RIS forms,
+> #13 budgets, #17 TOTP 2FA, #19 refresh tokens, #20 backup restore UI,
+> F4 concurrency tokens, F5 server-side pagination, F6 lint cleanup.
 
 ---
 
