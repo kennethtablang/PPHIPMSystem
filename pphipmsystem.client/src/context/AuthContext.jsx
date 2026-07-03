@@ -1,6 +1,13 @@
 import { createContext, useContext, useState, useCallback } from 'react';
+import axios from 'axios';
 import { login as apiLogin, login2Fa as apiLogin2Fa } from '../api/auth';
 import { signalRService } from '../api/signalrService';
+
+const storeSession = data => {
+  localStorage.setItem('token', data.token);
+  if (data.refreshToken) localStorage.setItem('refreshToken', data.refreshToken);
+  localStorage.setItem('user', JSON.stringify(data));
+};
 
 const AuthContext = createContext(null);
 
@@ -17,21 +24,23 @@ export function AuthProvider({ children }) {
     if (data.requiresTwoFactor) {
       return data;
     }
-    localStorage.setItem('token', data.token);
-    localStorage.setItem('user', JSON.stringify(data));
+    storeSession(data);
     setUser(data);
     return data;
   }, []);
 
   const loginWith2Fa = useCallback(async (username, code) => {
     const { data } = await apiLogin2Fa({ username, code });
-    localStorage.setItem('token', data.token);
-    localStorage.setItem('user', JSON.stringify(data));
+    storeSession(data);
     setUser(data);
     return data;
   }, []);
 
   const logout = useCallback(() => {
+    // Kill the refresh token server-side so the session can't be resumed
+    // (fire-and-forget; the endpoint is anonymous so no auth header races).
+    const refreshToken = localStorage.getItem('refreshToken');
+    if (refreshToken) axios.post('/api/auth/revoke', { refreshToken }).catch(() => {});
     signalRService.stopConnections();
     localStorage.clear();
     setUser(null);
