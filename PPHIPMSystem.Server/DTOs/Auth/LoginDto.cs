@@ -10,3 +10,9 @@ public class LoginDto
     [Required, MaxLength(128)]
     public string Password { get; set; } = string.Empty;
 }
+
+public class RefreshRequestDto
+{
+    [Required, MaxLength(100)]
+    public string RefreshToken { get; set; } = string.Empty;
+}

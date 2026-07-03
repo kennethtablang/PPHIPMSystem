@@ -26,10 +26,20 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<Backup> Backups => Set<Backup>();
     public DbSet<SystemSetting> SystemSettings => Set<SystemSetting>();
+    public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
+
+        builder.Entity<RefreshToken>(e =>
+        {
+            e.HasIndex(t => t.Token).IsUnique();
+            e.HasOne(t => t.User)
+             .WithMany()
+             .HasForeignKey(t => t.UserId)
+             .OnDelete(DeleteBehavior.Cascade);
+        });
 
         builder.Entity<ApplicationUser>(e =>
         {

@@ -6,6 +6,8 @@ public interface IAuthService
 {
     Task<LoginResponseDto?> LoginAsync(LoginDto dto, string? ipAddress);
     Task<LoginResponseDto?> Login2FaAsync(Login2FaDto dto, string? ipAddress);
+    Task<LoginResponseDto?> RefreshAsync(string refreshToken, string? ipAddress);
+    Task RevokeRefreshTokenAsync(string refreshToken);
     Task<bool> ChangePasswordAsync(string userId, ChangePasswordDto dto);
     Task<bool> ResetPasswordAsync(string userId, string newPassword);
     Task<bool> ForgotPasswordAsync(string email);

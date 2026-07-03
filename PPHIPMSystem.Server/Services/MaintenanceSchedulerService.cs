@@ -72,6 +72,13 @@ public class MaintenanceSchedulerService : BackgroundService
             var removed = await db.AuditLogs.Where(l => l.Timestamp < cutoff).ExecuteDeleteAsync();
             if (removed > 0) _logger.LogInformation("Retention: deleted {Count} audit log(s) older than {Days} days.", removed, auditDays);
         }
+
+        // Refresh tokens are worthless 30 days after expiring or being rotated out.
+        var tokenCutoff = DateTime.UtcNow.AddDays(-30);
+        var tokensRemoved = await db.RefreshTokens
+            .Where(t => t.ExpiresAt < tokenCutoff || (t.RevokedAt != null && t.RevokedAt < tokenCutoff))
+            .ExecuteDeleteAsync();
+        if (tokensRemoved > 0) _logger.LogInformation("Retention: deleted {Count} dead refresh token(s).", tokensRemoved);
     }
 
     private async Task SendMonthlyReportIfDueAsync(IServiceProvider services, ApplicationDbContext db)

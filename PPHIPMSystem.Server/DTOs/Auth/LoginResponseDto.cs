@@ -13,4 +13,6 @@ public class LoginResponseDto
     public bool RequiresTwoFactor { get; set; } = false;
     // Client must route to the forced password-change screen before the app.
     public bool MustChangePassword { get; set; } = false;
+    // Rotating token used to obtain a new JWT when the current one expires.
+    public string? RefreshToken { get; set; }
 }

@@ -50,6 +50,25 @@ public class AuthController : ControllerBase
         }
     }
 
+    [HttpPost("refresh")]
+    [EnableRateLimiting("auth")]
+    public async Task<IActionResult> Refresh([FromBody] RefreshRequestDto dto)
+    {
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+        var result = await _auth.RefreshAsync(dto.RefreshToken, ip);
+        return result is null
+            ? Unauthorized(new { message = "Session expired. Please sign in again." })
+            : Ok(result);
+    }
+
+    // Called on sign-out so the refresh token can't be reused afterwards.
+    [HttpPost("revoke")]
+    public async Task<IActionResult> Revoke([FromBody] RefreshRequestDto dto)
+    {
+        await _auth.RevokeRefreshTokenAsync(dto.RefreshToken);
+        return NoContent();
+    }
+
     [Authorize]
     [HttpPost("change-password")]
     public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordDto dto)

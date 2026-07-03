@@ -1,5 +1,6 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
+using System.Security.Cryptography;
 using System.Text;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -97,7 +98,8 @@ public class AuthService : IAuthService
             Role = user.Role.ToString(),
             DepartmentName = user.Department?.Name,
             DepartmentId = user.DepartmentId,
-            MustChangePassword = user.MustChangePassword
+            MustChangePassword = user.MustChangePassword,
+            RefreshToken = await CreateRefreshTokenAsync(user.Id)
         };
     }
 
@@ -142,9 +144,72 @@ public class AuthService : IAuthService
             Role = user.Role.ToString(),
             DepartmentName = user.Department?.Name,
             DepartmentId = user.DepartmentId,
-            MustChangePassword = user.MustChangePassword
+            MustChangePassword = user.MustChangePassword,
+            RefreshToken = await CreateRefreshTokenAsync(user.Id)
         };
     }
+
+    // Exchanges an active refresh token for a fresh JWT + rotated refresh token.
+    public async Task<LoginResponseDto?> RefreshAsync(string refreshToken, string? ipAddress)
+    {
+        var stored = await _db.RefreshTokens
+            .Include(t => t.User).ThenInclude(u => u.Department)
+            .FirstOrDefaultAsync(t => t.Token == refreshToken);
+
+        if (stored is null || !stored.IsActive || !stored.User.IsActive) return null;
+        if (await _userManager.IsLockedOutAsync(stored.User)) return null;
+
+        // Rotate: the presented token dies, its replacement takes over. A replayed
+        // old token therefore fails, limiting the damage of a leaked token.
+        var newRefresh = await CreateRefreshTokenAsync(stored.UserId);
+        stored.RevokedAt = DateTime.UtcNow;
+        stored.ReplacedByToken = newRefresh;
+        await _db.SaveChangesAsync();
+
+        var user = stored.User;
+        var token = GenerateToken(user);
+        return new LoginResponseDto
+        {
+            Token = token.token,
+            Expiry = token.expiry,
+            UserId = user.Id,
+            Username = user.UserName!,
+            FullName = $"{user.FirstName} {user.LastName}",
+            Role = user.Role.ToString(),
+            DepartmentName = user.Department?.Name,
+            DepartmentId = user.DepartmentId,
+            MustChangePassword = user.MustChangePassword,
+            RefreshToken = newRefresh
+        };
+    }
+
+    public async Task RevokeRefreshTokenAsync(string refreshToken)
+    {
+        var stored = await _db.RefreshTokens.FirstOrDefaultAsync(t => t.Token == refreshToken);
+        if (stored is null || stored.RevokedAt is not null) return;
+        stored.RevokedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+    }
+
+    private async Task<string> CreateRefreshTokenAsync(string userId)
+    {
+        var token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
+        var days = double.Parse(_config["Jwt:RefreshDays"] ?? "7");
+        _db.RefreshTokens.Add(new RefreshToken
+        {
+            UserId = userId,
+            Token = token,
+            ExpiresAt = DateTime.UtcNow.AddDays(days)
+        });
+        await _db.SaveChangesAsync();
+        return token;
+    }
+
+    // Password changes invalidate every outstanding session's refresh ability.
+    private Task RevokeAllRefreshTokensAsync(string userId) =>
+        _db.RefreshTokens
+            .Where(t => t.UserId == userId && t.RevokedAt == null)
+            .ExecuteUpdateAsync(s => s.SetProperty(t => t.RevokedAt, DateTime.UtcNow));
 
     public async Task<bool> ChangePasswordAsync(string userId, ChangePasswordDto dto)
     {
@@ -158,6 +223,7 @@ public class AuthService : IAuthService
                 user.MustChangePassword = false;
                 await _db.SaveChangesAsync();
             }
+            await RevokeAllRefreshTokensAsync(userId);
             await _audit.LogAsync(userId, "PasswordChanged", "User", null);
         }
         return result.Succeeded;
@@ -174,6 +240,7 @@ public class AuthService : IAuthService
             // The admin knows this password — force the user to pick their own.
             user.MustChangePassword = true;
             await _db.SaveChangesAsync();
+            await RevokeAllRefreshTokensAsync(userId);
             await _audit.LogAsync(userId, "PasswordReset", "User", null);
         }
         return result.Succeeded;
@@ -220,6 +287,7 @@ public class AuthService : IAuthService
                 user.MustChangePassword = false;
                 await _db.SaveChangesAsync();
             }
+            await RevokeAllRefreshTokensAsync(user.Id);
             await _audit.LogAsync(user.Id, "PasswordResetWithToken", "User", null);
         }
         return result.Succeeded;
