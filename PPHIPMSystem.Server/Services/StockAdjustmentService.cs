@@ -80,6 +80,57 @@ public class StockAdjustmentService : IStockAdjustmentService
         return _mapper.Map<StockAdjustmentDto>(adjustment);
     }
 
+    public async Task<CycleCountResultDto> SubmitCycleCountAsync(CycleCountDto dto, string userId)
+    {
+        var ids = dto.Lines.Select(l => l.InventoryItemId).Distinct().ToList();
+        var items = await _db.InventoryItems
+            .Where(i => ids.Contains(i.Id))
+            .ToDictionaryAsync(i => i.Id);
+
+        var result = new CycleCountResultDto();
+        // Last count wins if the same item appears twice in the worksheet.
+        foreach (var line in dto.Lines.GroupBy(l => l.InventoryItemId).Select(g => g.Last()))
+        {
+            if (!items.TryGetValue(line.InventoryItemId, out var item))
+                throw new InvalidOperationException($"Item #{line.InventoryItemId} does not exist.");
+
+            if (line.PhysicalCount == item.QuantityOnHand)
+            {
+                result.UnchangedItems++;
+                continue;
+            }
+
+            _db.StockAdjustments.Add(new StockAdjustment
+            {
+                InventoryItemId = item.Id,
+                RecordedQuantity = item.QuantityOnHand,
+                PhysicalCount = line.PhysicalCount,
+                Reason = dto.Reason,
+                RequestedByUserId = userId,
+                Status = AdjustmentStatus.Pending
+            });
+            result.AdjustmentsCreated++;
+        }
+
+        if (result.AdjustmentsCreated > 0)
+        {
+            await _db.SaveChangesAsync();
+
+            // One notification for the whole count, not one per line.
+            await _notifications.CreateForRoleAsync(
+                UserRole.HospitalAdministrator,
+                NotificationType.StockAdjustmentRequested,
+                "Cycle Count Submitted",
+                $"A physical count generated {result.AdjustmentsCreated} stock adjustment(s) awaiting approval.",
+                null, "StockAdjustment");
+
+            await _audit.LogAsync(userId, "CycleCountSubmitted", "StockAdjustment", null,
+                $"{result.AdjustmentsCreated} adjustment(s) created, {result.UnchangedItems} item(s) matched. Reason: {dto.Reason}");
+        }
+
+        return result;
+    }
+
     public async Task<StockAdjustmentDto?> ProcessApprovalAsync(int id, ApproveAdjustmentDto dto, string approverId)
     {
         var adjustment = await _db.StockAdjustments

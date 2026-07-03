@@ -42,6 +42,22 @@ public class StockAdjustmentsController : ControllerBase
         }
     }
 
+    [HttpPost("cycle-count")]
+    [Authorize(Roles = "HospitalAdministrator,InventoryOfficer")]
+    public async Task<IActionResult> CycleCount([FromBody] CycleCountDto dto)
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        try
+        {
+            var result = await _adjustments.SubmitCycleCountAsync(dto, userId);
+            return Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     [HttpPatch("{id}/approve")]
     [Authorize(Roles = "HospitalAdministrator")]
     public async Task<IActionResult> Approve(int id, [FromBody] ApproveAdjustmentDto dto)

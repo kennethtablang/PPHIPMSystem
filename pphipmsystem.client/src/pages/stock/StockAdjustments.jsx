@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { MdAdd } from 'react-icons/md';
-import { getAdjustments, createAdjustment, approveAdjustment } from '../../api/stockAdjustments';
+import { MdAdd, MdChecklist, MdSearch } from 'react-icons/md';
+import { getAdjustments, createAdjustment, approveAdjustment, submitCycleCount } from '../../api/stockAdjustments';
 import { getItems } from '../../api/inventory';
 import Modal from '../../components/common/Modal';
 import SearchSelect from '../../components/common/SearchSelect';
@@ -24,6 +24,11 @@ export default function StockAdjustments() {
   const [form, setForm] = useState(BLANK);
   const [approveForm, setApproveForm] = useState({ approved: true, remarks: '' });
   const [saving, setSaving] = useState(false);
+  // Cycle count worksheet: counted quantities keyed by item id; blank = not counted.
+  const [countModal, setCountModal] = useState(false);
+  const [counts, setCounts] = useState({});
+  const [countSearch, setCountSearch] = useState('');
+  const [countReason, setCountReason] = useState('Physical count / cycle count');
 
   const load = () => {
     setLoading(true);
@@ -52,6 +57,40 @@ export default function StockAdjustments() {
     } finally { setSaving(false); }
   };
 
+  const openCycleCount = () => {
+    setCounts({});
+    setCountSearch('');
+    setCountReason('Physical count / cycle count');
+    setCountModal(true);
+  };
+
+  // Lines actually counted (non-blank), with their variance against records.
+  const countedLines = items
+    .filter(i => counts[i.id] !== undefined && counts[i.id] !== '')
+    .map(i => ({ item: i, counted: Number(counts[i.id]) }));
+  const varianceLines = countedLines.filter(l => !Number.isNaN(l.counted) && l.counted !== l.item.quantityOnHand);
+
+  const submitCount = async () => {
+    if (!countReason.trim()) { toast.error('A reason is required.'); return; }
+    if (countedLines.some(l => Number.isNaN(l.counted) || l.counted < 0)) {
+      toast.error('Counted quantities must be valid non-negative numbers.');
+      return;
+    }
+    if (countedLines.length === 0) { toast.error('Enter at least one counted quantity.'); return; }
+    setSaving(true);
+    try {
+      const { data } = await submitCycleCount({
+        reason: countReason.trim(),
+        lines: countedLines.map(l => ({ inventoryItemId: l.item.id, physicalCount: l.counted })),
+      });
+      toast.success(`${data.adjustmentsCreated} adjustment(s) submitted for approval; ${data.unchangedItems} item(s) matched the records.`);
+      setCountModal(false);
+      load();
+    } catch (e) {
+      toast.error(e.response?.data?.message ?? 'Failed to submit the count.');
+    } finally { setSaving(false); }
+  };
+
   const submitApproval = async () => {
     setSaving(true);
     try {
@@ -71,9 +110,14 @@ export default function StockAdjustments() {
           <p className="page-subtitle">Reconcile physical count discrepancies with digital records</p>
         </div>
         {canCreate && (
-          <button className="btn btn-primary" onClick={() => { setForm(BLANK); setCreateModal(true); }}>
-            <MdAdd size={16} /> New Adjustment
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button className="btn btn-secondary" onClick={openCycleCount} title="Count many items at once">
+              <MdChecklist size={16} /> Cycle Count
+            </button>
+            <button className="btn btn-primary" onClick={() => { setForm(BLANK); setCreateModal(true); }}>
+              <MdAdd size={16} /> New Adjustment
+            </button>
+          </div>
         )}
       </div>
 
@@ -134,6 +178,83 @@ export default function StockAdjustments() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {countModal && (
+        <Modal
+          title="Cycle Count Worksheet"
+          onClose={() => setCountModal(false)}
+          size="modal-xl"
+          footer={
+            <>
+              <span style={{ marginRight: 'auto', fontSize: 12, color: 'var(--text-muted)' }}>
+                {countedLines.length} counted · {varianceLines.length} with variance
+              </span>
+              <button className="btn btn-secondary" onClick={() => setCountModal(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={submitCount} disabled={saving || countedLines.length === 0}>
+                {saving ? 'Submitting…' : `Submit ${varianceLines.length} Adjustment(s)`}
+              </button>
+            </>
+          }
+        >
+          <div className="alert alert-info" style={{ fontSize: 12 }}>
+            Enter the physically counted quantity for each item you checked — leave the rest blank.
+            Items matching the recorded quantity are noted but create no adjustment; every variance
+            becomes a pending adjustment for approval.
+          </div>
+
+          <div style={{ display: 'flex', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
+            <div style={{ position: 'relative', flex: 1, minWidth: 220 }}>
+              <MdSearch size={15} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
+              <input className="form-control" placeholder="Filter items…" value={countSearch} onChange={e => setCountSearch(e.target.value)} style={{ paddingLeft: 32 }} />
+            </div>
+            <div className="form-group" style={{ margin: 0, flex: 2, minWidth: 260 }}>
+              <input className="form-control" value={countReason} onChange={e => setCountReason(e.target.value)} maxLength={500} placeholder="Count reason (applies to all adjustments) *" />
+            </div>
+          </div>
+
+          <div className="table-wrap" style={{ maxHeight: 380, overflowY: 'auto' }}>
+            <table>
+              <thead>
+                <tr><th>Item</th><th>Unit</th><th style={{ textAlign: 'right' }}>Recorded</th><th style={{ width: 140 }}>Counted</th><th style={{ textAlign: 'right' }}>Variance</th></tr>
+              </thead>
+              <tbody>
+                {items
+                  .filter(i => i.isActive !== false)
+                  .filter(i => !countSearch || i.name.toLowerCase().includes(countSearch.toLowerCase()) || (i.itemCode ?? '').toLowerCase().includes(countSearch.toLowerCase()))
+                  .map(i => {
+                    const raw = counts[i.id] ?? '';
+                    const counted = raw === '' ? null : Number(raw);
+                    const diff = counted === null || Number.isNaN(counted) ? null : counted - i.quantityOnHand;
+                    return (
+                      <tr key={i.id}>
+                        <td>
+                          <div style={{ fontWeight: 500 }}>{i.name}</div>
+                          {i.itemCode && <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'monospace' }}>{i.itemCode}</div>}
+                        </td>
+                        <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{i.unit}</td>
+                        <td style={{ textAlign: 'right', fontWeight: 600 }}>{i.quantityOnHand}</td>
+                        <td>
+                          <input
+                            className="form-control"
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            placeholder="—"
+                            value={raw}
+                            onChange={e => setCounts(p => ({ ...p, [i.id]: e.target.value }))}
+                          />
+                        </td>
+                        <td style={{ textAlign: 'right', fontWeight: 700, color: diff === null || diff === 0 ? 'var(--text-muted)' : diff > 0 ? '#059669' : '#dc2626' }}>
+                          {diff === null ? '—' : diff === 0 ? 'Match' : `${diff > 0 ? '+' : ''}${diff}`}
+                        </td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+          </div>
+        </Modal>
       )}
 
       {createModal && (

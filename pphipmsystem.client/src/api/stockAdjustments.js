@@ -3,3 +3,4 @@ export const getAdjustments = (p = {}) => api.get('/stockadjustments', { params:
 export const getAdjustment = id => api.get(`/stockadjustments/${id}`);
 export const createAdjustment = d => api.post('/stockadjustments', d);
 export const approveAdjustment = (id, d) => api.patch(`/stockadjustments/${id}/approve`, d);
+export const submitCycleCount = d => api.post('/stockadjustments/cycle-count', d);

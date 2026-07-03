@@ -7,5 +7,6 @@ public interface IStockAdjustmentService
     Task<IEnumerable<StockAdjustmentDto>> GetAllAsync(string? status);
     Task<StockAdjustmentDto?> GetByIdAsync(int id);
     Task<StockAdjustmentDto> CreateAsync(CreateStockAdjustmentDto dto, string userId);
+    Task<CycleCountResultDto> SubmitCycleCountAsync(CycleCountDto dto, string userId);
     Task<StockAdjustmentDto?> ProcessApprovalAsync(int id, ApproveAdjustmentDto dto, string approverId);
 }
