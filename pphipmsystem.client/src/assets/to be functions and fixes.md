@@ -8,6 +8,11 @@ items marked **(carried)** survive from the previous list, the rest are newly id
 
 Effort: **S** (hours) · **M** (days) · **L** (a week or more).
 
+> **Progress (2026-07-03):** ✅ F1 (deactivation now revokes access immediately),
+> ✅ #18 (forced password change for assigned passwords), ✅ F3 (forwarded headers),
+> ✅ #4 (batch lot/expiry correction), ✅ #10 (approval aging indicators).
+> Next per the order of attack: #9 partial deliveries, then #1 bulk item import.
+
 ---
 
 ## Part 1 — To-Be Functions (new capabilities)
