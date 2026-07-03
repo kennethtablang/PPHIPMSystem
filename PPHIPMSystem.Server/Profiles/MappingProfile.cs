@@ -38,12 +38,16 @@ public class MappingProfile : Profile
         // InventoryItem
         CreateMap<InventoryItem, InventoryItemDto>()
             .ForMember(d => d.CategoryName, o => o.MapFrom(s => s.Category.Name))
+            .ForMember(d => d.RowVersion, o => o.MapFrom(s => s.RowVersion == null ? null : Convert.ToBase64String(s.RowVersion)))
             .ForMember(d => d.ExpiringBatchCount, o => o.MapFrom(s =>
                 s.Batches.Count(b => b.ExpirationDate.HasValue &&
                                      b.ExpirationDate.Value > DateTime.UtcNow &&
                                      (b.ExpirationDate.Value - DateTime.UtcNow).TotalDays <= s.ExpirationWarningDays)));
         CreateMap<CreateInventoryItemDto, InventoryItem>();
-        CreateMap<UpdateInventoryItemDto, InventoryItem>();
+        // RowVersion is handled explicitly in UpdateAsync as the concurrency check,
+        // never mapped onto the entity.
+        CreateMap<UpdateInventoryItemDto, InventoryItem>()
+            .ForMember(d => d.RowVersion, o => o.Ignore());
 
         // ItemBatch
         CreateMap<ItemBatch, ItemBatchDto>()

@@ -102,6 +102,7 @@ export default function InventoryList() {
       reorderThreshold: item.reorderThreshold, expirationWarningDays: item.expirationWarningDays,
       preferredForecastMethod: item.preferredForecastMethod, movingAverageWindow: item.movingAverageWindow,
       smoothingConstant: item.smoothingConstant, isActive: item.isActive,
+      rowVersion: item.rowVersion ?? null, // concurrency token — echoed back on save
     });
     setModal(item);
   };

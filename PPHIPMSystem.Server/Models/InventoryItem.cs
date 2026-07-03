@@ -42,6 +42,11 @@ public class InventoryItem
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
+    // Optimistic concurrency: two people editing the same item no longer
+    // silently overwrite each other — the stale save is rejected.
+    [Timestamp]
+    public byte[]? RowVersion { get; set; }
+
     public ICollection<ItemBatch> Batches { get; set; } = [];
     public ICollection<StockMovement> StockMovements { get; set; } = [];
     public ICollection<StockAdjustment> StockAdjustments { get; set; } = [];

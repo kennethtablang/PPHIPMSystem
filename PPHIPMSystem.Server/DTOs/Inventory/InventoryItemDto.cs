@@ -23,4 +23,6 @@ public class InventoryItemDto
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public int ExpiringBatchCount { get; set; }
+    // Base64 concurrency token; echo it back on update.
+    public string? RowVersion { get; set; }
 }

@@ -72,7 +72,21 @@ public class InventoryService : IInventoryService
 
         _mapper.Map(dto, entity);
         entity.UpdatedAt = DateTime.UtcNow;
-        await _db.SaveChangesAsync();
+
+        // Optimistic concurrency: compare against the row version the editor
+        // loaded, so a save over someone else's newer edit fails cleanly.
+        if (!string.IsNullOrEmpty(dto.RowVersion))
+            _db.Entry(entity).Property(e => e.RowVersion).OriginalValue = Convert.FromBase64String(dto.RowVersion);
+
+        try
+        {
+            await _db.SaveChangesAsync();
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            throw new InvalidOperationException(
+                "This item was changed by someone else while you were editing. Reload the list and apply your change again.");
+        }
         await _db.Entry(entity).Reference(e => e.Category).LoadAsync();
         await _db.Entry(entity).Collection(e => e.Batches).LoadAsync();
         return _mapper.Map<InventoryItemDto>(entity);

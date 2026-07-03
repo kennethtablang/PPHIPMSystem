@@ -35,4 +35,8 @@ public class UpdateInventoryItemDto
     public decimal SmoothingConstant { get; set; }
 
     public bool IsActive { get; set; }
+
+    // Concurrency token from the loaded item (base64); when present, a save
+    // over someone else's newer edit is rejected instead of overwriting it.
+    public string? RowVersion { get; set; }
 }
