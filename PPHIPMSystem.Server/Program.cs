@@ -1,9 +1,11 @@
+using System.Security.Claims;
 using System.Text;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using PPHIPMSystem.Server.Data;
@@ -76,9 +78,36 @@ namespace PPHIPMSystem.Server
                             context.Token = accessToken;
                         }
                         return Task.CompletedTask;
+                    },
+                    // Tokens live 8 hours, so deactivating an account must be
+                    // checked per request — otherwise the old token keeps working
+                    // until it expires. Cached 60s to avoid a DB hit on every call.
+                    OnTokenValidated = async context =>
+                    {
+                        var userId = context.Principal?.FindFirstValue(ClaimTypes.NameIdentifier);
+                        if (userId is null)
+                        {
+                            context.Fail("Invalid token.");
+                            return;
+                        }
+
+                        var cache = context.HttpContext.RequestServices.GetRequiredService<IMemoryCache>();
+                        var isActive = await cache.GetOrCreateAsync($"user-active:{userId}", async entry =>
+                        {
+                            entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(60);
+                            var db = context.HttpContext.RequestServices.GetRequiredService<ApplicationDbContext>();
+                            return await db.Users.AsNoTracking()
+                                .Where(u => u.Id == userId)
+                                .Select(u => (bool?)u.IsActive)
+                                .FirstOrDefaultAsync() ?? false;
+                        });
+
+                        if (!isActive) context.Fail("Account is deactivated.");
                     }
                 };
             });
+
+            builder.Services.AddMemoryCache();
 
             builder.Services.AddAuthorization();
             builder.Services.AddScoped<IClaimsTransformation, SuperAdminClaimsTransformation>();

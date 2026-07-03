@@ -1,6 +1,7 @@
 using AutoMapper;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using PPHIPMSystem.Server.Data;
 using PPHIPMSystem.Server.DTOs.User;
 using PPHIPMSystem.Server.Interfaces;
@@ -14,13 +15,15 @@ public class UserService : IUserService
     private readonly ApplicationDbContext _db;
     private readonly IMapper _mapper;
     private readonly IAuditLogService _audit;
+    private readonly IMemoryCache _cache;
 
-    public UserService(UserManager<ApplicationUser> userManager, ApplicationDbContext db, IMapper mapper, IAuditLogService audit)
+    public UserService(UserManager<ApplicationUser> userManager, ApplicationDbContext db, IMapper mapper, IAuditLogService audit, IMemoryCache cache)
     {
         _userManager = userManager;
         _db = db;
         _mapper = mapper;
         _audit = audit;
+        _cache = cache;
     }
 
     public async Task<IEnumerable<UserDto>> GetAllAsync(string? search = null)
@@ -86,6 +89,9 @@ public class UserService : IUserService
         if (user is null) return false;
         user.IsActive = false;
         await _db.SaveChangesAsync();
+        // Evict the token-validation cache so the user's existing JWT stops
+        // working immediately, not after the cache TTL.
+        _cache.Remove($"user-active:{id}");
         await _audit.LogAsync(id, "UserDeactivated", "User", null);
         return true;
     }
@@ -95,6 +101,7 @@ public class UserService : IUserService
         var user = await _db.Users.FindAsync(id);
         if (user is null) return false;
         await _userManager.DeleteAsync(user);
+        _cache.Remove($"user-active:{id}");
         await _audit.LogAsync(null, "UserDeleted", "User", null, $"UserId: {id}");
         return true;
     }
