@@ -143,4 +143,51 @@ public class ItemBatchService : IItemBatchService
             $"Disposed {disposalQty} of {item.Name}. Reason: {reason}. Batch: {batch.LotNumber ?? batchId.ToString()}");
         return true;
     }
+
+    // Monthly pharmacy practice: write off everything past its expiration date
+    // in one action. Each batch still gets its own Disposal movement so the
+    // disposal certificate can list them individually.
+    public async Task<BulkDisposalResultDto> DisposeExpiredAsync(string reason, string userId)
+    {
+        var today = DateTime.UtcNow.Date;
+        var expired = await _db.ItemBatches
+            .Include(b => b.InventoryItem)
+            .Where(b => b.RemainingQuantity > 0 && b.ExpirationDate != null && b.ExpirationDate < today)
+            .ToListAsync();
+
+        var result = new BulkDisposalResultDto();
+        foreach (var batch in expired)
+        {
+            var qty = batch.RemainingQuantity;
+            batch.RemainingQuantity = 0;
+
+            var item = batch.InventoryItem;
+            item.QuantityOnHand = Math.Max(0, item.QuantityOnHand - qty);
+            item.UpdatedAt = DateTime.UtcNow;
+
+            _db.StockMovements.Add(new StockMovement
+            {
+                InventoryItemId = item.Id,
+                MovementType = StockMovementType.Disposal,
+                Quantity = qty,
+                QuantityBeforeMovement = item.QuantityOnHand + qty,
+                QuantityAfterMovement = item.QuantityOnHand,
+                Remarks = $"Disposal — {reason}. Batch: {batch.LotNumber ?? batch.Id.ToString()}",
+                PerformedByUserId = userId
+            });
+
+            result.BatchesDisposed++;
+            result.TotalQuantity += qty;
+        }
+
+        if (result.BatchesDisposed > 0)
+        {
+            await _db.SaveChangesAsync();
+            await _audit.LogAsync(userId, "ExpiredBatchesDisposed", "ItemBatch", null,
+                $"Bulk-disposed {result.BatchesDisposed} expired batch(es), {result.TotalQuantity} unit(s) total. Reason: {reason}");
+            await _notifications.BroadcastStockChangedAsync();
+        }
+
+        return result;
+    }
 }

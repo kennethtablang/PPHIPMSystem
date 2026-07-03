@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { MdAdd, MdWarning, MdDeleteForever, MdEdit } from 'react-icons/md';
-import { getAllBatches, getExpiringBatches, createBatch, disposeBatch, updateBatchDetails } from '../../api/batches';
+import { MdAdd, MdWarning, MdDeleteForever, MdEdit, MdDeleteSweep, MdFileDownload } from 'react-icons/md';
+import { getAllBatches, getExpiringBatches, createBatch, disposeBatch, updateBatchDetails, disposeExpired } from '../../api/batches';
+import { exportDisposalCertificate } from '../../api/reports';
 import { getItems } from '../../api/inventory';
 import Modal from '../../components/common/Modal';
 import SearchSelect from '../../components/common/SearchSelect';
@@ -34,6 +35,15 @@ export default function ItemBatches() {
   // Correction of lot/expiry typos made at receiving (audit-logged server-side).
   const [editModal, setEditModal] = useState(null);
   const [editForm, setEditForm] = useState({ lotNumber: '', expirationDate: '' });
+  // Bulk write-off of everything past expiry + certificate download.
+  const [bulkModal, setBulkModal] = useState(false);
+  const [bulkReason, setBulkReason] = useState('Expired — past expiration date');
+  const [certModal, setCertModal] = useState(false);
+  const now = new Date();
+  const [certRange, setCertRange] = useState({
+    startDate: `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`,
+    endDate: now.toISOString().split('T')[0],
+  });
 
   const load = () => {
     setLoading(true);
@@ -103,6 +113,28 @@ export default function ItemBatches() {
 
   const daysColor = d => d < 0 ? '#b91c1c' : d <= 30 ? '#dc2626' : d <= 60 ? '#d97706' : '#059669';
 
+  const confirmBulkDispose = async () => {
+    if (!bulkReason.trim()) { toast.error('A reason is required.'); return; }
+    setSaving(true);
+    try {
+      const { data } = await disposeExpired(bulkReason.trim());
+      if (data.batchesDisposed === 0) toast.info('No expired batches with remaining stock were found.');
+      else toast.success(`Disposed ${data.batchesDisposed} expired batch(es), ${data.totalQuantity} unit(s) written off.`);
+      setBulkModal(false);
+      load();
+    } catch (e) {
+      toast.error(e.response?.data?.message ?? 'Bulk disposal failed.');
+    } finally { setSaving(false); }
+  };
+
+  const downloadCertificate = async () => {
+    try {
+      await exportDisposalCertificate(certRange.startDate, certRange.endDate);
+      toast.success('Disposal certificate downloaded.');
+      setCertModal(false);
+    } catch { toast.error('Failed to export the certificate.'); }
+  };
+
   return (
     <div>
       <div className="page-header">
@@ -111,9 +143,17 @@ export default function ItemBatches() {
           <p className="page-subtitle">Monitor pharmaceutical and supply batches nearing expiration</p>
         </div>
         {canEdit && (
-          <button className="btn btn-primary" onClick={() => { setForm(BLANK); setModal(true); }}>
-            <MdAdd size={16} /> Receive Batch
-          </button>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button className="btn btn-secondary" onClick={() => setCertModal(true)} title="Excel certificate of disposals in a date range">
+              <MdFileDownload size={16} /> Disposal Certificate
+            </button>
+            <button className="btn btn-danger" onClick={() => { setBulkReason('Expired — past expiration date'); setBulkModal(true); }}>
+              <MdDeleteSweep size={16} /> Dispose All Expired
+            </button>
+            <button className="btn btn-primary" onClick={() => { setForm(BLANK); setModal(true); }}>
+              <MdAdd size={16} /> Receive Batch
+            </button>
+          </div>
         )}
       </div>
 
@@ -194,6 +234,64 @@ export default function ItemBatches() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {bulkModal && (
+        <Modal
+          title="Dispose All Expired Batches"
+          onClose={() => setBulkModal(false)}
+          footer={
+            <>
+              <button className="btn btn-secondary" onClick={() => setBulkModal(false)}>Cancel</button>
+              <button className="btn btn-danger" onClick={confirmBulkDispose} disabled={saving}>
+                {saving ? 'Disposing…' : 'Dispose All Expired'}
+              </button>
+            </>
+          }
+        >
+          <div className="alert alert-danger" style={{ display: 'block' }}>
+            Every batch <strong>past its expiration date</strong> with remaining stock will be written off:
+            remaining quantities go to zero, item stock is reduced, and a Disposal movement is recorded
+            per batch. This cannot be undone in bulk.
+          </div>
+          <div className="form-group">
+            <label className="form-label">Disposal Reason *</label>
+            <input className="form-control" value={bulkReason} onChange={e => setBulkReason(e.target.value)} maxLength={300} />
+          </div>
+          <div className="alert alert-info" style={{ fontSize: 12 }}>
+            Tip: download the Disposal Certificate afterwards for the COA filing copy.
+          </div>
+        </Modal>
+      )}
+
+      {certModal && (
+        <Modal
+          title="Disposal Certificate"
+          onClose={() => setCertModal(false)}
+          footer={
+            <>
+              <button className="btn btn-secondary" onClick={() => setCertModal(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={downloadCertificate}>
+                <MdFileDownload size={16} /> Download Excel
+              </button>
+            </>
+          }
+        >
+          <p style={{ fontSize: 13, color: 'var(--text-muted)', marginBottom: 16 }}>
+            Generates a signed-copy certificate listing every disposal in the period —
+            item, quantity, batch details, and who performed it — with a signature block for filing.
+          </p>
+          <div className="grid-2">
+            <div className="form-group">
+              <label className="form-label">From *</label>
+              <input className="form-control" type="date" value={certRange.startDate} onChange={e => setCertRange(p => ({ ...p, startDate: e.target.value }))} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">To *</label>
+              <input className="form-control" type="date" value={certRange.endDate} onChange={e => setCertRange(p => ({ ...p, endDate: e.target.value }))} />
+            </div>
+          </div>
+        </Modal>
       )}
 
       {editModal && (

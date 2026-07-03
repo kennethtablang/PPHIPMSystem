@@ -10,4 +10,5 @@ public interface IItemBatchService
     Task<ItemBatchDto> CreateAsync(CreateItemBatchDto dto, string userId);
     Task<ItemBatchDto?> UpdateDetailsAsync(int batchId, UpdateItemBatchDetailsDto dto, string userId);
     Task<bool> MarkExpiredForDisposalAsync(int batchId, string userId, string reason);
+    Task<BulkDisposalResultDto> DisposeExpiredAsync(string reason, string userId);
 }

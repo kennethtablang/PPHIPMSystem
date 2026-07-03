@@ -19,6 +19,12 @@ public class CreateItemBatchDto
     public int? PurchaseOrderId { get; set; }
 }
 
+public class BulkDisposalResultDto
+{
+    public int BatchesDisposed { get; set; }
+    public decimal TotalQuantity { get; set; }
+}
+
 // Correction of details captured at receiving — lot/expiry typos happen and
 // wrong expiry dates poison FEFO ordering and expiration warnings.
 public class UpdateItemBatchDetailsDto

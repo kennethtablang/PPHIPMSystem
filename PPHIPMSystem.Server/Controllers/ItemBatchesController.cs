@@ -52,6 +52,17 @@ public class ItemBatchesController : ControllerBase
         return result is null ? NotFound() : Ok(result);
     }
 
+    [HttpPost("dispose-expired")]
+    [Authorize(Roles = "SuperAdmin,HospitalAdministrator,InventoryOfficer")]
+    public async Task<IActionResult> DisposeExpired([FromBody] string reason)
+    {
+        if (string.IsNullOrWhiteSpace(reason))
+            return BadRequest(new { message = "Disposal reason is required." });
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        var result = await _batches.DisposeExpiredAsync(reason.Trim(), userId);
+        return Ok(result);
+    }
+
     [HttpPatch("{id}/dispose")]
     [Authorize(Roles = "SuperAdmin,HospitalAdministrator,InventoryOfficer")]
     public async Task<IActionResult> Dispose(int id, [FromBody] string reason)

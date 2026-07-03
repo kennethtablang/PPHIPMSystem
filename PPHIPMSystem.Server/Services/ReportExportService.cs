@@ -174,6 +174,52 @@ public class ReportExportService : IReportExportService
         return ToBytes(wb);
     }
 
+    public async Task<byte[]> ExportDisposalCertificateAsync(DateTime startDate, DateTime endDate)
+    {
+        var org = (await _settings.GetAsync()).OrganizationName;
+        var endExclusive = endDate.Date.AddDays(1);
+
+        var disposals = await _db.StockMovements.AsNoTracking()
+            .Include(m => m.InventoryItem)
+            .Include(m => m.PerformedByUser)
+            .Where(m => m.MovementType == Models.Enums.StockMovementType.Disposal
+                        && m.MovementDate >= startDate.Date && m.MovementDate < endExclusive)
+            .OrderBy(m => m.MovementDate)
+            .ToListAsync();
+
+        using var wb = new XLWorkbook();
+        var ws = wb.AddWorksheet("Disposal Certificate");
+        var row = WriteDocumentHeader(ws, org,
+            $"Certificate of Disposal / Write-Off — {startDate:yyyy-MM-dd} to {endDate:yyyy-MM-dd}", lastCol: 6);
+
+        row = WriteTable(ws, row, "Disposed Stock",
+            ["Date", "Item", "Quantity", "Unit", "Details", "Disposed By"],
+            disposals.Select(d => new object[]
+            {
+                d.MovementDate.ToString("yyyy-MM-dd HH:mm"),
+                d.InventoryItem.Name,
+                d.Quantity,
+                d.InventoryItem.Unit,
+                d.Remarks ?? "—",
+                d.PerformedByUser is null ? "—" : $"{d.PerformedByUser.FirstName} {d.PerformedByUser.LastName}",
+            }));
+
+        ws.Cell(row, 1).Value = $"Total entries: {disposals.Count} · Total quantity: {disposals.Sum(d => d.Quantity):N2}";
+        ws.Cell(row, 1).Style.Font.SetBold();
+        row += 3;
+
+        // Signature block for the physical filing copy.
+        foreach (var role in new[] { "Prepared by", "Noted by", "Witnessed by" })
+        {
+            ws.Cell(row, 1).Value = $"{role}: _________________________";
+            ws.Cell(row, 4).Value = "Date: _______________";
+            row += 2;
+        }
+
+        ws.Columns().AdjustToContents();
+        return ToBytes(wb);
+    }
+
     // ── workbook building blocks ─────────────────────────────────────────────
 
     private static int WriteDocumentHeader(IXLWorksheet ws, string org, string title, int lastCol)

@@ -26,3 +26,8 @@ export const exportInventorySnapshot = async () => {
   const res = await api.get('/reports/inventory-snapshot/export', { responseType: 'blob' });
   downloadBlob(res.data, res.headers, 'inventory-snapshot.xlsx');
 };
+
+export const exportDisposalCertificate = async (startDate, endDate) => {
+  const res = await api.get('/reports/disposals/export', { params: { startDate, endDate }, responseType: 'blob' });
+  downloadBlob(res.data, res.headers, 'disposal-certificate.xlsx');
+};

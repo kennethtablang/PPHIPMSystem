@@ -54,4 +54,9 @@ public class ReportsController : ControllerBase
     public async Task<IActionResult> ExportInventorySnapshot()
         => File(await _exports.ExportInventorySnapshotAsync(), XlsxMime,
             $"inventory-snapshot-{DateTime.Now:yyyyMMdd}.xlsx");
+
+    [HttpGet("disposals/export")]
+    public async Task<IActionResult> ExportDisposalCertificate([FromQuery] DateTime startDate, [FromQuery] DateTime endDate)
+        => File(await _exports.ExportDisposalCertificateAsync(startDate, endDate), XlsxMime,
+            $"disposal-certificate-{DateTime.Now:yyyyMMdd}.xlsx");
 }
