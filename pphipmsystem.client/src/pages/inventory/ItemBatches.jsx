@@ -8,7 +8,7 @@ import SearchSelect from '../../components/common/SearchSelect';
 import { toast } from '../../components/common/Toast';
 import { useAuth } from '../../context/AuthContext';
 
-const BLANK = { inventoryItemId: '', lotNumber: '', quantity: '', expirationDate: '' };
+const BLANK = { inventoryItemId: '', lotNumber: '', quantity: '', expirationDate: '', unitCost: '' };
 const DISPOSE_REASONS = [
   'Expired — past expiration date',
   'Damaged / contaminated',
@@ -59,7 +59,7 @@ export default function ItemBatches() {
   const save = async () => {
     setSaving(true);
     try {
-      await createBatch({ ...form, inventoryItemId: +form.inventoryItemId, quantity: +form.quantity, expirationDate: form.expirationDate || null });
+      await createBatch({ ...form, inventoryItemId: +form.inventoryItemId, quantity: +form.quantity, expirationDate: form.expirationDate || null, unitCost: form.unitCost === '' ? null : +form.unitCost });
       toast.success('Batch received and stock updated.');
       setModal(false);
       load();
@@ -403,12 +403,19 @@ export default function ItemBatches() {
               <input className="form-control" type="number" min="0.01" step="0.01" value={form.quantity} onChange={set('quantity')} required />
             </div>
           </div>
-          <div className="form-group">
-            <label className="form-label">Expiration Date</label>
-            <input className="form-control" type="date" value={form.expirationDate} onChange={set('expirationDate')} />
+          <div className="grid-2">
+            <div className="form-group">
+              <label className="form-label">Expiration Date</label>
+              <input className="form-control" type="date" value={form.expirationDate} onChange={set('expirationDate')} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Unit Cost (₱)</label>
+              <input className="form-control" type="number" min="0" step="0.01" value={form.unitCost} onChange={set('unitCost')} placeholder="Optional — for valuation" />
+            </div>
           </div>
           <div className="alert alert-info">
             Receiving a batch will automatically increase the item's quantity on hand.
+            PO deliveries record the unit cost automatically; enter it here for donations or direct purchases.
           </div>
         </Modal>
       )}

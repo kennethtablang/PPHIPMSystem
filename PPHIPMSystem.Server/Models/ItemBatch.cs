@@ -22,6 +22,11 @@ public class ItemBatch
     public DateTime? ExpirationDate { get; set; }
     public DateTime ReceivedDate { get; set; } = DateTime.UtcNow;
 
+    // Acquisition cost per unit — set automatically from the PO on delivery,
+    // optional on manual receipt. Null = cost unknown (excluded from valuation).
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal? UnitCost { get; set; }
+
     public bool IsExpired => ExpirationDate.HasValue && ExpirationDate.Value.Date < DateTime.UtcNow.Date;
 
     public int? PurchaseOrderId { get; set; }

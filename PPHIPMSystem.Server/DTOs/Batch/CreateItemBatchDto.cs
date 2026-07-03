@@ -15,6 +15,10 @@ public class CreateItemBatchDto
 
     public DateTime? ExpirationDate { get; set; }
 
+    // Optional acquisition cost per unit for valuation reporting.
+    [Range(0, 1_000_000_000)]
+    public decimal? UnitCost { get; set; }
+
     [Range(1, int.MaxValue)]
     public int? PurchaseOrderId { get; set; }
 }

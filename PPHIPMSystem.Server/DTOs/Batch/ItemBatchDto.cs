@@ -12,6 +12,7 @@ public class ItemBatchDto
     public bool IsExpired { get; set; }
     public int? DaysUntilExpiry { get; set; }
     public DateTime ReceivedDate { get; set; }
+    public decimal? UnitCost { get; set; }
     public int? PurchaseOrderId { get; set; }
     public string? PONumber { get; set; }
 }

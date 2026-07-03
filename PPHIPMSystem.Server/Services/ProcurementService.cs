@@ -325,6 +325,7 @@ public class ProcurementService : IProcurementService
                 RemainingQuantity = received,
                 LotNumber = string.IsNullOrWhiteSpace(details?.LotNumber) ? null : details!.LotNumber!.Trim(),
                 ExpirationDate = details?.ExpirationDate,
+                UnitCost = item.UnitCost, // carries acquisition cost for valuation
                 PurchaseOrderId = purchaseOrderId,
                 ReceivedDate = DateTime.UtcNow
             });

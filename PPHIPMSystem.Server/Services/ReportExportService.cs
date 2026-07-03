@@ -156,12 +156,14 @@ public class ReportExportService : IReportExportService
         // Sheet 2: batches & expiry
         var ws2 = wb.AddWorksheet("Batches & Expiry");
         var today = DateTime.UtcNow.Date;
-        var row2 = WriteDocumentHeader(ws2, org, "Active Batches by Expiry", lastCol: 6);
+        var row2 = WriteDocumentHeader(ws2, org, "Active Batches by Expiry", lastCol: 8);
         WriteTable(ws2, row2, "Batches (soonest expiry first)",
-            ["Item", "Lot No.", "Remaining Qty", "Received", "Expiration", "Status"],
+            ["Item", "Lot No.", "Remaining Qty", "Unit Cost", "Line Value", "Received", "Expiration", "Status"],
             batches.Select(b => new object[]
             {
                 b.InventoryItem.Name, b.LotNumber ?? "—", b.RemainingQuantity,
+                b.UnitCost is decimal uc ? uc : "—",
+                b.UnitCost is decimal c ? b.RemainingQuantity * c : "—",
                 b.ReceivedDate.ToString("yyyy-MM-dd"),
                 b.ExpirationDate?.ToString("yyyy-MM-dd") ?? "—",
                 b.ExpirationDate is null ? "No expiry"
@@ -170,6 +172,41 @@ public class ReportExportService : IReportExportService
                     : "OK",
             }));
         ws2.Columns().AdjustToContents();
+
+        // Sheet 3: valuation — weighted-average cost over costed batches only.
+        var ws3 = wb.AddWorksheet("Valuation");
+        var row3 = WriteDocumentHeader(ws3, org, "Stock Valuation (weighted average of costed batches)", lastCol: 6);
+        var valuation = batches
+            .Where(b => b.UnitCost is not null)
+            .GroupBy(b => b.InventoryItem)
+            .Select(g =>
+            {
+                var costedQty = g.Sum(b => b.RemainingQuantity);
+                var value = g.Sum(b => b.RemainingQuantity * b.UnitCost!.Value);
+                return new
+                {
+                    Item = g.Key,
+                    CostedQty = costedQty,
+                    AvgCost = costedQty > 0 ? Math.Round(value / costedQty, 2) : 0,
+                    Value = Math.Round(value, 2),
+                };
+            })
+            .OrderByDescending(v => v.Value)
+            .ToList();
+
+        row3 = WriteTable(ws3, row3, "Value by Item",
+            ["Item", "Unit", "On Hand", "Costed Qty", "Avg Unit Cost (PHP)", "Stock Value (PHP)"],
+            valuation.Select(v => new object[]
+            {
+                v.Item.Name, v.Item.Unit, v.Item.QuantityOnHand, v.CostedQty, v.AvgCost, v.Value,
+            }));
+
+        ws3.Cell(row3, 1).Value = $"Total stock value (costed batches): PHP {valuation.Sum(v => v.Value):N2}";
+        ws3.Cell(row3, 1).Style.Font.SetBold().Font.SetFontColor(XLColor.FromHtml(HeaderGreen));
+        row3 += 2;
+        ws3.Cell(row3, 1).Value = "Stock received without a cost (manual receipts before costing, pre-batch stock) is not included.";
+        ws3.Cell(row3, 1).Style.Font.SetItalic().Font.SetFontColor(XLColor.Gray);
+        ws3.Columns().AdjustToContents();
 
         return ToBytes(wb);
     }
