@@ -290,30 +290,39 @@ public class ProcurementService : IProcurementService
             .FirstOrDefaultAsync(p => p.Id == purchaseOrderId);
         if (po is null || po.IsDelivered) return false;
 
-        po.IsDelivered = true;
-        po.DeliveredAt = DateTime.UtcNow;
-
-        // Lot/expiry the receiver typed in, keyed by PO line.
+        // Per-line details the receiver typed in (qty received, lot, expiry).
         var lineDetails = (dto?.Lines ?? [])
             .GroupBy(l => l.PurchaseOrderItemId)
             .ToDictionary(g => g.Key, g => g.Last());
 
+        var receivedAnything = false;
         foreach (var item in po.Items)
         {
             var invItem = await _db.InventoryItems.FindAsync(item.InventoryItemId);
             if (invItem is null) continue;
-            invItem.QuantityOnHand += item.QuantityOrdered;
+
+            var outstanding = item.QuantityOrdered - (item.QuantityDelivered ?? 0);
+            var details = lineDetails.GetValueOrDefault(item.Id);
+            // No explicit quantity means the whole outstanding amount arrived.
+            var received = details?.QuantityReceived ?? outstanding;
+
+            if (received <= 0) continue; // nothing of this line in the shipment
+            if (received > outstanding)
+                throw new InvalidOperationException(
+                    $"{invItem.Name}: received quantity ({received}) exceeds the outstanding amount ({outstanding}).");
+
+            receivedAnything = true;
+            invItem.QuantityOnHand += received;
             invItem.UpdatedAt = DateTime.UtcNow;
-            item.QuantityDelivered = item.QuantityOrdered;
+            item.QuantityDelivered = (item.QuantityDelivered ?? 0) + received;
 
             // Every delivered line becomes a batch so expiration tracking and
             // FEFO issuance can see PO-received stock.
-            var details = lineDetails.GetValueOrDefault(item.Id);
             _db.ItemBatches.Add(new ItemBatch
             {
                 InventoryItemId = item.InventoryItemId,
-                Quantity = item.QuantityOrdered,
-                RemainingQuantity = item.QuantityOrdered,
+                Quantity = received,
+                RemainingQuantity = received,
                 LotNumber = string.IsNullOrWhiteSpace(details?.LotNumber) ? null : details!.LotNumber!.Trim(),
                 ExpirationDate = details?.ExpirationDate,
                 PurchaseOrderId = purchaseOrderId,
@@ -324,8 +333,8 @@ public class ProcurementService : IProcurementService
             {
                 InventoryItemId = item.InventoryItemId,
                 MovementType = StockMovementType.Receipt,
-                Quantity = item.QuantityOrdered,
-                QuantityBeforeMovement = invItem.QuantityOnHand - item.QuantityOrdered,
+                Quantity = received,
+                QuantityBeforeMovement = invItem.QuantityOnHand - received,
                 QuantityAfterMovement = invItem.QuantityOnHand,
                 Remarks = $"Received via PO {po.PONumber}",
                 PerformedByUserId = userId,
@@ -333,11 +342,22 @@ public class ProcurementService : IProcurementService
             });
         }
 
-        var request = await _db.ProcurementRequests.FindAsync(po.ProcurementRequestId);
-        if (request is not null) request.Status = ProcurementStatus.Delivered;
+        if (!receivedAnything)
+            throw new InvalidOperationException("No quantities were received — enter at least one line quantity.");
+
+        // The PO closes only once every line is fully delivered.
+        var fullyDelivered = po.Items.All(i => (i.QuantityDelivered ?? 0) >= i.QuantityOrdered);
+        if (fullyDelivered)
+        {
+            po.IsDelivered = true;
+            po.DeliveredAt = DateTime.UtcNow;
+            var request = await _db.ProcurementRequests.FindAsync(po.ProcurementRequestId);
+            if (request is not null) request.Status = ProcurementStatus.Delivered;
+        }
 
         await _db.SaveChangesAsync();
-        await _audit.LogAsync(userId, "DeliveryConfirmed", "PurchaseOrder", purchaseOrderId, po.PONumber);
+        await _audit.LogAsync(userId, "DeliveryConfirmed", "PurchaseOrder", purchaseOrderId,
+            $"{po.PONumber} ({(fullyDelivered ? "fully delivered" : "partial delivery")})");
         return true;
     }
 }

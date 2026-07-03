@@ -131,7 +131,14 @@ public class ProcurementController : ControllerBase
     public async Task<IActionResult> ConfirmDelivery(int id, [FromBody] ConfirmDeliveryDto? dto)
     {
         var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
-        var ok = await _procurement.ConfirmDeliveryAsync(id, dto, userId);
-        return ok ? NoContent() : NotFound();
+        try
+        {
+            var ok = await _procurement.ConfirmDeliveryAsync(id, dto, userId);
+            return ok ? NoContent() : NotFound();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 }

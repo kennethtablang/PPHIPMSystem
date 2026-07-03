@@ -14,6 +14,11 @@ public class DeliveryLineDto
     [Range(1, int.MaxValue)]
     public int PurchaseOrderItemId { get; set; }
 
+    // Quantity received in this shipment; null = everything still outstanding.
+    // 0 skips the line (allows partial deliveries across multiple confirmations).
+    [Range(0, 1_000_000_000)]
+    public decimal? QuantityReceived { get; set; }
+
     [MaxLength(100)]
     public string? LotNumber { get; set; }
 

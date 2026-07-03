@@ -78,10 +78,15 @@ export default function PurchaseOrders() {
   const openDeliver = async id => {
     try {
       const { data } = await getPurchaseOrder(id);
-      setDeliverLines(data.items.map(i => ({
-        purchaseOrderItemId: i.id, itemName: i.itemName, unit: i.unit,
-        quantityOrdered: i.quantityOrdered, lotNumber: '', expirationDate: '',
-      })));
+      setDeliverLines(data.items
+        .map(i => ({
+          purchaseOrderItemId: i.id, itemName: i.itemName, unit: i.unit,
+          quantityOrdered: i.quantityOrdered,
+          outstanding: i.quantityOrdered - (i.quantityDelivered ?? 0),
+          quantityReceived: String(i.quantityOrdered - (i.quantityDelivered ?? 0)),
+          lotNumber: '', expirationDate: '',
+        }))
+        .filter(l => l.outstanding > 0));
       setDeliverModal(data);
     } catch { toast.error('Failed to load purchase order.'); }
   };
@@ -93,16 +98,27 @@ export default function PurchaseOrders() {
   });
 
   const deliver = async () => {
+    for (const l of deliverLines) {
+      const qty = Number(l.quantityReceived || 0);
+      if (Number.isNaN(qty) || qty < 0) { toast.error(`${l.itemName}: enter a valid quantity.`); return; }
+      if (qty > l.outstanding) { toast.error(`${l.itemName}: received quantity exceeds the outstanding ${l.outstanding}.`); return; }
+    }
+    if (!deliverLines.some(l => Number(l.quantityReceived || 0) > 0)) {
+      toast.error('Enter the quantity received for at least one line.');
+      return;
+    }
+
     setDelivering(true);
     try {
       await confirmDelivery(deliverModal.id, {
         lines: deliverLines.map(l => ({
           purchaseOrderItemId: l.purchaseOrderItemId,
+          quantityReceived: Number(l.quantityReceived || 0),
           lotNumber: l.lotNumber || null,
           expirationDate: l.expirationDate || null,
         })),
       });
-      toast.success('Delivery confirmed — stock updated and batches recorded.');
+      toast.success('Delivery recorded — stock updated and batches created.');
       setDeliverModal(null);
       load();
     } catch (e) {
@@ -210,9 +226,13 @@ export default function PurchaseOrders() {
                   <td>{po.generatedByFullName}</td>
                   <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{new Date(po.generatedAt).toLocaleDateString('en-PH')}</td>
                   <td>
-                    <span className={`badge ${po.isDelivered ? 'badge-green' : 'badge-amber'}`}>
-                      {po.isDelivered ? 'Delivered' : 'Pending'}
-                    </span>
+                    {po.isDelivered ? (
+                      <span className="badge badge-green">Delivered</span>
+                    ) : (po.items ?? []).some(i => (i.quantityDelivered ?? 0) > 0) ? (
+                      <span className="badge badge-blue">Partial</span>
+                    ) : (
+                      <span className="badge badge-amber">Pending</span>
+                    )}
                   </td>
                   <td>
                     <div style={{ display: 'flex', gap: 4 }}>
@@ -335,17 +355,26 @@ export default function PurchaseOrders() {
           }
         >
           <div className="alert alert-info">
-            Stock will be added and a batch recorded for each line. Enter the lot number and
-            expiration date from the physical delivery — leave blank if not applicable.
+            Enter what actually arrived — partial quantities are fine and the PO stays open
+            until every line is fully delivered. Each received line adds stock and records a
+            batch (enter lot / expiry from the physical delivery, or leave blank).
           </div>
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Item</th><th>Qty</th><th>Lot / Batch No.</th><th>Expiration Date</th></tr></thead>
+              <thead><tr><th>Item</th><th>Outstanding</th><th>Qty Received *</th><th>Lot / Batch No.</th><th>Expiration Date</th></tr></thead>
               <tbody>
                 {deliverLines.map((l, i) => (
                   <tr key={l.purchaseOrderItemId}>
                     <td>{l.itemName} <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>({l.unit})</span></td>
-                    <td style={{ fontWeight: 600 }}>{l.quantityOrdered}</td>
+                    <td style={{ fontWeight: 600 }}>
+                      {l.outstanding}
+                      {l.outstanding < l.quantityOrdered && (
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>of {l.quantityOrdered} ordered</div>
+                      )}
+                    </td>
+                    <td>
+                      <input className="form-control" type="number" min="0" max={l.outstanding} step="0.01" style={{ width: 110 }} value={l.quantityReceived} onChange={setDeliverLine(i, 'quantityReceived')} />
+                    </td>
                     <td>
                       <input className="form-control" value={l.lotNumber} onChange={setDeliverLine(i, 'lotNumber')} placeholder="e.g. LOT-2026-001" maxLength={100} />
                     </td>
