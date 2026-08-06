@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PPHIPMSystem.Server.Data;
 
@@ -11,9 +12,11 @@ using PPHIPMSystem.Server.Data;
 namespace PPHIPMSystem.Server.Data.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260703120527_AddRequestAttachments")]
+    partial class AddRequestAttachments
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -471,10 +474,6 @@ namespace PPHIPMSystem.Server.Data.Migrations
                         .HasMaxLength(300)
                         .HasColumnType("nvarchar(300)");
 
-                    b.Property<string>("HeadOfDepartment")
-                        .HasMaxLength(150)
-                        .HasColumnType("nvarchar(150)");
-
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
 
@@ -486,71 +485,6 @@ namespace PPHIPMSystem.Server.Data.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("Departments");
-                });
-
-            modelBuilder.Entity("PPHIPMSystem.Server.Models.DepartmentBudget", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<decimal>("Amount")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<int>("DepartmentId")
-                        .HasColumnType("int");
-
-                    b.Property<int>("FiscalYear")
-                        .HasColumnType("int");
-
-                    b.Property<string>("Notes")
-                        .HasMaxLength(500)
-                        .HasColumnType("nvarchar(500)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("DepartmentId", "FiscalYear")
-                        .IsUnique();
-
-                    b.ToTable("DepartmentBudgets");
-                });
-
-            modelBuilder.Entity("PPHIPMSystem.Server.Models.DepartmentStock", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("DepartmentId")
-                        .HasColumnType("int");
-
-                    b.Property<int>("InventoryItemId")
-                        .HasColumnType("int");
-
-                    b.Property<decimal>("Quantity")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("datetime2");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("InventoryItemId");
-
-                    b.HasIndex("DepartmentId", "InventoryItemId")
-                        .IsUnique();
-
-                    b.ToTable("DepartmentStocks");
                 });
 
             modelBuilder.Entity("PPHIPMSystem.Server.Models.InventoryItem", b =>
@@ -1062,9 +996,6 @@ namespace PPHIPMSystem.Server.Data.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
-                    b.Property<int?>("DepartmentId")
-                        .HasColumnType("int");
-
                     b.Property<int>("InventoryItemId")
                         .HasColumnType("int");
 
@@ -1100,9 +1031,6 @@ namespace PPHIPMSystem.Server.Data.Migrations
                     b.Property<int?>("ReversalOfMovementId")
                         .HasColumnType("int");
 
-                    b.Property<int?>("ToDepartmentId")
-                        .HasColumnType("int");
-
                     b.Property<string>("VoidReason")
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
@@ -1115,8 +1043,6 @@ namespace PPHIPMSystem.Server.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("DepartmentId");
-
                     b.HasIndex("InventoryItemId");
 
                     b.HasIndex("PerformedByUserId");
@@ -1124,8 +1050,6 @@ namespace PPHIPMSystem.Server.Data.Migrations
                     b.HasIndex("PurchaseOrderId");
 
                     b.HasIndex("ReversalOfMovementId");
-
-                    b.HasIndex("ToDepartmentId");
 
                     b.HasIndex("VoidedByUserId");
 
@@ -1287,36 +1211,6 @@ namespace PPHIPMSystem.Server.Data.Migrations
                         .HasForeignKey("InventoryItemId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-
-                    b.Navigation("InventoryItem");
-                });
-
-            modelBuilder.Entity("PPHIPMSystem.Server.Models.DepartmentBudget", b =>
-                {
-                    b.HasOne("PPHIPMSystem.Server.Models.Department", "Department")
-                        .WithMany()
-                        .HasForeignKey("DepartmentId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Department");
-                });
-
-            modelBuilder.Entity("PPHIPMSystem.Server.Models.DepartmentStock", b =>
-                {
-                    b.HasOne("PPHIPMSystem.Server.Models.Department", "Department")
-                        .WithMany()
-                        .HasForeignKey("DepartmentId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.HasOne("PPHIPMSystem.Server.Models.InventoryItem", "InventoryItem")
-                        .WithMany()
-                        .HasForeignKey("InventoryItemId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
-                    b.Navigation("Department");
 
                     b.Navigation("InventoryItem");
                 });
@@ -1521,11 +1415,6 @@ namespace PPHIPMSystem.Server.Data.Migrations
 
             modelBuilder.Entity("PPHIPMSystem.Server.Models.StockMovement", b =>
                 {
-                    b.HasOne("PPHIPMSystem.Server.Models.Department", "Department")
-                        .WithMany()
-                        .HasForeignKey("DepartmentId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("PPHIPMSystem.Server.Models.InventoryItem", "InventoryItem")
                         .WithMany("StockMovements")
                         .HasForeignKey("InventoryItemId")
@@ -1547,17 +1436,10 @@ namespace PPHIPMSystem.Server.Data.Migrations
                         .HasForeignKey("ReversalOfMovementId")
                         .OnDelete(DeleteBehavior.Restrict);
 
-                    b.HasOne("PPHIPMSystem.Server.Models.Department", "ToDepartment")
-                        .WithMany()
-                        .HasForeignKey("ToDepartmentId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("PPHIPMSystem.Server.Models.ApplicationUser", "VoidedByUser")
                         .WithMany()
                         .HasForeignKey("VoidedByUserId")
                         .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("Department");
 
                     b.Navigation("InventoryItem");
 
@@ -1566,8 +1448,6 @@ namespace PPHIPMSystem.Server.Data.Migrations
                     b.Navigation("PurchaseOrder");
 
                     b.Navigation("ReversalOfMovement");
-
-                    b.Navigation("ToDepartment");
 
                     b.Navigation("VoidedByUser");
                 });
