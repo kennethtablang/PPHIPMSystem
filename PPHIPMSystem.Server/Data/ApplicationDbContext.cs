@@ -27,6 +27,9 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<Backup> Backups => Set<Backup>();
     public DbSet<SystemSetting> SystemSettings => Set<SystemSetting>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+    public DbSet<RequestAttachment> RequestAttachments => Set<RequestAttachment>();
+    public DbSet<DepartmentStock> DepartmentStocks => Set<DepartmentStock>();
+    public DbSet<DepartmentBudget> DepartmentBudgets => Set<DepartmentBudget>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -39,6 +42,55 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
              .WithMany()
              .HasForeignKey(t => t.UserId)
              .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<DepartmentStock>(e =>
+        {
+            e.HasIndex(d => new { d.DepartmentId, d.InventoryItemId }).IsUnique();
+            e.HasOne(d => d.Department)
+             .WithMany()
+             .HasForeignKey(d => d.DepartmentId)
+             .OnDelete(DeleteBehavior.Restrict);
+            e.HasOne(d => d.InventoryItem)
+             .WithMany()
+             .HasForeignKey(d => d.InventoryItemId)
+             .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<StockMovement>(e =>
+        {
+            e.HasOne(m => m.Department)
+             .WithMany()
+             .HasForeignKey(m => m.DepartmentId)
+             .OnDelete(DeleteBehavior.Restrict);
+
+            // Receiving ward of a DepartmentTransfer.
+            e.HasOne(m => m.ToDepartment)
+             .WithMany()
+             .HasForeignKey(m => m.ToDepartmentId)
+             .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<DepartmentBudget>(e =>
+        {
+            // One appropriation per department per fiscal year.
+            e.HasIndex(b => new { b.DepartmentId, b.FiscalYear }).IsUnique();
+            e.HasOne(b => b.Department)
+             .WithMany()
+             .HasForeignKey(b => b.DepartmentId)
+             .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<RequestAttachment>(e =>
+        {
+            e.HasOne(a => a.ProcurementRequest)
+             .WithMany()
+             .HasForeignKey(a => a.ProcurementRequestId)
+             .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(a => a.UploadedByUser)
+             .WithMany()
+             .HasForeignKey(a => a.UploadedByUserId)
+             .OnDelete(DeleteBehavior.Restrict);
         });
 
         builder.Entity<ApplicationUser>(e =>

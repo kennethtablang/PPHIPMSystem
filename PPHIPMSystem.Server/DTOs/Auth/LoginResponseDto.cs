@@ -11,6 +11,8 @@ public class LoginResponseDto
     public string? DepartmentName { get; set; }
     public int? DepartmentId { get; set; }
     public bool RequiresTwoFactor { get; set; } = false;
+    // With RequiresTwoFactor: "authenticator" (TOTP app) or "email" (mailed code).
+    public string? TwoFactorMethod { get; set; }
     // Client must route to the forced password-change screen before the app.
     public bool MustChangePassword { get; set; } = false;
     // Rotating token used to obtain a new JWT when the current one expires.

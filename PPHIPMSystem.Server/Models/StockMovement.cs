@@ -31,6 +31,18 @@ public class StockMovement
     public int? PurchaseOrderId { get; set; }
     public PurchaseOrder? PurchaseOrder { get; set; }
 
+    // Destination (Issuance) or source (Return, DepartmentConsumption,
+    // DepartmentTransfer) department.
+    // Null = external / unattributed — the pre-transfer behaviour.
+    public int? DepartmentId { get; set; }
+    public Department? Department { get; set; }
+
+    // Receiving department of a DepartmentTransfer; null for every other type.
+    // Paired with DepartmentId (the source) it records the whole handover in
+    // one row instead of a synthetic return + issuance pair.
+    public int? ToDepartmentId { get; set; }
+    public Department? ToDepartment { get; set; }
+
     public DateTime MovementDate { get; set; } = DateTime.UtcNow;
 
     // Void tracking. A voided movement keeps its ledger row but is flagged and

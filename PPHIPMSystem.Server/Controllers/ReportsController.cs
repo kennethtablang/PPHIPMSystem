@@ -55,6 +55,20 @@ public class ReportsController : ControllerBase
         => File(await _exports.ExportInventorySnapshotAsync(), XlsxMime,
             $"inventory-snapshot-{DateTime.Now:yyyyMMdd}.xlsx");
 
+    // Narrower than the rest of this controller on purpose: budget figures are
+    // for the people who hold the money, matching the Budgets page's own roles.
+    [HttpGet("department-budgets/export")]
+    [Authorize(Roles = "SuperAdmin,HospitalAdministrator,ProcurementStaff")]
+    public async Task<IActionResult> ExportDepartmentBudgets([FromQuery] int? year)
+    {
+        var fiscalYear = year ?? DateTime.UtcNow.Year;
+        if (fiscalYear is < 2000 or > 2200)
+            return BadRequest(new { message = "Fiscal year is out of range." });
+
+        return File(await _exports.ExportDepartmentBudgetsAsync(fiscalYear), XlsxMime,
+            $"department-budgets-FY{fiscalYear}.xlsx");
+    }
+
     [HttpGet("disposals/export")]
     public async Task<IActionResult> ExportDisposalCertificate([FromQuery] DateTime startDate, [FromQuery] DateTime endDate)
         => File(await _exports.ExportDisposalCertificateAsync(startDate, endDate), XlsxMime,

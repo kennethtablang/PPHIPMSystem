@@ -67,6 +67,8 @@ public class MappingProfile : Profile
             .ForMember(d => d.ItemCode, o => o.MapFrom(s => s.InventoryItem.ItemCode))
             .ForMember(d => d.PerformedByFullName, o => o.MapFrom(s => $"{s.PerformedByUser.FirstName} {s.PerformedByUser.LastName}"))
             .ForMember(d => d.PONumber, o => o.MapFrom(s => s.PurchaseOrder != null ? s.PurchaseOrder.PONumber : null))
+            .ForMember(d => d.DepartmentName, o => o.MapFrom(s => s.Department != null ? s.Department.Name : null))
+            .ForMember(d => d.ToDepartmentName, o => o.MapFrom(s => s.ToDepartment != null ? s.ToDepartment.Name : null))
             .ForMember(d => d.VoidedByFullName, o => o.MapFrom(s =>
                 s.VoidedByUser != null ? $"{s.VoidedByUser.FirstName} {s.VoidedByUser.LastName}" : null));
         CreateMap<CreateStockMovementDto, StockMovement>();

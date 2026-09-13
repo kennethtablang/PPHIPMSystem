@@ -69,6 +69,16 @@
   --surface: #ffffff;
   --card-border: rgba(255,255,255,0.6);
   --card-highlight: rgba(255,255,255,0.7);
+
+  /* ── Motion ──
+     One easing curve and three durations for the whole app so hovers, page
+     changes, and modals all decelerate identically. --ease is a soft
+     "settle" curve; --ease-out is for things that only need to arrive. */
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out: cubic-bezier(0.33, 1, 0.68, 1);
+  --dur-fast: 120ms;
+  --dur-base: 220ms;
+  --dur-slow: 380ms;
 }
 
 /* ── Dark theme (see utils/displayPrefs.js — set via html[data-theme="dark"]) ── */
@@ -135,6 +145,8 @@ html[data-theme="dark"] .alert-info    { background: rgba(59,130,246,.12); borde
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+html { scroll-behavior: smooth; }
+
 body {
   font-family: 'Montserrat', sans-serif;
   background: var(--page-bg);
@@ -153,20 +165,38 @@ a { color: inherit; text-decoration: none; }
 ::-webkit-scrollbar-thumb:hover { background: var(--green-300); }
 
 /* ── Global Animations (keyframes defined at the bottom of this file) ── */
-.fade-in { animation: fadeIn 0.4s ease forwards; }
-.slide-up { animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+.fade-in { animation: fadeIn var(--dur-slow) var(--ease-out) forwards; }
+.slide-up { animation: slideUp var(--dur-slow) var(--ease) forwards; }
 .delay-1 { animation-delay: 0.05s; }
 .delay-2 { animation-delay: 0.1s; }
 .delay-3 { animation-delay: 0.15s; }
+
+/* Route change: a short rise + fade, keyed on pathname in Layout.jsx.
+   Deliberately shorter than .slide-up — a full-page 380ms move reads as lag
+   when you are just tabbing between list pages. */
+.page-transition { animation: pageEnter var(--dur-base) var(--ease-out) both; }
 
 /* ── Buttons ── */
 .btn {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 8px 18px; border-radius: 99px;
   font-size: 13px; font-weight: 600; cursor: pointer;
-  border: none; transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1); white-space: nowrap; font-family: inherit;
+  border: none; white-space: nowrap; font-family: inherit;
   letter-spacing: .01em;
+  /* Named properties rather than `all`: `all` also animates layout-affecting
+     properties (width/padding) whenever a label changes, which stutters. */
+  transition:
+    background-color var(--dur-base) var(--ease),
+    box-shadow var(--dur-base) var(--ease),
+    color var(--dur-base) var(--ease),
+    border-color var(--dur-base) var(--ease),
+    filter var(--dur-base) var(--ease),
+    opacity var(--dur-base) var(--ease),
+    transform var(--dur-fast) var(--ease-out);
 }
+.btn:hover:not(:disabled) { transform: translateY(-1px); }
+.btn:active:not(:disabled) { transform: translateY(0) scale(.975); transition-duration: 60ms; }
+.btn:focus-visible { outline: 2px solid var(--green-500); outline-offset: 2px; }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 .btn-primary {
   background: linear-gradient(135deg, var(--green-700) 0%, var(--green-500) 100%);
@@ -196,7 +226,9 @@ a { color: inherit; text-decoration: none; }
   border-radius: var(--radius-md);
   border: 1px solid var(--card-border);
   box-shadow: 0 4px 24px rgba(5,46,16,.07), inset 0 1px 0 var(--card-highlight);
+  transition: box-shadow var(--dur-base) var(--ease), transform var(--dur-base) var(--ease);
 }
+.card:hover { box-shadow: 0 8px 30px rgba(5,46,16,.11), inset 0 1px 0 var(--card-highlight); }
 .card-header { padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
 .card-title { font-size: 15px; font-weight: 600; color: var(--text-primary); }
 .card-body { padding: 20px; }
@@ -211,10 +243,20 @@ thead th {
 }
 thead th:first-child { border-radius: var(--radius-sm) 0 0 0; }
 thead th:last-child  { border-radius: 0 var(--radius-sm) 0 0; }
-tbody tr { border-bottom: 1px solid var(--border); transition: background-color 0.2s ease, transform 0.2s ease; }
+tbody tr {
+  border-bottom: 1px solid var(--border);
+  /* An inset rail instead of translateY: shifting a row nudges its neighbours'
+     1px borders and makes the whole table shimmer on hover. */
+  box-shadow: inset 3px 0 0 transparent;
+  transition: background-color var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out);
+}
 tbody tr:last-child { border-bottom: none; }
-tbody tr:hover { background: rgba(255, 255, 255, 0.6); transform: translateY(-1px); }
+tbody tr:hover { background: rgba(255, 255, 255, 0.6); box-shadow: inset 3px 0 0 var(--green-300); }
 tbody td { padding: 11px 14px; color: var(--text-primary); font-size: 13px; }
+
+/* Row ticked for a bulk action (see .bulk-bar) */
+tbody tr.row-selected { background: var(--green-50); box-shadow: inset 3px 0 0 var(--green-600); }
+tbody tr.row-selected:hover { background: var(--green-100); }
 
 /* ── Badges ── */
 .badge {
@@ -367,6 +409,31 @@ textarea.form-control { resize: vertical; min-height: 80px; }
 
 .filter-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
 
+/* ── Bulk action bar (tick-box selection on list pages) ── */
+.bulk-bar {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 10px 16px; margin-bottom: 12px;
+  border-radius: var(--radius-md);
+  background: var(--green-50);
+  border: 1px solid var(--green-200);
+  box-shadow: var(--shadow-sm);
+  animation: bulkBarIn var(--dur-base) var(--ease) both;
+}
+.bulk-bar-count {
+  font-size: 13px; font-weight: 700; color: var(--green-800);
+  padding-right: 10px; border-right: 1px solid var(--green-200);
+}
+
+/* Tick boxes: brand colour + a comfortable hit area in dense tables. */
+input[type="checkbox"], input[type="radio"] {
+  accent-color: var(--green-600);
+  width: 15px; height: 15px;
+  cursor: pointer;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+input[type="checkbox"]:hover:not(:disabled) { transform: scale(1.12); }
+input[type="checkbox"]:disabled { cursor: not-allowed; opacity: .45; }
+
 .empty-state { text-align: center; padding: 60px 20px; color: var(--text-muted); }
 .empty-state h3 { font-size: 15px; font-weight: 600; color: var(--text-secondary); margin-top: 8px; }
 
@@ -412,6 +479,17 @@ html[data-reduce-motion="true"] *::after {
   animation-delay: 0ms !important;
   animation-iteration-count: 1 !important;
   transition-duration: .001ms !important;
+  scroll-behavior: auto !important;
+}
+/* Honour the OS-level setting too, not just our in-app preference. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .001ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .001ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 html[data-density="compact"] tbody td,
 html[data-density="compact"] thead th { padding: 6px 12px; }
@@ -421,6 +499,8 @@ html[data-density="compact"] thead th { padding: 6px 12px; }
 @keyframes slideUp  { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes slideInRight { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
 @keyframes spin     { to { transform: rotate(360deg); } }
+@keyframes pageEnter { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes bulkBarIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes modalPop {
   0% { opacity: 0; transform: scale(0.96) translateY(10px); }
   100% { opacity: 1; transform: scale(1) translateY(0); }

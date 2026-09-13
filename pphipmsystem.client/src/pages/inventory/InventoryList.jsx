@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { MdAdd, MdEdit, MdDelete, MdSearch, MdWarning, MdFileDownload, MdShoppingCart, MdUploadFile } from 'react-icons/md';
+import { MdAdd, MdEdit, MdDelete, MdSearch, MdWarning, MdFileDownload, MdShoppingCart, MdUploadFile, MdQrCode2, MdInventory2, MdClose } from 'react-icons/md';
 import { getItems, createItem, updateItem, deleteItem, importPreview, importItems, downloadImportTemplate } from '../../api/inventory';
 import { getCategories } from '../../api/categories';
 import { getSystemSettings } from '../../api/systemSettings';
 import { exportInventorySnapshot } from '../../api/reports';
+import LabelPrintModal from '../../components/common/LabelPrintModal';
+import ReplenishModal from '../../components/common/ReplenishModal';
 import Modal from '../../components/common/Modal';
 import { toast } from '../../components/common/Toast';
 import Pagination, { usePagination } from '../../components/common/Pagination';
@@ -40,6 +42,13 @@ export default function InventoryList() {
   // Admin-configured defaults for new items (Settings → System); falls back to BLANK's values.
   const [itemDefaults, setItemDefaults] = useState(null);
   const pager = usePagination(items);
+  // QR label sheet for the currently filtered items.
+  const [labelModal, setLabelModal] = useState(false);
+  // Tick-box selection driving the bulk reorder / bulk replenish actions.
+  // Holds item ids; survives paging but is cleared whenever the filters reload the list.
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  // Items being restocked (lot + expiry captured per item); null = modal closed.
+  const [replenishItems, setReplenishItems] = useState(null);
   // Bulk import: pick file → preview validation results → import valid rows.
   const [importModal, setImportModal] = useState(false);
   const [importFile, setImportFile] = useState(null);
@@ -67,6 +76,30 @@ export default function InventoryList() {
   }, [canEdit]);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: reload only when these inputs change
   useEffect(() => { load(); }, [search, catFilter, lowStockOnly]);
+
+  // Drop ticks for rows that are no longer listed (filter change, delete, reload)
+  // so the bulk action count can never include an item the user cannot see.
+  useEffect(() => {
+    setSelectedIds(prev => {
+      if (prev.size === 0) return prev;
+      const visible = new Set(items.map(i => i.id));
+      const next = new Set([...prev].filter(id => visible.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [items]);
+
+  // Anyone who can act in bulk gets the tick column.
+  const canSelect = canRequest || canEdit;
+  const selectedItems = items.filter(i => selectedIds.has(i.id));
+  const allSelected = items.length > 0 && selectedIds.size === items.length;
+
+  const toggleOne = id => setSelectedIds(prev => {
+    const next = new Set(prev);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
+  const toggleAll = () => setSelectedIds(allSelected ? new Set() : new Set(items.map(i => i.id)));
+  const clearSelection = () => setSelectedIds(new Set());
 
   const openCreate = () => { setForm({ ...BLANK, ...itemDefaults }); setModal('create'); };
 
@@ -153,6 +186,9 @@ export default function InventoryList() {
           )}
           {canEdit && (
             <>
+              <button className="btn btn-secondary" onClick={() => setLabelModal(true)} disabled={items.length === 0} title="Print QR labels for the items shown">
+                <MdQrCode2 size={16} /> Labels
+              </button>
               <button className="btn btn-secondary" onClick={openImport}>
                 <MdUploadFile size={16} /> Import
               </button>
@@ -178,7 +214,7 @@ export default function InventoryList() {
           <input type="checkbox" checked={lowStockOnly} onChange={e => setLowStockOnly(e.target.checked)} />
           Low Stock Only
         </label>
-        {canRequest && lowStockOnly && items.length > 0 && (
+        {canRequest && lowStockOnly && items.length > 0 && selectedIds.size === 0 && (
           <button
             className="btn btn-primary btn-sm"
             onClick={() => navigate('/procurement', { state: reorderPrefill(items) })}
@@ -189,6 +225,43 @@ export default function InventoryList() {
         )}
       </div>
 
+      {/* Bulk action bar — appears once rows are ticked */}
+      {canSelect && selectedIds.size > 0 && (
+        <div className="bulk-bar">
+          <span className="bulk-bar-count">{selectedIds.size} selected</span>
+          {canRequest && (
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={() => navigate('/procurement', { state: reorderPrefill(selectedItems) })}
+              title="Create one procurement request covering every ticked item"
+            >
+              <MdShoppingCart size={14} /> Reorder Selected
+            </button>
+          )}
+          {canEdit && (
+            <button
+              className="btn btn-success btn-sm"
+              onClick={() => setReplenishItems(selectedItems)}
+              title="Receive stock for the ticked items, recording lot and expiration date"
+            >
+              <MdInventory2 size={14} /> Replenish Selected
+            </button>
+          )}
+          {canEdit && (
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={() => setLabelModal('selected')}
+              title="Print QR labels for the ticked items"
+            >
+              <MdQrCode2 size={14} /> Labels
+            </button>
+          )}
+          <button className="btn btn-ghost btn-sm" onClick={clearSelection} style={{ marginLeft: 'auto' }}>
+            <MdClose size={14} /> Clear
+          </button>
+        </div>
+      )}
+
       {loading ? (
         <div className="loading-center"><div className="spinner" /></div>
       ) : (
@@ -197,6 +270,20 @@ export default function InventoryList() {
           <table>
             <thead>
               <tr>
+                {canSelect && (
+                  <th style={{ width: 38 }}>
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      // Ticked-but-not-all renders the dash state.
+                      ref={el => { if (el) el.indeterminate = selectedIds.size > 0 && !allSelected; }}
+                      onChange={toggleAll}
+                      disabled={items.length === 0}
+                      aria-label="Select all listed items"
+                      title={`Select all ${items.length} listed item(s)`}
+                    />
+                  </th>
+                )}
                 <th>Code</th>
                 <th>Item Name</th>
                 <th>Category</th>
@@ -210,9 +297,19 @@ export default function InventoryList() {
             </thead>
             <tbody>
               {items.length === 0 ? (
-                <tr><td colSpan={9} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>No items found.</td></tr>
+                <tr><td colSpan={canSelect ? 10 : 9} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>No items found.</td></tr>
               ) : pager.pageItems.map(item => (
-                <tr key={item.id}>
+                <tr key={item.id} className={selectedIds.has(item.id) ? 'row-selected' : undefined}>
+                  {canSelect && (
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(item.id)}
+                        onChange={() => toggleOne(item.id)}
+                        aria-label={`Select ${item.name}`}
+                      />
+                    </td>
+                  )}
                   <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{item.itemCode ?? '—'}</td>
                   <td>
                     <div style={{ fontWeight: 500 }}>{item.name}</div>
@@ -256,6 +353,14 @@ export default function InventoryList() {
                         )}
                         {canEdit && (
                           <>
+                            <button
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => setReplenishItems([item])}
+                              title="Receive stock for this item, recording lot and expiration date"
+                              style={{ fontSize: 11 }}
+                            >
+                              <MdInventory2 size={13} /> Replenish
+                            </button>
                             <button className="btn btn-ghost btn-icon btn-sm" onClick={() => openEdit(item)} title="Edit"><MdEdit size={15} /></button>
                             <button className="btn btn-danger btn-icon btn-sm" onClick={() => remove(item.id)} title="Delete"><MdDelete size={15} /></button>
                           </>
@@ -270,6 +375,27 @@ export default function InventoryList() {
         </div>
         <Pagination {...pager} />
         </>
+      )}
+
+      {labelModal && (
+        <LabelPrintModal
+          title={labelModal === 'selected' ? 'Item QR Labels (Selected)' : 'Item QR Labels'}
+          onClose={() => setLabelModal(false)}
+          labels={(labelModal === 'selected' ? selectedItems : items).map(i => ({
+            qr: i.itemCode || `ITEM-${i.id}`,
+            title: i.name,
+            subtitle: i.itemCode ?? `ITEM-${i.id}`,
+            meta: i.unit,
+          }))}
+        />
+      )}
+
+      {replenishItems && (
+        <ReplenishModal
+          items={replenishItems}
+          onClose={() => setReplenishItems(null)}
+          onDone={() => { clearSelection(); load(); }}
+        />
       )}
 
       {importModal && (

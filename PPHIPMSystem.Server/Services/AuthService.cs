@@ -62,6 +62,19 @@ public class AuthService : IAuthService
 
         if (user.TwoFactorEnabled)
         {
+            // Users enrolled with an authenticator app verify offline — no email
+            // dependency. Everyone else keeps the mailed code.
+            var authenticatorKey = await _userManager.GetAuthenticatorKeyAsync(user);
+            if (!string.IsNullOrEmpty(authenticatorKey))
+            {
+                return new LoginResponseDto
+                {
+                    RequiresTwoFactor = true,
+                    TwoFactorMethod = "authenticator",
+                    Username = user.UserName!
+                };
+            }
+
             var code = await _userManager.GenerateTwoFactorTokenAsync(user, "Email");
             
             string emailBody = $@"
@@ -78,6 +91,7 @@ public class AuthService : IAuthService
             return new LoginResponseDto
             {
                 RequiresTwoFactor = true,
+                TwoFactorMethod = "email",
                 Username = user.UserName!
             };
         }
@@ -117,7 +131,13 @@ public class AuthService : IAuthService
             throw new InvalidOperationException("Account temporarily locked after repeated failed sign-ins. Try again in 15 minutes.");
         }
 
-        var validCode = await _userManager.VerifyTwoFactorTokenAsync(user, "Email", dto.Code);
+        // Accept whichever second factor the account has: authenticator app
+        // first (offline), then the emailed code.
+        var code = dto.Code.Replace(" ", "").Replace("-", "");
+        var validCode = await _userManager.VerifyTwoFactorTokenAsync(
+            user, _userManager.Options.Tokens.AuthenticatorTokenProvider, code);
+        if (!validCode)
+            validCode = await _userManager.VerifyTwoFactorTokenAsync(user, "Email", dto.Code);
         if (!validCode)
         {
             // Failed codes count toward lockout too, so OTPs can't be brute-forced.
@@ -181,6 +201,68 @@ public class AuthService : IAuthService
             MustChangePassword = user.MustChangePassword,
             RefreshToken = newRefresh
         };
+    }
+
+    // ── Authenticator-app (TOTP) enrolment ──────────────────────────────────
+
+    // Generates (or reuses) the shared secret and returns it with the otpauth
+    // URI the client renders as a QR code.
+    public async Task<AuthenticatorSetupDto?> BeginAuthenticatorSetupAsync(string userId)
+    {
+        var user = await _userManager.FindByIdAsync(userId);
+        if (user is null) return null;
+
+        var key = await _userManager.GetAuthenticatorKeyAsync(user);
+        if (string.IsNullOrEmpty(key))
+        {
+            await _userManager.ResetAuthenticatorKeyAsync(user);
+            key = await _userManager.GetAuthenticatorKeyAsync(user);
+        }
+
+        var issuer = "PPH IPMS";
+        var account = user.Email ?? user.UserName ?? userId;
+        var uri = $"otpauth://totp/{Uri.EscapeDataString(issuer)}:{Uri.EscapeDataString(account)}" +
+                  $"?secret={key}&issuer={Uri.EscapeDataString(issuer)}&digits=6";
+
+        return new AuthenticatorSetupDto
+        {
+            SharedKey = FormatKey(key!),
+            OtpauthUri = uri
+        };
+    }
+
+    // Confirms enrolment with a live code; only then does TOTP take effect.
+    public async Task<bool> ConfirmAuthenticatorAsync(string userId, string code)
+    {
+        var user = await _userManager.FindByIdAsync(userId);
+        if (user is null) return false;
+
+        var valid = await _userManager.VerifyTwoFactorTokenAsync(
+            user, _userManager.Options.Tokens.AuthenticatorTokenProvider, code.Replace(" ", "").Replace("-", ""));
+        if (!valid) return false;
+
+        await _userManager.SetTwoFactorEnabledAsync(user, true);
+        await _audit.LogAsync(userId, "AuthenticatorEnabled", "User", null);
+        return true;
+    }
+
+    // Removes the authenticator; 2FA (if still enabled) falls back to email codes.
+    public async Task<bool> RemoveAuthenticatorAsync(string userId)
+    {
+        var user = await _userManager.FindByIdAsync(userId);
+        if (user is null) return false;
+
+        await _userManager.RemoveAuthenticationTokenAsync(user, "[AspNetUserStore]", "AuthenticatorKey");
+        await _audit.LogAsync(userId, "AuthenticatorRemoved", "User", null);
+        return true;
+    }
+
+    private static string FormatKey(string key)
+    {
+        // Groups of four make manual entry humane: "abcd efgh ijkl …"
+        var chunks = Enumerable.Range(0, (key.Length + 3) / 4)
+            .Select(i => key.Substring(i * 4, Math.Min(4, key.Length - i * 4)));
+        return string.Join(" ", chunks).ToLowerInvariant();
     }
 
     public async Task RevokeRefreshTokenAsync(string refreshToken)

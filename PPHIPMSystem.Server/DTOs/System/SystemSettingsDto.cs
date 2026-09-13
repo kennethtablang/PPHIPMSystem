@@ -44,4 +44,9 @@ public class SystemSettingsDto
 
     // Email the monthly consumption/procurement summary to administrators.
     public bool MonthlyReportEmails { get; set; } = false;
+
+    // On: a purchase order that would take a department past its fiscal-year
+    // budget is rejected. Off: it is allowed and merely flagged. Departments
+    // with no budget set are never checked either way.
+    public bool EnforceDepartmentBudget { get; set; } = true;
 }

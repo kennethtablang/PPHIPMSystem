@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { MdDns, MdSave, MdInventory2, MdLock, MdCampaign, MdStorage } from 'react-icons/md';
+import { MdDns, MdSave, MdInventory2, MdLock, MdCampaign, MdStorage, MdAccountBalanceWallet } from 'react-icons/md';
 import { getSystemSettings, updateSystemSettings } from '../../../api/systemSettings';
 import { toast } from '../../../components/common/Toast';
 
@@ -107,6 +107,20 @@ export default function SystemTab() {
             <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 12 }}>On the 1st of each month, email administrators a consumption and procurement summary of the previous month.</p>
           </div>
           <Toggle on={settings.monthlyReportEmails} onClick={toggle('monthlyReportEmails')} />
+        </div>
+
+        <Section Icon={MdAccountBalanceWallet} title="Procurement budgets" desc="Department appropriations are set per fiscal year on the Budgets page." />
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <div style={{ flex: 1 }}>
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>Enforce department budgets</label>
+            <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 12 }}>
+              Reject a purchase order that would take a department past its fiscal-year budget. Turn
+              off to allow it and merely notify administrators. Departments with no budget set are
+              never checked either way.
+            </p>
+          </div>
+          <Toggle on={settings.enforceDepartmentBudget} onClick={toggle('enforceDepartmentBudget')} />
         </div>
 
         <Section Icon={MdCampaign} title="Announcement" desc="Shown as a banner to every user until they dismiss it. Leave empty for no banner." />

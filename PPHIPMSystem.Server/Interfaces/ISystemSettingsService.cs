@@ -10,4 +10,5 @@ public interface ISystemSettingsService
     // Convenience accessors used by other services.
     Task<int> GetBackupRetentionDaysAsync();
     Task<PasswordPolicyDto> GetPasswordPolicyAsync();
+    Task<bool> GetEnforceDepartmentBudgetAsync();
 }

@@ -131,6 +131,13 @@ public static class MockDataSeeder
             // Issuance movements – spread over last 6 months
             var issueCount = rng.Next(3, 9);
             decimal runningQty = totalQty;
+
+            // Consumption is stored one row per (item, year, month) — enforced by a
+            // unique index. Several of the issuances below land in the same month,
+            // so they are accumulated here and topped up exactly as the live
+            // issuance path does, instead of inserting a second row that the index
+            // would reject.
+            var monthlyConsumption = new Dictionary<(int Year, int Month), ConsumptionRecord>();
             for (int i = 0; i < issueCount; i++)
             {
                 var issueQty = rng.Next(1, Math.Max(2, (int)(totalQty * 0.05m)));
@@ -150,14 +157,24 @@ public static class MockDataSeeder
                 });
 
                 // Consumption records (Year / Month only)
-                await db.ConsumptionRecords.AddAsync(new ConsumptionRecord
+                var month = (issuedAt.Year, issuedAt.Month);
+                if (monthlyConsumption.TryGetValue(month, out var consumption))
                 {
-                    InventoryItemId = item.Id,
-                    QuantityConsumed = issueQty,
-                    Year            = issuedAt.Year,
-                    Month           = issuedAt.Month,
-                    RecordedAt      = issuedAt,
-                });
+                    consumption.QuantityConsumed += issueQty;
+                }
+                else
+                {
+                    consumption = new ConsumptionRecord
+                    {
+                        InventoryItemId = item.Id,
+                        QuantityConsumed = issueQty,
+                        Year            = issuedAt.Year,
+                        Month           = issuedAt.Month,
+                        RecordedAt      = issuedAt,
+                    };
+                    monthlyConsumption[month] = consumption;
+                    await db.ConsumptionRecords.AddAsync(consumption);
+                }
 
                 runningQty -= issueQty;
             }

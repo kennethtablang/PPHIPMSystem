@@ -9,4 +9,7 @@ public class CreateDepartmentDto
 
     [MaxLength(300)]
     public string? Description { get; set; }
+
+    [MaxLength(150)]
+    public string? HeadOfDepartment { get; set; }
 }

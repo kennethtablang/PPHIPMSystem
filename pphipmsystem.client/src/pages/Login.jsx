@@ -20,6 +20,7 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [showPw, setShowPw] = useState(false);
   const [needs2Fa, setNeeds2Fa] = useState(false);
+  const [twoFaMethod, setTwoFaMethod] = useState('email'); // 'email' | 'authenticator'
 
   const set = k => e => setForm(p => ({ ...p, [k]: e.target.value }));
 
@@ -34,6 +35,7 @@ export default function Login() {
       } else {
         const result = await login(form.username, form.password);
         if (result.requiresTwoFactor) {
+          setTwoFaMethod(result.twoFactorMethod ?? 'email');
           setNeeds2Fa(true);
         } else {
           navigate(result.mustChangePassword ? '/force-password' : '/');
@@ -393,7 +395,9 @@ export default function Login() {
                     border: '1px solid rgba(255,255,255,.1)', marginBottom: '8px'
                   }}>
                     <p style={{ color: 'rgba(255,255,255,.8)', fontSize: 13, lineHeight: 1.5, margin: 0 }}>
-                      A verification code has been sent to your registered email address.
+                      {twoFaMethod === 'authenticator'
+                        ? 'Enter the 6-digit code from your authenticator app.'
+                        : 'A verification code has been sent to your registered email address.'}
                     </p>
                   </div>
                   <label style={{

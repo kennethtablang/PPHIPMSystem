@@ -8,3 +8,13 @@ export const generatePO = (id, d) => api.post(`/procurement/${id}/purchase-order
 export const getPurchaseOrders = () => api.get('/procurement/purchase-orders');
 export const getPurchaseOrder = id => api.get(`/procurement/purchase-orders/${id}`);
 export const confirmDelivery = (id, body = { lines: [] }) => api.patch(`/procurement/purchase-orders/${id}/confirm-delivery`, body);
+
+// Attachments (quotes, canvass sheets, supporting documents)
+export const getAttachments = requestId => api.get(`/procurement/${requestId}/attachments`);
+export const uploadAttachment = (requestId, file) => {
+  const form = new FormData();
+  form.append('file', file);
+  return api.post(`/procurement/${requestId}/attachments`, form);
+};
+export const downloadAttachment = id => api.get(`/procurement/attachments/${id}/download`, { responseType: 'blob' });
+export const deleteAttachment = id => api.delete(`/procurement/attachments/${id}`);

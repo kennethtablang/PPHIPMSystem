@@ -12,6 +12,8 @@ public class ProfileDto
     public string Role { get; set; } = string.Empty;
     public string? DepartmentName { get; set; }
     public bool TwoFactorEnabled { get; set; }
+    // True when an authenticator app is enrolled (TOTP replaces email codes).
+    public bool HasAuthenticator { get; set; }
 
     public bool EmailNotificationsEnabled { get; set; }
     public bool EmailNotifyInventory { get; set; }

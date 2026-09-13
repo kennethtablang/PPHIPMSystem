@@ -10,7 +10,7 @@ import { validatePassword, passwordHint, usePasswordPolicy } from '../../utils/p
 import { fmtDateTime } from '../../utils/format';
 
 const ROLES = ['SuperAdmin', 'HospitalAdministrator', 'InventoryOfficer', 'ProcurementStaff', 'DepartmentHead'];
-const BLANK = { username: '', password: '', firstName: '', middleName: '', lastName: '', employeeId: '', role: 'InventoryOfficer', departmentId: '', email: '', phoneNumber: '', isActive: true };
+const BLANK = { username: '', password: '', firstName: '', middleName: '', lastName: '', employeeId: '', role: 'InventoryOfficer', departmentId: '', email: '', isActive: true };
 
 export default function UsersPage() {
   const pwPolicy = usePasswordPolicy();
@@ -38,7 +38,7 @@ export default function UsersPage() {
 
   const openCreate = () => { setForm(BLANK); setErrors({}); setModal('create'); };
   const openEdit = u => {
-    setForm({ username: u.userName ?? '', password: '', firstName: u.firstName, middleName: u.middleName ?? '', lastName: u.lastName, employeeId: u.employeeId ?? '', role: u.role, departmentId: u.departmentId ?? '', email: u.email ?? '', phoneNumber: u.phoneNumber ?? '', isActive: u.isActive });
+    setForm({ username: u.userName ?? '', password: '', firstName: u.firstName, middleName: u.middleName ?? '', lastName: u.lastName, employeeId: u.employeeId ?? '', role: u.role, departmentId: u.departmentId ?? '', email: u.email ?? '', isActive: u.isActive });
     setErrors({});
     setModal(u);
   };

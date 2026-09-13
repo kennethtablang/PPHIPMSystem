@@ -18,12 +18,15 @@ public class ReportExportService : IReportExportService
     private readonly IReportService _reports;
     private readonly ISystemSettingsService _settings;
     private readonly ApplicationDbContext _db;
+    private readonly IDepartmentBudgetService _budgets;
 
-    public ReportExportService(IReportService reports, ISystemSettingsService settings, ApplicationDbContext db)
+    public ReportExportService(IReportService reports, ISystemSettingsService settings,
+        ApplicationDbContext db, IDepartmentBudgetService budgets)
     {
         _reports = reports;
         _settings = settings;
         _db = db;
+        _budgets = budgets;
     }
 
     public async Task<byte[]> ExportConsumptionAsync(ReportFilterDto filter)
@@ -47,6 +50,10 @@ public class ReportExportService : IReportExportService
         row = WriteTable(ws, row, "Monthly Consumption",
             ["Month", "Total Quantity"],
             data.ByMonth.Select(m => new object[] { m.Month is >= 1 and <= 12 ? MonthNames[m.Month - 1] : m.Month.ToString(), m.TotalQuantity }));
+
+        row = WriteTable(ws, row, "Consumption by Category",
+            ["Category", "Items Consumed", "Total Quantity", "Share of Total"],
+            data.ByCategory.Select(c => new object[] { c.Category, c.UniqueItems, c.TotalQuantity, $"{c.SharePercent:0.##}%" }));
 
         WriteTable(ws, row, "Top Items",
             ["Item", "Category", "Total Quantity", "Unit"],
@@ -207,6 +214,94 @@ public class ReportExportService : IReportExportService
         ws3.Cell(row3, 1).Value = "Stock received without a cost (manual receipts before costing, pre-batch stock) is not included.";
         ws3.Cell(row3, 1).Style.Font.SetItalic().Font.SetFontColor(XLColor.Gray);
         ws3.Columns().AdjustToContents();
+
+        // Sheet 4: department stock — what wards hold that has not been returned
+        // or consumed. This is stock the hospital still owns but that has already
+        // left the storeroom, so it is NOT part of the Stock on Hand figures above.
+        var deptStock = await _db.DepartmentStocks.AsNoTracking()
+            .Include(d => d.Department)
+            .Include(d => d.InventoryItem)
+            .Where(d => d.Quantity > 0)
+            .OrderBy(d => d.Department.Name).ThenBy(d => d.InventoryItem.Name)
+            .ToListAsync();
+
+        var ws4 = wb.AddWorksheet("Department Stock");
+        var row4 = WriteDocumentHeader(ws4, org, "Stock Held by Departments", lastCol: 5);
+        row4 = WriteTable(ws4, row4, "Held by Ward / Unit",
+            ["Department", "Item", "Code", "Unit", "Quantity Held"],
+            deptStock.Select(d => new object[]
+            {
+                d.Department.Name, d.InventoryItem.Name,
+                d.InventoryItem.ItemCode ?? "—", d.InventoryItem.Unit, d.Quantity,
+            }));
+
+        if (deptStock.Count > 0)
+        {
+            row4 = WriteTable(ws4, row4 + 1, "Total Held per Department",
+                ["Department", "Distinct Items", "Total Units"],
+                deptStock.GroupBy(d => d.Department.Name)
+                    .OrderBy(g => g.Key)
+                    .Select(g => new object[] { g.Key, g.Count(), g.Sum(d => d.Quantity) }));
+        }
+
+        ws4.Cell(row4, 1).Value =
+            "Department stock has already been deducted from Stock on Hand — the two sheets do not overlap.";
+        ws4.Cell(row4, 1).Style.Font.SetItalic().Font.SetFontColor(XLColor.Gray);
+        ws4.Columns().AdjustToContents();
+
+        return ToBytes(wb);
+    }
+
+    // Appropriation vs. actual commitment per department for one fiscal year —
+    // the sheet the annual budget review and COA ask for. Spend comes from the
+    // same service the Budgets page uses, so the paper and the screen can't
+    // disagree.
+    public async Task<byte[]> ExportDepartmentBudgetsAsync(int fiscalYear)
+    {
+        var org = (await _settings.GetAsync()).OrganizationName;
+        var rows = (await _budgets.GetAllAsync(fiscalYear, null)).ToList();
+        var budgeted = rows.Where(r => r.HasBudget).ToList();
+
+        using var wb = new XLWorkbook();
+        var ws = wb.AddWorksheet($"FY{fiscalYear} Budgets");
+        var row = WriteDocumentHeader(ws, org, $"Department Budget Utilisation — FY {fiscalYear}", lastCol: 6);
+
+        row = WriteKeyValueBlock(ws, row, "Summary", new (string, object)[]
+        {
+            ("Departments with a budget", budgeted.Count),
+            ("Total appropriated", budgeted.Sum(r => r.Amount)),
+            ("Total committed (purchase orders)", budgeted.Sum(r => r.Committed)),
+            ("Total remaining", budgeted.Sum(r => r.Remaining)),
+            ("Departments over budget", budgeted.Count(r => r.Remaining < 0)),
+        });
+
+        row = WriteTable(ws, row, "By Department",
+            ["Department", "Appropriation", "Committed", "Remaining", "Utilisation %", "Purchase Orders"],
+            rows.Select(r => new object[]
+            {
+                r.DepartmentName,
+                r.HasBudget ? r.Amount : "Not set",
+                r.Committed,
+                r.HasBudget ? r.Remaining : "—",
+                r.HasBudget ? r.UtilizationPercent : "—",
+                r.PurchaseOrderCount,
+            }));
+
+        // Estimates, kept well clear of the committed figures above so nobody
+        // adds the two together.
+        var pending = rows.Where(r => r.Pending > 0).ToList();
+        if (pending.Count > 0)
+        {
+            row = WriteTable(ws, row + 1, "Requests Not Yet on a Purchase Order (estimated)",
+                ["Department", "Estimated Value"],
+                pending.Select(r => new object[] { r.DepartmentName, r.Pending }));
+        }
+
+        ws.Cell(row, 1).Value =
+            "Committed = total of purchase orders raised against the department's requests in this fiscal year. " +
+            "Estimated values are the requesters' figures and are not commitments.";
+        ws.Cell(row, 1).Style.Font.SetItalic().Font.SetFontColor(XLColor.Gray);
+        ws.Columns().AdjustToContents();
 
         return ToBytes(wb);
     }
@@ -374,6 +469,10 @@ public class ReportExportService : IReportExportService
                 "Requested by" => $"{request.RequestedByUser.FirstName} {request.RequestedByUser.LastName}",
                 "Approved by" when finalApprover is not null =>
                     $"{finalApprover.ApproverUser.FirstName} {finalApprover.ApproverUser.LastName}",
+                // The department head signs for the goods on the RIS. Printed
+                // when one is on record; otherwise a rule to sign over.
+                "Received by" when !string.IsNullOrWhiteSpace(request.Department?.HeadOfDepartment) =>
+                    request.Department!.HeadOfDepartment!,
                 _ => "_________________________",
             };
             ws.Cell(row, 1).Value = $"{role}:";

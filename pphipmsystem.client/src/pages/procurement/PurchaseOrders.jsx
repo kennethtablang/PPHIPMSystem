@@ -1,10 +1,15 @@
 import { useEffect, useState } from 'react';
-import { MdAdd, MdVisibility, MdLocalShipping, MdPrint, MdCheckCircle, MdAssignment, MdPendingActions } from 'react-icons/md';
+import { QRCodeSVG } from 'qrcode.react';
+import { MdAdd, MdVisibility, MdLocalShipping, MdPrint, MdCheckCircle, MdAssignment, MdPendingActions, MdQrCode2 } from 'react-icons/md';
 import { getPurchaseOrders, getPurchaseOrder, generatePO, confirmDelivery, getRequests } from '../../api/procurement';
+import { checkRequestBudget } from '../../api/departmentBudgets';
 import { getSuppliers } from '../../api/suppliers';
+import LabelPrintModal from '../../components/common/LabelPrintModal';
 import Modal from '../../components/common/Modal';
 import { toast } from '../../components/common/Toast';
 import { useAuth } from '../../context/AuthContext';
+
+const peso = n => `₱${Number(n ?? 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 function StatCard({ label, value, icon: Icon, color, onClick }) {
   return (
@@ -30,11 +35,17 @@ export default function PurchaseOrders() {
   const [viewModal, setViewModal] = useState(null);
   const [genModal, setGenModal] = useState(false);
   const [genForm, setGenForm] = useState({ requestId: '', supplierId: '', itemCosts: [] });
+  // Requesting department's remaining appropriation, fetched when a request is
+  // picked. Null = no request selected yet or the lookup failed.
+  const [budget, setBudget] = useState(null);
   const [saving, setSaving] = useState(false);
   // Delivery confirmation modal: PO detail + per-line lot/expiry inputs.
   const [deliverModal, setDeliverModal] = useState(null);
   const [deliverLines, setDeliverLines] = useState([]);
   const [delivering, setDelivering] = useState(false);
+  // QR label sheet for the listed POs; the QR encodes the PO number, which
+  // global search (Ctrl+K) resolves back to the order.
+  const [labelModal, setLabelModal] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -59,7 +70,16 @@ export default function PurchaseOrders() {
       ...p, requestId: reqId,
       itemCosts: (req?.items ?? []).map(i => ({ procurementRequestItemId: i.id, itemName: i.itemName, unit: i.unit, quantityRequested: i.quantityRequested, unitCost: '' }))
     }));
+    // Show what the department has left before any costs are typed in, so an
+    // over-budget order is obvious here rather than at submit time.
+    setBudget(null);
+    if (reqId) checkRequestBudget(reqId).then(r => setBudget(r.data)).catch(() => {});
   };
+
+  // Live PO total from the entered unit costs, weighed against the department's
+  // remaining appropriation.
+  const genTotal = genForm.itemCosts.reduce((s, c) => s + (c.quantityRequested * (c.unitCost || 0)), 0);
+  const overBudget = budget?.hasBudget && genTotal > budget.remaining;
 
   const generate = async () => {
     setSaving(true);
@@ -183,11 +203,24 @@ export default function PurchaseOrders() {
           <h1 className="page-title">Purchase Orders</h1>
           <p className="page-subtitle">Generate and track purchase orders from approved requests</p>
         </div>
-        {canGenerate && approvedReqs.length > 0 && (
-          <button className="btn btn-primary" onClick={() => setGenModal(true)}>
-            <MdAdd size={16} /> Generate PO
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            className="btn btn-secondary"
+            onClick={() => setLabelModal(true)}
+            disabled={orders.length === 0}
+            title="Print QR labels for the purchase orders shown — stick one on each delivery"
+          >
+            <MdQrCode2 size={16} /> QR Labels
           </button>
-        )}
+          {canGenerate && approvedReqs.length > 0 && (
+            <button
+              className="btn btn-primary"
+              onClick={() => { setGenForm({ requestId: '', supplierId: '', itemCosts: [] }); setBudget(null); setGenModal(true); }}
+            >
+              <MdAdd size={16} /> Generate PO
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="grid-stat" style={{ marginBottom: 24 }}>
@@ -279,6 +312,34 @@ export default function PurchaseOrders() {
               </select>
             </div>
           </div>
+          {budget && (
+            <div
+              className={`alert ${overBudget ? 'alert-warning' : 'alert-info'}`}
+              style={{ display: 'block', fontSize: 12 }}
+            >
+              {budget.hasBudget ? (
+                <>
+                  <strong>{budget.departmentName}</strong> — FY{budget.fiscalYear} budget{' '}
+                  <strong>{peso(budget.amount)}</strong>, committed {peso(budget.committed)},{' '}
+                  <strong>{peso(budget.remaining)} remaining</strong>.
+                  {genTotal > 0 && (
+                    <div style={{ marginTop: 4 }}>
+                      This order of <strong>{peso(genTotal)}</strong>{' '}
+                      {overBudget
+                        ? <>exceeds what is left by <strong>{peso(genTotal - budget.remaining)}</strong>
+                            {budget.enforced
+                              ? ' — it will be rejected until the budget is raised or the order reduced.'
+                              : ' — enforcement is off, so it will go through and administrators will be notified.'}</>
+                        : <>leaves <strong>{peso(budget.remaining - genTotal)}</strong> for the rest of the year.</>}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>No FY{budget.fiscalYear} budget is set for <strong>{budget.departmentName}</strong>, so this
+                order is not checked against one.</>
+              )}
+            </div>
+          )}
           {genForm.itemCosts.length > 0 && (
             <div>
               <label className="form-label">Unit Costs per Item</label>
@@ -298,8 +359,8 @@ export default function PurchaseOrders() {
                   </div>
                 </div>
               ))}
-              <div style={{ textAlign: 'right', marginTop: 10, fontWeight: 700, color: 'var(--green-700)' }}>
-                Total: ₱{genForm.itemCosts.reduce((s, c) => s + (c.quantityRequested * (c.unitCost || 0)), 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+              <div style={{ textAlign: 'right', marginTop: 10, fontWeight: 700, color: overBudget ? '#dc2626' : 'var(--green-700)' }}>
+                Total: {peso(genTotal)}
               </div>
             </div>
           )}
@@ -317,11 +378,23 @@ export default function PurchaseOrders() {
           }
         >
           <div id="po-print-area">
-            <div className="grid-2" style={{ marginBottom: 20 }}>
-              <div><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Supplier</span><br /><strong>{viewModal.supplierName}</strong></div>
-              <div><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Total Amount</span><br /><strong style={{ color: 'var(--green-700)', fontSize: 18 }}>₱{viewModal.totalAmount?.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong></div>
-              <div><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Generated By</span><br /><strong>{viewModal.generatedByFullName}</strong></div>
-              <div><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Delivery Status</span><br /><span className={`badge ${viewModal.isDelivered ? 'badge-green' : 'badge-amber'}`}>{viewModal.isDelivered ? `Delivered ${new Date(viewModal.deliveredAt).toLocaleDateString('en-PH')}` : 'Pending Delivery'}</span></div>
+            <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', marginBottom: 20 }}>
+              <div className="grid-2" style={{ flex: 1 }}>
+                <div><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Supplier</span><br /><strong>{viewModal.supplierName}</strong></div>
+                <div><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Total Amount</span><br /><strong style={{ color: 'var(--green-700)', fontSize: 18 }}>₱{viewModal.totalAmount?.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</strong></div>
+                <div><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Generated By</span><br /><strong>{viewModal.generatedByFullName}</strong></div>
+                <div><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Delivery Status</span><br /><span className={`badge ${viewModal.isDelivered ? 'badge-green' : 'badge-amber'}`}>{viewModal.isDelivered ? `Delivered ${new Date(viewModal.deliveredAt).toLocaleDateString('en-PH')}` : 'Pending Delivery'}</span></div>
+              </div>
+              {/* Inside the print area on purpose — the printed PO carries a
+                  scannable code the receiving clerk can shoot into global search. */}
+              <div style={{ textAlign: 'center', flexShrink: 0 }}>
+                <div style={{ padding: 8, background: '#fff', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
+                  <QRCodeSVG value={viewModal.poNumber} size={84} />
+                </div>
+                <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-muted)', marginTop: 4 }}>
+                  {viewModal.poNumber}
+                </div>
+              </div>
             </div>
             <div className="table-wrap">
               <table>
@@ -387,6 +460,19 @@ export default function PurchaseOrders() {
             </table>
           </div>
         </Modal>
+      )}
+
+      {labelModal && (
+        <LabelPrintModal
+          title="Purchase Order QR Labels"
+          onClose={() => setLabelModal(false)}
+          labels={orders.map(po => ({
+            qr: po.poNumber,
+            title: po.supplierName,
+            subtitle: po.poNumber,
+            meta: `${po.requestNumber} · ${po.isDelivered ? 'Delivered' : 'Pending delivery'}`,
+          }))}
+        />
       )}
     </div>
   );

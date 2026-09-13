@@ -20,7 +20,22 @@ public class ConsumptionSummaryDto
     public decimal? PeakMonthQty { get; set; }
     public decimal? AvgMonthlyConsumption { get; set; }
     public IEnumerable<ConsumptionMonthlyTotalDto> ByMonth { get; set; } = [];
+    public IEnumerable<ConsumptionCategoryTotalDto> ByCategory { get; set; } = [];
     public IEnumerable<ConsumptionTopItemDto> TopItems { get; set; } = [];
+}
+
+/// <summary>
+/// Consumption rolled up per category across every item consumed in the period
+/// — not just the top items — so shares are of the true total.
+/// </summary>
+public class ConsumptionCategoryTotalDto
+{
+    public int? CategoryId { get; set; }
+    public string Category { get; set; } = string.Empty;
+    public decimal TotalQuantity { get; set; }
+    public int UniqueItems { get; set; }
+    /// <summary>Percentage of the period's total consumption, 0–100.</summary>
+    public decimal SharePercent { get; set; }
 }
 
 public class ConsumptionMonthlyTotalDto

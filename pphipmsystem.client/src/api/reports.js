@@ -27,6 +27,12 @@ export const exportInventorySnapshot = async () => {
   downloadBlob(res.data, res.headers, 'inventory-snapshot.xlsx');
 };
 
+// Appropriation vs. committed spend per department for one fiscal year.
+export const exportDepartmentBudgets = async year => {
+  const res = await api.get('/reports/department-budgets/export', { params: { year }, responseType: 'blob' });
+  downloadBlob(res.data, res.headers, `department-budgets-FY${year}.xlsx`);
+};
+
 export const exportDisposalCertificate = async (startDate, endDate) => {
   const res = await api.get('/reports/disposals/export', { params: { startDate, endDate }, responseType: 'blob' });
   downloadBlob(res.data, res.headers, 'disposal-certificate.xlsx');

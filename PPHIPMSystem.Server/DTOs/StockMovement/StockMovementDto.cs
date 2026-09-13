@@ -28,6 +28,11 @@ public class StockMovementDto
     public string PerformedByFullName { get; set; } = string.Empty;
     public int? PurchaseOrderId { get; set; }
     public string? PONumber { get; set; }
+    public int? DepartmentId { get; set; }
+    public string? DepartmentName { get; set; }
+    // Receiving ward of a DepartmentTransfer; null for every other type.
+    public int? ToDepartmentId { get; set; }
+    public string? ToDepartmentName { get; set; }
     public DateTime MovementDate { get; set; }
 
     public bool IsVoided { get; set; }

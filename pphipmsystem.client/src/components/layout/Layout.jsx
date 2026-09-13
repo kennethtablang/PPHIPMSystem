@@ -75,12 +75,12 @@ export default function Layout() {
         display: 'flex',
         flexDirection: 'column',
         minHeight: '100vh',
-        transition: 'margin-left 0.22s ease',
+        transition: 'margin-left var(--dur-base) var(--ease)',
       }}>
         <Topbar />
         <AnnouncementBanner />
         <main className="main-content" style={{ flex: 1, overflow: 'auto' }}>
-          <div key={location.pathname} className="fade-in slide-up">
+          <div key={location.pathname} className="page-transition">
             <Outlet />
           </div>
         </main>

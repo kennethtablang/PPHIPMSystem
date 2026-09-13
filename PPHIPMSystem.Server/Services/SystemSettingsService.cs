@@ -23,6 +23,7 @@ public class SystemSettingsService : ISystemSettingsService
     public const string NotificationRetentionKey = "NotificationRetentionDays";
     public const string AuditLogRetentionKey = "AuditLogRetentionDays";
     public const string MonthlyReportEmailsKey = "MonthlyReportEmails";
+    public const string EnforceDepartmentBudgetKey = "EnforceDepartmentBudget";
     // Bookkeeping (not exposed in the settings UI): last month a report email went out.
     public const string MonthlyReportLastSentKey = "MonthlyReportLastSent";
 
@@ -55,6 +56,8 @@ public class SystemSettingsService : ISystemSettingsService
             NotificationRetentionDays = int.TryParse(all.GetValueOrDefault(NotificationRetentionKey), out var nr) ? nr : 90,
             AuditLogRetentionDays = int.TryParse(all.GetValueOrDefault(AuditLogRetentionKey), out var ar) ? ar : 0,
             MonthlyReportEmails = bool.TryParse(all.GetValueOrDefault(MonthlyReportEmailsKey), out var mr) && mr,
+            // Unset means on: a budget an admin bothered to enter should bite.
+            EnforceDepartmentBudget = !bool.TryParse(all.GetValueOrDefault(EnforceDepartmentBudgetKey), out var eb) || eb,
         };
     }
 
@@ -73,6 +76,7 @@ public class SystemSettingsService : ISystemSettingsService
         await SetAsync(NotificationRetentionKey, dto.NotificationRetentionDays.ToString());
         await SetAsync(AuditLogRetentionKey, dto.AuditLogRetentionDays.ToString());
         await SetAsync(MonthlyReportEmailsKey, dto.MonthlyReportEmails.ToString());
+        await SetAsync(EnforceDepartmentBudgetKey, dto.EnforceDepartmentBudget.ToString());
         await _db.SaveChangesAsync();
         return await GetAsync();
     }
@@ -81,6 +85,15 @@ public class SystemSettingsService : ISystemSettingsService
     {
         var setting = await _db.SystemSettings.AsNoTracking().FirstOrDefaultAsync(s => s.Key == BackupRetentionKey);
         return int.TryParse(setting?.Value, out var d) ? d : DefaultRetentionDays;
+    }
+
+    // Used by DepartmentBudgetService when deciding whether an over-budget
+    // purchase order is a hard stop or just a warning.
+    public async Task<bool> GetEnforceDepartmentBudgetAsync()
+    {
+        var setting = await _db.SystemSettings.AsNoTracking()
+            .FirstOrDefaultAsync(s => s.Key == EnforceDepartmentBudgetKey);
+        return !bool.TryParse(setting?.Value, out var enforce) || enforce;
     }
 
     // Used by SystemPasswordValidator and the anonymous password-policy endpoint.

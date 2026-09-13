@@ -43,6 +43,23 @@ public class ItemBatchesController : ControllerBase
         }
     }
 
+    // Replenish many items at once — all-or-nothing (see ReceiveManyAsync).
+    [HttpPost("bulk")]
+    [Authorize(Roles = "HospitalAdministrator,InventoryOfficer")]
+    public async Task<IActionResult> ReceiveMany([FromBody] BulkReceiveBatchesDto dto)
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        try
+        {
+            var result = await _batches.ReceiveManyAsync(dto, userId);
+            return Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     [HttpPatch("{id}")]
     [Authorize(Roles = "HospitalAdministrator,InventoryOfficer")]
     public async Task<IActionResult> UpdateDetails(int id, [FromBody] UpdateItemBatchDetailsDto dto)

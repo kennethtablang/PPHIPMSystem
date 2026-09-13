@@ -2,26 +2,28 @@ import { useEffect, useState } from 'react';
 import {
   MdNotifications, MdDoneAll, MdWarning, MdError, MdInfo,
   MdCheckCircle, MdShoppingCart, MdLocalShipping,
-  MdTune, MdDeleteForever, MdCircle,
+  MdTune, MdDeleteForever, MdCircle, MdAccountBalanceWallet,
 } from 'react-icons/md';
 import { getNotifications, markRead, markAllRead } from '../../api/notifications';
 import { signalRService } from '../../api/signalrService';
 import { toast } from '../../components/common/Toast';
 import { fmtDateTime } from '../../utils/format';
 
+// Keys must match `NotificationType` on the server exactly — an unmapped type
+// falls back to a grey generic row and drops out of the group filters entirely.
 const TYPE_META = {
   LowStock:                    { icon: MdWarning,      color: '#f59e0b', label: 'Low Stock Alert',          group: 'inventory' },
   ExpirationWarning:           { icon: MdWarning,      color: '#f59e0b', label: 'Expiration Warning',        group: 'inventory' },
-  StockOut:                    { icon: MdError,        color: '#dc2626', label: 'Stock Out',                 group: 'inventory' },
-  AdjustmentRequested:         { icon: MdTune,         color: '#3b82f6', label: 'Adjustment Requested',      group: 'adjustments' },
-  AdjustmentApproved:          { icon: MdCheckCircle,  color: '#059669', label: 'Adjustment Approved',       group: 'adjustments' },
-  AdjustmentRejected:          { icon: MdDeleteForever,color: '#dc2626', label: 'Adjustment Rejected',       group: 'adjustments' },
+  StockAdjustmentRequested:    { icon: MdTune,         color: '#3b82f6', label: 'Adjustment Requested',      group: 'adjustments' },
+  StockAdjustmentApproved:     { icon: MdCheckCircle,  color: '#059669', label: 'Adjustment Approved',       group: 'adjustments' },
+  StockAdjustmentRejected:     { icon: MdDeleteForever,color: '#dc2626', label: 'Adjustment Rejected',       group: 'adjustments' },
   ProcurementSubmitted:        { icon: MdShoppingCart, color: '#3b82f6', label: 'Request Submitted',         group: 'procurement' },
   ProcurementApproved:         { icon: MdCheckCircle,  color: '#059669', label: 'Request Approved',          group: 'procurement' },
   ProcurementRejected:         { icon: MdError,        color: '#dc2626', label: 'Request Rejected',          group: 'procurement' },
   ProcurementReturnedForRevision: { icon: MdInfo,      color: '#f59e0b', label: 'Returned for Revision',     group: 'procurement' },
   PurchaseOrderGenerated:      { icon: MdLocalShipping,color: '#059669', label: 'Purchase Order Generated',  group: 'procurement' },
-  DeliveryConfirmed:           { icon: MdLocalShipping,color: '#059669', label: 'Delivery Confirmed',        group: 'procurement' },
+  BudgetAlert:                 { icon: MdAccountBalanceWallet, color: '#dc2626', label: 'Budget Alert',      group: 'procurement' },
+  General:                     { icon: MdInfo,         color: '#6b7280', label: 'Notice',                    group: 'other' },
 };
 
 const GROUPS = [
@@ -29,6 +31,7 @@ const GROUPS = [
   { id: 'inventory',  label: 'Inventory' },
   { id: 'procurement',label: 'Procurement' },
   { id: 'adjustments',label: 'Adjustments' },
+  { id: 'other',      label: 'Other' },
 ];
 
 function timeAgo(dateStr) {

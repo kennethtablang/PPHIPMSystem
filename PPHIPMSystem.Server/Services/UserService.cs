@@ -123,6 +123,7 @@ public class UserService : IUserService
             Role = user.Role.ToString(),
             DepartmentName = user.Department?.Name,
             TwoFactorEnabled = user.TwoFactorEnabled,
+            HasAuthenticator = !string.IsNullOrEmpty(await _userManager.GetAuthenticatorKeyAsync(user)),
             EmailNotificationsEnabled = user.EmailNotificationsEnabled,
             EmailNotifyInventory = user.EmailNotifyInventory,
             EmailNotifyProcurement = user.EmailNotifyProcurement,

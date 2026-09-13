@@ -275,7 +275,7 @@ export default function StockAdjustments() {
               value={form.inventoryItemId}
               onChange={set('inventoryItemId')}
               placeholder="Search items…"
-              options={items.map(i => ({ value: i.id, label: i.name, sublabel: `Current: ${i.quantityOnHand} ${i.unit}` }))}
+              options={items.map(i => ({ value: i.id, label: i.name, sublabel: `${i.itemCode ? `${i.itemCode} · ` : ''}Current: ${i.quantityOnHand} ${i.unit}` }))}
             />
             {selectedItem && (
               <div style={{ marginTop: 8, padding: '8px 12px', borderRadius: 8, background: 'var(--green-50)', border: '1px solid var(--green-200)', fontSize: 13, display: 'flex', gap: 20 }}>

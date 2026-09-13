@@ -1,9 +1,13 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { MdAdd, MdVisibility, MdSchedule, MdFileDownload } from 'react-icons/md';
+import { QRCodeSVG } from 'qrcode.react';
+import { MdAdd, MdVisibility, MdSchedule, MdFileDownload, MdQrCode2 } from 'react-icons/md';
 import { exportRisForm, exportPurchaseRequestForm } from '../../api/reports';
 import { getRequests, createRequest, approveRequest, submitRequest } from '../../api/procurement';
+import { checkRequestBudget } from '../../api/departmentBudgets';
 import { getItems } from '../../api/inventory';
+import AttachmentsPanel from '../../components/common/AttachmentsPanel';
+import LabelPrintModal from '../../components/common/LabelPrintModal';
 import Modal from '../../components/common/Modal';
 import SearchSelect from '../../components/common/SearchSelect';
 import StatusBadge from '../../components/common/StatusBadge';
@@ -19,6 +23,8 @@ const AGING_WARN_DAYS = 7;
 
 const daysWaiting = r => Math.floor((Date.now() - new Date(r.updatedAt ?? r.requestedAt).getTime()) / 86400000);
 const isStalled = r => PENDING_STATUSES.includes(r.status) && daysWaiting(r) >= AGING_WARN_DAYS;
+
+const peso = n => `₱${Number(n ?? 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export default function ProcurementList() {
   const { user } = useAuth();
@@ -36,7 +42,13 @@ export default function ProcurementList() {
   const [approveModal, setApproveModal] = useState(null);
   const [form, setForm] = useState(BLANK_FORM);
   const [approveForm, setApproveForm] = useState({ action: 'Approve', remarks: '' });
+  // Requesting department's remaining appropriation for the request under
+  // review; null while it loads or when no budget lookup was possible.
+  const [approveBudget, setApproveBudget] = useState(null);
   const [saving, setSaving] = useState(false);
+  // QR label sheet for the requests currently listed — the QR encodes the
+  // request number, which global search (Ctrl+K) resolves back to the request.
+  const [labelModal, setLabelModal] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -93,6 +105,16 @@ export default function ProcurementList() {
     finally { setSaving(false); }
   };
 
+  // Approvers see what the department has left before waving a request on. The
+  // figure is an estimate (real costs land on the PO), so it never blocks the
+  // approval — the hard check happens when the purchase order is raised.
+  const openApprove = r => {
+    setApproveModal(r);
+    setApproveForm({ action: 'Approve', remarks: '' });
+    setApproveBudget(null);
+    checkRequestBudget(r.id).then(res => setApproveBudget(res.data)).catch(() => {});
+  };
+
   const submitApproval = async () => {
     setSaving(true);
     try {
@@ -138,11 +160,21 @@ export default function ProcurementList() {
           <h1 className="page-title">Procurement Requests</h1>
           <p className="page-subtitle">Department purchase requests and approval workflow</p>
         </div>
-        {canCreate && (
-          <button className="btn btn-primary" onClick={() => { setForm({ justification: '', items: [{ inventoryItemId: '', quantityRequested: '', estimatedUnitCost: '', remarks: '' }] }); setCreateModal(true); }}>
-            <MdAdd size={16} /> New Request
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button
+            className="btn btn-secondary"
+            onClick={() => setLabelModal(true)}
+            disabled={requests.length === 0}
+            title="Print QR labels for the requests shown — scan to pull one up instantly"
+          >
+            <MdQrCode2 size={16} /> QR Labels
           </button>
-        )}
+          {canCreate && (
+            <button className="btn btn-primary" onClick={() => { setForm({ justification: '', items: [{ inventoryItemId: '', quantityRequested: '', estimatedUnitCost: '', remarks: '' }] }); setCreateModal(true); }}>
+              <MdAdd size={16} /> New Request
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="filter-bar" style={{ overflowX: 'auto', flexWrap: 'nowrap' }}>
@@ -201,22 +233,22 @@ export default function ProcurementList() {
                         <MdVisibility size={14} /> View
                       </button>
                       {canApprove && r.status === 'SubmittedToProcurement' && ['SuperAdmin', 'HospitalAdministrator', 'ProcurementStaff'].includes(user?.role) && (
-                        <button className="btn btn-primary btn-sm" onClick={() => { setApproveModal(r); setApproveForm({ action: 'Approve', remarks: '' }); }}>
+                        <button className="btn btn-primary btn-sm" onClick={() => openApprove(r)}>
                           Review (Procurement)
                         </button>
                       )}
                       {canApprove && r.status === 'SubmittedToProcurement' && ['SuperAdmin', 'HospitalAdministrator', 'InventoryOfficer'].includes(user?.role) && (
-                        <button className="btn btn-success btn-sm" onClick={() => { setApproveModal(r); setApproveForm({ action: 'Approve', remarks: '' }); }}>
+                        <button className="btn btn-success btn-sm" onClick={() => openApprove(r)}>
                           Review (Inventory)
                         </button>
                       )}
                       {canApprove && r.status === 'ApprovedByProcurement' && ['SuperAdmin', 'HospitalAdministrator', 'InventoryOfficer'].includes(user?.role) && (
-                        <button className="btn btn-primary btn-sm" onClick={() => { setApproveModal(r); setApproveForm({ action: 'Approve', remarks: '' }); }}>
+                        <button className="btn btn-primary btn-sm" onClick={() => openApprove(r)}>
                           Review (Inventory)
                         </button>
                       )}
                       {canApprove && r.status === 'ApprovedByInventoryOfficer' && ['SuperAdmin', 'HospitalAdministrator'].includes(user?.role) && (
-                        <button className="btn btn-primary btn-sm" onClick={() => { setApproveModal(r); setApproveForm({ action: 'Approve', remarks: '' }); }}>
+                        <button className="btn btn-primary btn-sm" onClick={() => openApprove(r)}>
                           Final Approve
                         </button>
                       )}
@@ -232,6 +264,19 @@ export default function ProcurementList() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {labelModal && (
+        <LabelPrintModal
+          title="Procurement Request QR Labels"
+          onClose={() => setLabelModal(false)}
+          labels={requests.map(r => ({
+            qr: r.requestNumber,
+            title: r.departmentName,
+            subtitle: r.requestNumber,
+            meta: `${r.items?.length ?? 0} item(s) · ${new Date(r.requestedAt).toLocaleDateString('en-PH')}`,
+          }))}
+        />
       )}
 
       {/* Create Modal */}
@@ -266,7 +311,7 @@ export default function ProcurementList() {
                       options={items.map(it => ({
                         value: it.id,
                         label: `${it.name} (${it.unit})`,
-                        sublabel: `${it.quantityOnHand > 0 ? 'Available' : 'Not Available'} — ${it.quantityOnHand} in stock`,
+                        sublabel: `${it.itemCode ? `${it.itemCode} · ` : ''}${it.quantityOnHand > 0 ? 'Available' : 'Not Available'} — ${it.quantityOnHand} in stock`,
                       }))}
                     />
                   </div>
@@ -315,11 +360,23 @@ export default function ProcurementList() {
             </>
           }
         >
-          <div className="grid-2">
-            <div><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Department</span><br /><strong>{viewModal.departmentName}</strong></div>
-            <div><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Status</span><br /><StatusBadge status={viewModal.status} /></div>
-            <div><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Requested By</span><br /><strong>{viewModal.requestedByFullName}</strong></div>
-            <div><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Date</span><br /><strong>{new Date(viewModal.requestedAt).toLocaleDateString('en-PH')}</strong></div>
+          <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+            <div className="grid-2" style={{ flex: 1 }}>
+              <div><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Department</span><br /><strong>{viewModal.departmentName}</strong></div>
+              <div><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Status</span><br /><StatusBadge status={viewModal.status} /></div>
+              <div><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Requested By</span><br /><strong>{viewModal.requestedByFullName}</strong></div>
+              <div><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Date</span><br /><strong>{new Date(viewModal.requestedAt).toLocaleDateString('en-PH')}</strong></div>
+            </div>
+            {/* Scannable request number — staple to the printed PR/RIS so the
+                paper copy can be scanned straight back into global search. */}
+            <div style={{ textAlign: 'center', flexShrink: 0 }}>
+              <div style={{ padding: 8, background: '#fff', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
+                <QRCodeSVG value={viewModal.requestNumber} size={84} />
+              </div>
+              <div style={{ fontSize: 10, fontFamily: 'monospace', color: 'var(--text-muted)', marginTop: 4 }}>
+                {viewModal.requestNumber}
+              </div>
+            </div>
           </div>
           <div className="alert alert-info">{viewModal.justification}</div>
           <div>
@@ -349,6 +406,7 @@ export default function ProcurementList() {
               </table>
             </div>
           </div>
+          <AttachmentsPanel requestId={viewModal.id} />
           {(viewModal.approvals ?? []).length > 0 && (
             <div>
               <label className="form-label">Approval History</label>
@@ -377,6 +435,29 @@ export default function ProcurementList() {
             </>
           }
         >
+          {approveBudget && (
+            <div
+              className={`alert ${approveBudget.wouldExceed ? 'alert-warning' : 'alert-info'}`}
+              style={{ display: 'block', fontSize: 12 }}
+            >
+              {approveBudget.hasBudget ? (
+                <>
+                  <strong>{approveBudget.departmentName}</strong> has{' '}
+                  <strong>{peso(approveBudget.remaining)}</strong> left of its FY{approveBudget.fiscalYear}{' '}
+                  budget ({peso(approveBudget.amount)} appropriated, {peso(approveBudget.committed)} committed).
+                  <div style={{ marginTop: 4 }}>
+                    This request is estimated at <strong>{peso(approveBudget.proposedAmount)}</strong>
+                    {approveBudget.wouldExceed
+                      ? ' — more than the department has left. Approving is still allowed; the purchase order is where the budget is enforced.'
+                      : `, leaving ${peso(approveBudget.remainingAfter)}.`}
+                  </div>
+                </>
+              ) : (
+                <>No FY{approveBudget.fiscalYear} budget is set for <strong>{approveBudget.departmentName}</strong>.</>
+              )}
+            </div>
+          )}
+
           <div className="form-group">
             <label className="form-label">Action</label>
             <div style={{ display: 'flex', gap: 10 }}>

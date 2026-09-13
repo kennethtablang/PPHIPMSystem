@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
+import { QRCodeSVG } from 'qrcode.react';
 import { getProfile, updateProfile } from '../../../api/users';
-import { changePassword } from '../../../api/auth';
+import { changePassword, setupAuthenticator, confirmAuthenticator, removeAuthenticator } from '../../../api/auth';
+import Modal from '../../../components/common/Modal';
 import { toast } from '../../../components/common/Toast';
 import { validatePassword, passwordHint, usePasswordPolicy } from '../../../utils/password';
-import { MdLock, MdVisibility, MdVisibilityOff, MdSecurity } from 'react-icons/md';
+import { MdLock, MdVisibility, MdVisibilityOff, MdSecurity, MdPhonelinkLock } from 'react-icons/md';
 
 const BLANK_PW = { current: '', next: '', confirm: '' };
 
@@ -18,6 +20,11 @@ export default function SecurityTab() {
   // Two-factor (needs the full profile so saving never drops other fields)
   const [profile, setProfile] = useState(null);
   const [twoFaSaving, setTwoFaSaving] = useState(false);
+
+  // Authenticator-app enrolment
+  const [enrolModal, setEnrolModal] = useState(null); // { sharedKey, otpauthUri }
+  const [enrolCode, setEnrolCode] = useState('');
+  const [enrolBusy, setEnrolBusy] = useState(false);
 
   useEffect(() => {
     getProfile()
@@ -44,6 +51,37 @@ export default function SecurityTab() {
     } finally {
       setPwSaving(false);
     }
+  };
+
+  const startEnrol = async () => {
+    try {
+      const { data } = await setupAuthenticator();
+      setEnrolCode('');
+      setEnrolModal(data);
+    } catch { toast.error('Failed to start authenticator setup.'); }
+  };
+
+  const confirmEnrol = async () => {
+    if (!enrolCode.trim()) { toast.error('Enter the 6-digit code from your app.'); return; }
+    setEnrolBusy(true);
+    try {
+      await confirmAuthenticator(enrolCode.trim());
+      toast.success('Authenticator enabled — you will now use app codes to sign in.');
+      setEnrolModal(null);
+      setProfile(p => ({ ...p, hasAuthenticator: true, twoFactorEnabled: true }));
+    } catch (e) {
+      toast.error(e.response?.data?.message ?? 'That code didn\'t match.');
+    } finally { setEnrolBusy(false); }
+  };
+
+  const removeEnrol = async () => {
+    setEnrolBusy(true);
+    try {
+      await removeAuthenticator();
+      toast.success('Authenticator removed. Email codes will be used while 2FA stays on.');
+      setProfile(p => ({ ...p, hasAuthenticator: false }));
+    } catch { toast.error('Failed to remove authenticator.'); }
+    finally { setEnrolBusy(false); }
   };
 
   const toggle2Fa = async () => {
@@ -122,6 +160,92 @@ export default function SecurityTab() {
           </div>
         )}
       </div>
+
+      {/* Authenticator app (TOTP) */}
+      <div className="card" style={{ padding: 32 }}>
+        <h3 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 20, borderBottom: '1px solid var(--border)', paddingBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <MdPhonelinkLock size={18} color="var(--green-600)" /> Authenticator App
+        </h3>
+
+        {!profile ? (
+          <div style={{ color: 'var(--text-muted)', fontSize: 13 }}>Loading…</div>
+        ) : (
+          <div style={{
+            background: profile.hasAuthenticator ? 'rgba(79,208,122,.08)' : 'var(--bg-muted)',
+            border: `1px solid ${profile.hasAuthenticator ? 'rgba(79,208,122,.3)' : 'var(--border)'}`,
+            borderRadius: 12, padding: 20, display: 'flex', alignItems: 'flex-start', gap: 16,
+          }}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: 14, marginBottom: 4 }}>
+                {profile.hasAuthenticator ? 'Enrolled' : 'Not set up'}
+              </div>
+              <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: 13, lineHeight: 1.5 }}>
+                {profile.hasAuthenticator
+                  ? 'Sign-in codes come from your authenticator app — they work even when email is down.'
+                  : 'Use Google/Microsoft Authenticator instead of emailed codes. Codes work offline and don\'t depend on the mail server.'}
+              </p>
+            </div>
+            {profile.hasAuthenticator ? (
+              <button type="button" className="btn btn-danger" onClick={removeEnrol} disabled={enrolBusy}>
+                {enrolBusy ? 'Removing…' : 'Remove'}
+              </button>
+            ) : (
+              <button type="button" className="btn btn-primary" onClick={startEnrol}>
+                Set Up
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+
+      {enrolModal && (
+        <Modal
+          title="Set Up Authenticator App"
+          onClose={() => setEnrolModal(null)}
+          footer={
+            <>
+              <button className="btn btn-secondary" onClick={() => setEnrolModal(null)}>Cancel</button>
+              <button className="btn btn-primary" onClick={confirmEnrol} disabled={enrolBusy}>
+                {enrolBusy ? 'Verifying…' : 'Verify & Enable'}
+              </button>
+            </>
+          }
+        >
+          <ol style={{ fontSize: 13, color: 'var(--text-primary)', lineHeight: 1.7, paddingLeft: 20, marginBottom: 16 }}>
+            <li>Install Google Authenticator or Microsoft Authenticator on your phone.</li>
+            <li>Scan the QR code below (or enter the key manually).</li>
+            <li>Type the 6-digit code the app shows to confirm.</li>
+          </ol>
+
+          <div style={{ display: 'flex', gap: 20, alignItems: 'center', flexWrap: 'wrap', marginBottom: 16 }}>
+            <div style={{ background: '#fff', padding: 12, borderRadius: 12, border: '1px solid var(--border)' }}>
+              <QRCodeSVG value={enrolModal.otpauthUri} size={160} />
+            </div>
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 6 }}>
+                Manual entry key
+              </div>
+              <code style={{ display: 'block', fontSize: 13, background: 'var(--bg-muted)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 12px', wordBreak: 'break-all' }}>
+                {enrolModal.sharedKey}
+              </code>
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label className="form-label">Verification code *</label>
+            <input
+              className="form-control"
+              value={enrolCode}
+              onChange={e => setEnrolCode(e.target.value)}
+              placeholder="123 456"
+              maxLength={10}
+              autoFocus
+              onKeyDown={e => e.key === 'Enter' && confirmEnrol()}
+              style={{ width: 180, fontSize: 18, letterSpacing: 2, fontFamily: 'monospace' }}
+            />
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

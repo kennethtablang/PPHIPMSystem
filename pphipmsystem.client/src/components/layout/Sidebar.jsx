@@ -7,7 +7,7 @@ import {
   MdShoppingCart, MdLocalShipping, MdStore, MdBarChart,
   MdPeople, MdBusiness, MdCategory, MdHistory, MdAnalytics,
   MdNotifications, MdChevronLeft, MdChevronRight,
-  MdGridView, MdBackup,
+  MdGridView, MdBackup, MdAccountBalanceWallet,
 } from 'react-icons/md';
 
 const W_OPEN   = 252;
@@ -110,6 +110,7 @@ export default function Sidebar() {
                   <Item to="/stock-adjustments" Icon={MdTune}     label="Adjustments"      collapsed={collapsed} />
                 </>
               )}
+              <Item to="/department-stock" Icon={MdWarehouse} label="Department Stock" collapsed={collapsed} />
             </Group>
           )}
 
@@ -126,6 +127,9 @@ export default function Sidebar() {
                   <Item to="/purchase-orders" Icon={MdLocalShipping} label="Purchase Orders" collapsed={collapsed} />
                   <Item to="/suppliers"       Icon={MdStore}         label="Suppliers"       collapsed={collapsed} />
                 </>
+              )}
+              {is(ROLE.SuperAdmin, ROLE.Admin, ROLE.Procurement, ROLE.DeptHead) && (
+                <Item to="/budgets" Icon={MdAccountBalanceWallet} label="Budgets" collapsed={collapsed} />
               )}
             </Group>
           )}

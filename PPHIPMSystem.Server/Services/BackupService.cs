@@ -66,6 +66,11 @@ public class BackupService : IBackupService
             backup.RecordCount = recordCount;
             backup.Status = BackupStatus.Success;
 
+            // The workbook is a readable data export; the .bak is the actual
+            // restorable database backup. A .bak failure (e.g. SQL engine can't
+            // reach the folder) degrades to export-only rather than failing the run.
+            await TryCreateDatabaseBackupAsync(Path.ChangeExtension(filePath, ".bak"));
+
             _db.Backups.Add(backup);
             await _db.SaveChangesAsync();
 
@@ -107,15 +112,25 @@ public class BackupService : IBackupService
         total += AddSheet(wb, "ConsumptionRecords", await _db.ConsumptionRecords.AsNoTracking().ToListAsync());
         total += AddSheet(wb, "StockMovements", await _db.StockMovements.AsNoTracking().ToListAsync());
         total += AddSheet(wb, "StockAdjustments", await _db.StockAdjustments.AsNoTracking().ToListAsync());
+        total += AddSheet(wb, "DepartmentStocks", await _db.DepartmentStocks.AsNoTracking().ToListAsync());
         total += AddSheet(wb, "Suppliers", await _db.Suppliers.AsNoTracking().ToListAsync());
         total += AddSheet(wb, "ProcurementRequests", await _db.ProcurementRequests.AsNoTracking().ToListAsync());
         total += AddSheet(wb, "ProcurementRequestItems", await _db.ProcurementRequestItems.AsNoTracking().ToListAsync());
         total += AddSheet(wb, "ProcurementApprovals", await _db.ProcurementApprovals.AsNoTracking().ToListAsync());
         total += AddSheet(wb, "PurchaseOrders", await _db.PurchaseOrders.AsNoTracking().ToListAsync());
         total += AddSheet(wb, "PurchaseOrderItems", await _db.PurchaseOrderItems.AsNoTracking().ToListAsync());
+        total += AddSheet(wb, "DepartmentBudgets", await _db.DepartmentBudgets.AsNoTracking().ToListAsync());
         total += AddSheet(wb, "DemandForecasts", await _db.DemandForecasts.AsNoTracking().ToListAsync());
+
+        // Attachment metadata only — the files themselves live on disk and are
+        // covered by the SQL .bak plus the uploads folder, not by this workbook.
+        total += AddSheet(wb, "RequestAttachments", await _db.RequestAttachments.AsNoTracking().ToListAsync());
+
+        total += AddSheet(wb, "SystemSettings", await _db.SystemSettings.AsNoTracking().ToListAsync());
         total += AddSheet(wb, "Notifications", await _db.Notifications.AsNoTracking().ToListAsync());
         total += AddSheet(wb, "AuditLogs", await _db.AuditLogs.AsNoTracking().ToListAsync());
+        // RefreshTokens are deliberately absent: they are live credentials, and
+        // a workbook is the last place they should be sitting.
 
         wb.SaveAs(filePath);
         return total;
@@ -176,7 +191,12 @@ public class BackupService : IBackupService
         var stale = _db.Backups.Where(b => b.CreatedAt < cutoff).ToList();
         foreach (var b in stale)
         {
-            try { if (File.Exists(b.FilePath)) File.Delete(b.FilePath); }
+            try
+            {
+                if (File.Exists(b.FilePath)) File.Delete(b.FilePath);
+                var bak = Path.ChangeExtension(b.FilePath, ".bak");
+                if (File.Exists(bak)) File.Delete(bak);
+            }
             catch (Exception ex) { _logger.LogWarning(ex, "Could not delete backup file {File}.", b.FilePath); }
         }
         if (stale.Count > 0)
@@ -194,13 +214,54 @@ public class BackupService : IBackupService
         return list.Select(ToDto);
     }
 
-    public async Task<(byte[] Content, string FileName)?> GetFileAsync(int id)
+    public async Task<(byte[] Content, string FileName)?> GetFileAsync(int id, string format = "xlsx")
     {
         var backup = await _db.Backups.FindAsync(id);
-        if (backup is null || backup.Status != BackupStatus.Success || !File.Exists(backup.FilePath))
-            return null;
-        var bytes = await File.ReadAllBytesAsync(backup.FilePath);
-        return (bytes, backup.FileName);
+        if (backup is null || backup.Status != BackupStatus.Success) return null;
+
+        var path = format == "bak" ? Path.ChangeExtension(backup.FilePath, ".bak") : backup.FilePath;
+        if (!File.Exists(path)) return null;
+
+        var bytes = await File.ReadAllBytesAsync(path);
+        return (bytes, Path.GetFileName(path));
+    }
+
+    public async Task<(bool Ok, string Message)> VerifyAsync(int id)
+    {
+        var backup = await _db.Backups.FindAsync(id);
+        if (backup is null || backup.Status != BackupStatus.Success)
+            return (false, "Backup not found.");
+
+        var bakPath = Path.ChangeExtension(backup.FilePath, ".bak");
+        if (!File.Exists(bakPath))
+            return (false, "No database (.bak) file exists for this backup — only the Excel data export.");
+
+        try
+        {
+            await _db.Database.ExecuteSqlRawAsync("RESTORE VERIFYONLY FROM DISK = {0}", bakPath);
+            return (true, $"Backup verified — {Path.GetFileName(bakPath)} is a valid, restorable database backup.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Backup verification failed for {File}.", bakPath);
+            return (false, $"Verification failed: {ex.Message}");
+        }
+    }
+
+    // BACKUP DATABASE runs on the SQL engine, so the folder must be writable
+    // by it (true for LocalDB, which runs as the app user).
+    private async Task TryCreateDatabaseBackupAsync(string bakPath)
+    {
+        try
+        {
+            var dbName = _db.Database.GetDbConnection().Database;
+            await _db.Database.ExecuteSqlRawAsync(
+                $"BACKUP DATABASE [{dbName}] TO DISK = {{0}} WITH INIT, COPY_ONLY", bakPath);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Database .bak backup failed; the Excel export was still created.");
+        }
     }
 
     public async Task<bool> DeleteAsync(int id)
@@ -208,7 +269,12 @@ public class BackupService : IBackupService
         var backup = await _db.Backups.FindAsync(id);
         if (backup is null) return false;
 
-        try { if (File.Exists(backup.FilePath)) File.Delete(backup.FilePath); }
+        try
+        {
+            if (File.Exists(backup.FilePath)) File.Delete(backup.FilePath);
+            var bak = Path.ChangeExtension(backup.FilePath, ".bak");
+            if (File.Exists(bak)) File.Delete(bak);
+        }
         catch (Exception ex) { _logger.LogWarning(ex, "Could not delete backup file {File}.", backup.FilePath); }
 
         _db.Backups.Remove(backup);
@@ -243,5 +309,6 @@ public class BackupService : IBackupService
         ErrorMessage = b.ErrorMessage,
         TriggeredByName = b.TriggeredByName,
         CreatedAt = b.CreatedAt,
+        HasDatabaseFile = !string.IsNullOrEmpty(b.FilePath) && File.Exists(Path.ChangeExtension(b.FilePath, ".bak")),
     };
 }

@@ -38,6 +38,25 @@ public class ReportService : IReportService
 
         var peakMonth = byMonth.MaxBy(m => m.TotalQuantity);
 
+        var total = records.Sum(c => c.QuantityConsumed);
+
+        var byCategory = records
+            .GroupBy(c => new { c.InventoryItem.CategoryId, Name = c.InventoryItem.Category?.Name })
+            .Select(g =>
+            {
+                var qty = g.Sum(c => c.QuantityConsumed);
+                return new ConsumptionCategoryTotalDto
+                {
+                    CategoryId = g.Key.CategoryId,
+                    Category = string.IsNullOrWhiteSpace(g.Key.Name) ? "Uncategorized" : g.Key.Name,
+                    TotalQuantity = qty,
+                    UniqueItems = g.Select(c => c.InventoryItemId).Distinct().Count(),
+                    SharePercent = total > 0 ? Math.Round(qty / total * 100, 2) : 0
+                };
+            })
+            .OrderByDescending(c => c.TotalQuantity)
+            .ToList();
+
         var topItems = records
             .GroupBy(c => c.InventoryItemId)
             .Select(g =>
@@ -58,12 +77,13 @@ public class ReportService : IReportService
 
         return new ConsumptionSummaryDto
         {
-            TotalQuantity = records.Sum(c => c.QuantityConsumed),
+            TotalQuantity = total,
             UniqueItems = records.Select(c => c.InventoryItemId).Distinct().Count(),
             PeakMonth = peakMonth?.Month,
             PeakMonthQty = peakMonth?.TotalQuantity,
             AvgMonthlyConsumption = byMonth.Any() ? byMonth.Average(m => m.TotalQuantity) : null,
             ByMonth = byMonth,
+            ByCategory = byCategory,
             TopItems = topItems
         };
     }

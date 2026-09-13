@@ -20,6 +20,7 @@ import ItemBatches from './pages/inventory/ItemBatches';
 
 import StockMovements from './pages/stock/StockMovements';
 import StockAdjustments from './pages/stock/StockAdjustments';
+import DepartmentStockPage from './pages/stock/DepartmentStockPage';
 
 import SupplierList from './pages/suppliers/SupplierList';
 import ProcurementList from './pages/procurement/ProcurementList';
@@ -32,6 +33,7 @@ import SettingsPage from './pages/settings/SettingsPage';
 
 import UsersPage from './pages/admin/UsersPage';
 import DepartmentsPage from './pages/admin/DepartmentsPage';
+import DepartmentBudgetsPage from './pages/admin/DepartmentBudgetsPage';
 import CategoriesPage from './pages/admin/CategoriesPage';
 import BackupManagementPage from './pages/admin/BackupManagementPage';
 import AuditLogPage from './pages/audit/AuditLogPage';
@@ -70,11 +72,22 @@ export default function App() {
 
           <Route path="stock-movements" element={<StockMovements />} />
           <Route path="stock-adjustments" element={<StockAdjustments />} />
+          <Route path="department-stock" element={<DepartmentStockPage />} />
 
           <Route path="suppliers" element={<SupplierList />} />
           <Route path="procurement" element={<ProcurementList />} />
           <Route path="department-requests" element={<PrivateRoute roles={['SuperAdmin', 'HospitalAdministrator', 'DepartmentHead']}><DepartmentRequestsPage /></PrivateRoute>} />
           <Route path="purchase-orders" element={<PurchaseOrders />} />
+          {/* Admins set the figures; procurement staff and department heads read
+              them (the server scopes heads to their own department). */}
+          <Route
+            path="budgets"
+            element={
+              <PrivateRoute roles={['SuperAdmin', 'HospitalAdministrator', 'ProcurementStaff', 'DepartmentHead']}>
+                <DepartmentBudgetsPage />
+              </PrivateRoute>
+            }
+          />
 
           <Route path="forecast" element={<ForecastPage />} />
           <Route path="reports" element={<ReportsPage />} />

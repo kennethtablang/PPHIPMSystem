@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { MdBackup, MdDownload, MdDelete, MdSchedule, MdPlayArrow } from 'react-icons/md';
-import { getBackups, runBackup, deleteBackup, downloadBackup, getBackupSchedule, updateBackupSchedule } from '../../api/backups';
+import { MdBackup, MdDownload, MdDelete, MdSchedule, MdPlayArrow, MdVerified, MdHelpOutline, MdStorage } from 'react-icons/md';
+import { getBackups, runBackup, deleteBackup, downloadBackup, verifyBackup, getBackupSchedule, updateBackupSchedule } from '../../api/backups';
 import Modal from '../../components/common/Modal';
 import { toast } from '../../components/common/Toast';
 import { fmtDateTime } from '../../utils/format';
@@ -22,6 +22,8 @@ export default function BackupManagementPage() {
   const [savingSchedule, setSavingSchedule] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  const [verifyingId, setVerifyingId] = useState(null);
+  const [guideOpen, setGuideOpen] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -60,19 +62,32 @@ export default function BackupManagementPage() {
     }
   };
 
-  const handleDownload = async b => {
+  const handleDownload = async (b, format = 'xlsx') => {
     try {
-      const res = await downloadBackup(b.id);
+      const res = await downloadBackup(b.id, format);
       const url = URL.createObjectURL(new Blob([res.data]));
       const a = document.createElement('a');
       a.href = url;
-      a.download = b.fileName;
+      a.download = format === 'bak' ? b.fileName.replace(/\.xlsx$/i, '.bak') : b.fileName;
       document.body.appendChild(a);
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
     } catch {
       toast.error('Download failed.');
+    }
+  };
+
+  // RESTORE VERIFYONLY on the server — confirms the .bak is actually restorable.
+  const handleVerify = async b => {
+    setVerifyingId(b.id);
+    try {
+      const { data } = await verifyBackup(b.id);
+      toast.success(data.message);
+    } catch (e) {
+      toast.error(e.response?.data?.message ?? 'Verification failed.');
+    } finally {
+      setVerifyingId(null);
     }
   };
 
@@ -97,9 +112,14 @@ export default function BackupManagementPage() {
           <h1 className="page-title">Backup Management</h1>
           <p className="page-subtitle">Daily Excel snapshots of the system for disaster recovery. Backups older than 30 days are removed automatically.</p>
         </div>
-        <button className="btn btn-primary" onClick={handleRun} disabled={running}>
-          <MdPlayArrow size={16} /> {running ? 'Backing up…' : 'Run Backup Now'}
-        </button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-secondary" onClick={() => setGuideOpen(true)}>
+            <MdHelpOutline size={16} /> Restore Guide
+          </button>
+          <button className="btn btn-primary" onClick={handleRun} disabled={running}>
+            <MdPlayArrow size={16} /> {running ? 'Backing up…' : 'Run Backup Now'}
+          </button>
+        </div>
       </div>
 
       {/* Schedule */}
@@ -164,10 +184,30 @@ export default function BackupManagementPage() {
                         className="btn btn-ghost btn-icon btn-sm"
                         onClick={() => handleDownload(b)}
                         disabled={b.status !== 'Success'}
-                        title="Download"
+                        title="Download Excel data export"
                       >
                         <MdDownload size={15} />
                       </button>
+                      {b.hasDatabaseFile && (
+                        <>
+                          <button
+                            className="btn btn-ghost btn-icon btn-sm"
+                            onClick={() => handleDownload(b, 'bak')}
+                            title="Download SQL database backup (.bak)"
+                          >
+                            <MdStorage size={15} />
+                          </button>
+                          <button
+                            className="btn btn-ghost btn-icon btn-sm"
+                            onClick={() => handleVerify(b)}
+                            disabled={verifyingId === b.id}
+                            title="Verify the .bak is restorable"
+                            style={{ color: 'var(--green-600)' }}
+                          >
+                            <MdVerified size={15} />
+                          </button>
+                        </>
+                      )}
                       <button
                         className="btn btn-ghost btn-icon btn-sm"
                         onClick={() => setDeleteTarget(b)}
@@ -183,6 +223,43 @@ export default function BackupManagementPage() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {guideOpen && (
+        <Modal
+          title="Restoring from a Backup"
+          onClose={() => setGuideOpen(false)}
+          size="modal-lg"
+          footer={<button className="btn btn-secondary" onClick={() => setGuideOpen(false)}>Close</button>}
+        >
+          <div className="alert alert-info" style={{ fontSize: 12 }}>
+            Each successful backup produces two files: an <strong>Excel data export</strong> (human-readable,
+            for audits and spot-checks — it deliberately excludes password hashes) and a
+            <strong> SQL database backup (.bak)</strong>, which is the file that restores the system.
+            Use <em>Verify</em> regularly to confirm .bak files are restorable — a backup is only as good as its last test.
+          </div>
+
+          <ol style={{ fontSize: 13, color: 'var(--text-primary)', lineHeight: 1.8, paddingLeft: 20, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <li><strong>Stop the IPMS application</strong> — a database cannot be restored while the app is connected to it.</li>
+            <li><strong>Download the .bak</strong> for the backup you want (the disk icon), or locate it in the server's <code>Backups</code> folder.</li>
+            <li>
+              <strong>Restore with sqlcmd</strong> (run as an administrator on the database server):
+              <pre style={{ background: 'var(--bg-muted)', border: '1px solid var(--border)', borderRadius: 8, padding: 12, fontSize: 11, overflowX: 'auto', marginTop: 6 }}>
+{`sqlcmd -S "(localdb)\\MSSQLLocalDB" -Q "RESTORE DATABASE [PPHIPMSystem]
+  FROM DISK = 'C:\\path\\to\\IPMS_Backup_....bak'
+  WITH REPLACE"`}
+              </pre>
+              Adjust the server name and database name to your environment.
+            </li>
+            <li><strong>Restart the application.</strong> Pending EF migrations newer than the backup apply automatically on startup.</li>
+            <li><strong>Have everyone sign in again</strong> — restoring rolls back refresh tokens and any changes made after the backup was taken.</li>
+          </ol>
+
+          <div className="alert alert-warning" style={{ fontSize: 12 }}>
+            Restoring overwrites the current database. Anything entered after the backup timestamp is lost —
+            take a fresh backup first if the current state may still be needed.
+          </div>
+        </Modal>
       )}
 
       {deleteTarget && (

@@ -96,6 +96,86 @@ public class ItemBatchService : IItemBatchService
         return _mapper.Map<ItemBatchDto>(entity);
     }
 
+    // Replenish several items in one action. Every line is validated up front and
+    // the inserts plus the QuantityOnHand increases go out in a single
+    // SaveChangesAsync, so a bad line on row 12 cannot leave rows 1-11 applied.
+    public async Task<BulkReceiveResultDto> ReceiveManyAsync(BulkReceiveBatchesDto dto, string userId)
+    {
+        if (dto.Batches.Count == 0)
+            throw new InvalidOperationException("No lines to receive.");
+
+        var itemIds = dto.Batches.Select(b => b.InventoryItemId).Distinct().ToList();
+        var items = await _db.InventoryItems
+            .Where(i => itemIds.Contains(i.Id))
+            .ToDictionaryAsync(i => i.Id);
+
+        var missingItems = itemIds.Where(id => !items.ContainsKey(id)).ToList();
+        if (missingItems.Count > 0)
+            throw new InvalidOperationException($"Item(s) not found: {string.Join(", ", missingItems)}.");
+
+        var poIds = dto.Batches
+            .Where(b => b.PurchaseOrderId.HasValue)
+            .Select(b => b.PurchaseOrderId!.Value).Distinct().ToList();
+        if (poIds.Count > 0)
+        {
+            var knownPoIds = await _db.PurchaseOrders
+                .Where(p => poIds.Contains(p.Id)).Select(p => p.Id).ToListAsync();
+            var missingPos = poIds.Except(knownPoIds).ToList();
+            if (missingPos.Count > 0)
+                throw new InvalidOperationException($"Purchase order(s) not found: {string.Join(", ", missingPos)}.");
+        }
+
+        var created = new List<(ItemBatch Batch, InventoryItem Item, CreateItemBatchDto Line)>();
+        foreach (var line in dto.Batches)
+        {
+            var entity = _mapper.Map<ItemBatch>(line);
+            _db.ItemBatches.Add(entity);
+
+            var item = items[line.InventoryItemId];
+            item.QuantityOnHand += line.Quantity;
+            item.UpdatedAt = DateTime.UtcNow;
+
+            created.Add((entity, item, line));
+        }
+
+        await _db.SaveChangesAsync();
+
+        // One summary entry, matching how DisposeExpiredAsync records bulk work.
+        // The per-line breakdown is kept in Details (capped to the column width).
+        var breakdown = string.Join("; ", created.Select(c =>
+            $"{c.Item.Name} ×{c.Line.Quantity}" +
+            (string.IsNullOrWhiteSpace(c.Line.LotNumber) ? "" : $" (lot {c.Line.LotNumber})") +
+            (c.Line.ExpirationDate.HasValue ? $" exp {c.Line.ExpirationDate:yyyy-MM-dd}" : "")));
+        var summary = $"Bulk receive: {created.Count} batch(es), " +
+                      $"{created.Sum(c => c.Line.Quantity)} unit(s). {breakdown}";
+        if (summary.Length > 2000) summary = summary[..1997] + "…";
+
+        await _audit.LogAsync(userId, "BatchesReceived", "ItemBatch", null, summary);
+
+        // Same expiry warning the single-receive path raises, per line.
+        foreach (var (batch, item, line) in created)
+        {
+            if (!line.ExpirationDate.HasValue) continue;
+            var daysUntilExpiry = (line.ExpirationDate.Value - DateTime.UtcNow).TotalDays;
+            if (daysUntilExpiry > item.ExpirationWarningDays) continue;
+
+            await _notifications.CreateForRoleAsync(
+                UserRole.InventoryOfficer,
+                NotificationType.ExpirationWarning,
+                "Expiration Warning",
+                $"Batch {line.LotNumber ?? batch.Id.ToString()} of {item.Name} expires in {(int)daysUntilExpiry} days.",
+                batch.Id, "ItemBatch");
+        }
+
+        await _notifications.BroadcastStockChangedAsync();
+
+        return new BulkReceiveResultDto
+        {
+            BatchesCreated = created.Count,
+            TotalQuantity = created.Sum(c => c.Line.Quantity),
+        };
+    }
+
     public async Task<ItemBatchDto?> UpdateDetailsAsync(int batchId, UpdateItemBatchDetailsDto dto, string userId)
     {
         var batch = await _db.ItemBatches.Include(b => b.InventoryItem).FirstOrDefaultAsync(b => b.Id == batchId);

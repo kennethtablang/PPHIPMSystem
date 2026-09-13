@@ -39,11 +39,21 @@ public class BackupController : ControllerBase
     }
 
     [HttpGet("{id:int}/download")]
-    public async Task<IActionResult> Download(int id)
+    public async Task<IActionResult> Download(int id, [FromQuery] string format = "xlsx")
     {
-        var file = await _backups.GetFileAsync(id);
+        var file = await _backups.GetFileAsync(id, format);
         if (file is null) return NotFound(new { message = "Backup file not found." });
-        return File(file.Value.Content, ExcelContentType, file.Value.FileName);
+        var contentType = format == "bak" ? "application/octet-stream" : ExcelContentType;
+        return File(file.Value.Content, contentType, file.Value.FileName);
+    }
+
+    [HttpPost("{id:int}/verify")]
+    public async Task<IActionResult> Verify(int id)
+    {
+        var (ok, message) = await _backups.VerifyAsync(id);
+        await _audit.LogAsync(User.FindFirstValue(ClaimTypes.NameIdentifier), "BackupVerified", "Backup", id,
+            $"{(ok ? "Passed" : "Failed")}: {message}");
+        return ok ? Ok(new { message }) : BadRequest(new { message });
     }
 
     [HttpDelete("{id:int}")]

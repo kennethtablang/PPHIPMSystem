@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { MdAdd, MdVisibility, MdSend, MdCheckCircle, MdCancel, MdWarning, MdSchedule } from 'react-icons/md';
 import { getRequests, createRequest, submitRequest } from '../../api/procurement';
 import { getItems } from '../../api/inventory';
+import AttachmentsPanel from '../../components/common/AttachmentsPanel';
 import Modal from '../../components/common/Modal';
 import SearchSelect from '../../components/common/SearchSelect';
 import StatusBadge from '../../components/common/StatusBadge';
@@ -220,7 +221,7 @@ export default function DepartmentRequestsPage() {
                         options={items.map(it => ({
                           value: it.id,
                           label: `${it.name} (${it.unit})`,
-                          sublabel: `${it.quantityOnHand > 0 ? 'Available' : 'Not Available'} — ${it.quantityOnHand} in stock`,
+                          sublabel: `${it.itemCode ? `${it.itemCode} · ` : ''}${it.quantityOnHand > 0 ? 'Available' : 'Not Available'} — ${it.quantityOnHand} in stock`,
                         }))}
                       />
                     </div>
@@ -309,6 +310,7 @@ export default function DepartmentRequestsPage() {
               </table>
             </div>
           </div>
+          <AttachmentsPanel requestId={viewModal.id} />
           {(viewModal.approvals ?? []).length > 0 && (
             <div style={{ marginTop: 16 }}>
               <label className="form-label">Approval History</label>

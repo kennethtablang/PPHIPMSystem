@@ -12,8 +12,13 @@ namespace PPHIPMSystem.Server.Controllers;
 public class ProcurementController : ControllerBase
 {
     private readonly IProcurementService _procurement;
+    private readonly IRequestAttachmentService _attachments;
 
-    public ProcurementController(IProcurementService procurement) => _procurement = procurement;
+    public ProcurementController(IProcurementService procurement, IRequestAttachmentService attachments)
+    {
+        _procurement = procurement;
+        _attachments = attachments;
+    }
 
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] string? status, [FromQuery] int? departmentId)
@@ -106,6 +111,76 @@ public class ProcurementController : ControllerBase
         {
             var result = await _procurement.GeneratePurchaseOrderAsync(id, dto, userId);
             return Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    // ── Attachments (quotes, canvass sheets, supporting documents) ──────────
+
+    // Department heads may only touch their own department's requests, mirroring
+    // the GetAll scoping; every other role sees the full procurement pipeline.
+    private async Task<bool> CanAccessRequestAsync(int requestId)
+    {
+        if (!User.IsInRole("DepartmentHead")) return true;
+        var deptClaim = User.FindFirstValue("departmentId");
+        return int.TryParse(deptClaim, out var deptId)
+            && await _attachments.RequestBelongsToDepartmentAsync(requestId, deptId);
+    }
+
+    [HttpGet("{id}/attachments")]
+    public async Task<IActionResult> GetAttachments(int id)
+    {
+        if (!await CanAccessRequestAsync(id)) return Forbid();
+        return Ok(await _attachments.GetForRequestAsync(id));
+    }
+
+    [HttpPost("{id}/attachments")]
+    [RequestSizeLimit(12 * 1024 * 1024)]
+    public async Task<IActionResult> UploadAttachment(int id, IFormFile file)
+    {
+        if (!await CanAccessRequestAsync(id)) return Forbid();
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        try
+        {
+            var result = await _attachments.UploadAsync(id, file, userId);
+            return Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpGet("attachments/{attachmentId}/download")]
+    public async Task<IActionResult> DownloadAttachment(int attachmentId)
+    {
+        var requestId = await _attachments.GetRequestIdForAttachmentAsync(attachmentId);
+        if (requestId is null) return NotFound(new { message = "Attachment not found." });
+        if (!await CanAccessRequestAsync(requestId.Value)) return Forbid();
+
+        var file = await _attachments.DownloadAsync(attachmentId);
+        if (file is null) return NotFound(new { message = "Attachment not found." });
+
+        Response.Headers.XContentTypeOptions = "nosniff";
+        return File(file.Value.Content, file.Value.ContentType, file.Value.FileName);
+    }
+
+    [HttpDelete("attachments/{attachmentId}")]
+    public async Task<IActionResult> DeleteAttachment(int attachmentId)
+    {
+        var requestId = await _attachments.GetRequestIdForAttachmentAsync(attachmentId);
+        if (requestId is null) return NotFound();
+        if (!await CanAccessRequestAsync(requestId.Value)) return Forbid();
+
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        var isAdmin = User.IsInRole("SuperAdmin") || User.IsInRole("HospitalAdministrator");
+        try
+        {
+            var ok = await _attachments.DeleteAsync(attachmentId, userId, isAdmin);
+            return ok ? NoContent() : NotFound();
         }
         catch (InvalidOperationException ex)
         {

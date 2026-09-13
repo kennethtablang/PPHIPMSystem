@@ -29,6 +29,8 @@ public class StockMovementService : IStockMovementService
             .Include(m => m.InventoryItem)
             .Include(m => m.PerformedByUser)
             .Include(m => m.PurchaseOrder)
+            .Include(m => m.Department)
+            .Include(m => m.ToDepartment)
             .Include(m => m.VoidedByUser)
             .AsQueryable();
 
@@ -78,6 +80,17 @@ public class StockMovementService : IStockMovementService
             await _db.PurchaseOrders.FindAsync(dto.PurchaseOrderId.Value) is null)
             throw new InvalidOperationException("Purchase order not found.");
 
+        Department? department = null;
+        if (dto.DepartmentId.HasValue)
+        {
+            if (dto.MovementType is not (StockMovementType.Issuance or StockMovementType.Return))
+                throw new InvalidOperationException("A department applies only to issuances (destination) and returns (source).");
+            department = await _db.Departments.FindAsync(dto.DepartmentId.Value)
+                ?? throw new InvalidOperationException("Department not found.");
+            if (!department.IsActive)
+                throw new InvalidOperationException("That department is inactive.");
+        }
+
         var before = item.QuantityOnHand;
         decimal after;
 
@@ -103,6 +116,16 @@ public class StockMovementService : IStockMovementService
         item.QuantityOnHand = after;
         item.UpdatedAt = DateTime.UtcNow;
 
+        // Department ledger: issuing moves stock into the department's balance;
+        // a return draws it back out (and must not exceed what's recorded there).
+        if (department is not null)
+        {
+            if (dto.MovementType == StockMovementType.Issuance)
+                await AdjustDepartmentStockAsync(department, item, dto.Quantity);
+            else
+                await AdjustDepartmentStockAsync(department, item, -dto.Quantity);
+        }
+
         var movement = new StockMovement
         {
             InventoryItemId = dto.InventoryItemId,
@@ -113,6 +136,7 @@ public class StockMovementService : IStockMovementService
             Remarks = dto.Remarks,
             PerformedByUserId = userId,
             PurchaseOrderId = dto.PurchaseOrderId,
+            DepartmentId = dto.DepartmentId,
             MovementDate = DateTime.UtcNow
         };
         _db.StockMovements.Add(movement);
@@ -160,10 +184,120 @@ public class StockMovementService : IStockMovementService
         return _mapper.Map<StockMovementDto>(movement);
     }
 
+    // Phase 2 of department transfers: a ward records what it actually used.
+    //
+    // Central stock is deliberately untouched — the item left the storeroom when
+    // it was issued, and the issuance already wrote the ConsumptionRecord that
+    // feeds demand forecasting. Counting it again here would double the forecast
+    // input and drive QuantityOnHand negative. All this does is draw the ward's
+    // balance down and leave an auditable movement behind.
+    public async Task<StockMovementDto> RecordDepartmentConsumptionAsync(
+        RecordDepartmentConsumptionDto dto, string userId)
+    {
+        var item = await _db.InventoryItems.FindAsync(dto.InventoryItemId)
+            ?? throw new InvalidOperationException("Inventory item not found.");
+
+        var department = await _db.Departments.FindAsync(dto.DepartmentId)
+            ?? throw new InvalidOperationException("Department not found.");
+        if (!department.IsActive)
+            throw new InvalidOperationException("That department is inactive.");
+
+        // Refuses to draw the ward below zero, with a message naming the balance.
+        await AdjustDepartmentStockAsync(department, item, -dto.Quantity);
+
+        var movement = new StockMovement
+        {
+            InventoryItemId = dto.InventoryItemId,
+            MovementType = StockMovementType.DepartmentConsumption,
+            Quantity = dto.Quantity,
+            // Central stock is unchanged, so before == after. Recording the real
+            // on-hand figure keeps the movement row meaningful in the ledger.
+            QuantityBeforeMovement = item.QuantityOnHand,
+            QuantityAfterMovement = item.QuantityOnHand,
+            Remarks = dto.Remarks,
+            PerformedByUserId = userId,
+            DepartmentId = department.Id,
+            MovementDate = DateTime.UtcNow
+        };
+        _db.StockMovements.Add(movement);
+
+        await _db.SaveChangesAsync();
+
+        await _audit.LogAsync(userId, "StockMovement_DepartmentConsumption", "StockMovement", movement.Id,
+            $"Item: {item.Name}, Qty: {dto.Quantity}, Department: {department.Name}");
+        await _notifications.BroadcastStockChangedAsync();
+
+        await _db.Entry(movement).Reference(m => m.InventoryItem).LoadAsync();
+        await _db.Entry(movement).Reference(m => m.PerformedByUser).LoadAsync();
+        await _db.Entry(movement).Reference(m => m.Department).LoadAsync();
+        return _mapper.Map<StockMovementDto>(movement);
+    }
+
+    // Phase 3 of department transfers: stock moves straight from one ward to
+    // another without a trip back through the storeroom.
+    //
+    // Central QuantityOnHand, the batches, and the ConsumptionRecords are all
+    // deliberately untouched: the units left central stock at issuance and were
+    // counted for forecasting then. Only the two ward balances change, so the
+    // hospital-wide totals are identical before and after — this is a move
+    // between two pockets of the same trousers.
+    public async Task<StockMovementDto> TransferBetweenDepartmentsAsync(
+        TransferDepartmentStockDto dto, string userId)
+    {
+        if (dto.FromDepartmentId == dto.ToDepartmentId)
+            throw new InvalidOperationException("Source and destination departments must be different.");
+
+        var item = await _db.InventoryItems.FindAsync(dto.InventoryItemId)
+            ?? throw new InvalidOperationException("Inventory item not found.");
+
+        var from = await _db.Departments.FindAsync(dto.FromDepartmentId)
+            ?? throw new InvalidOperationException("Source department not found.");
+        var to = await _db.Departments.FindAsync(dto.ToDepartmentId)
+            ?? throw new InvalidOperationException("Destination department not found.");
+        if (!to.IsActive)
+            throw new InvalidOperationException("That destination department is inactive.");
+
+        // Source first: it throws with the ward's actual balance if short, so
+        // nothing is credited to the destination on a failed transfer.
+        await AdjustDepartmentStockAsync(from, item, -dto.Quantity);
+        await AdjustDepartmentStockAsync(to, item, dto.Quantity);
+
+        var movement = new StockMovement
+        {
+            InventoryItemId = dto.InventoryItemId,
+            MovementType = StockMovementType.DepartmentTransfer,
+            Quantity = dto.Quantity,
+            // Central stock is unchanged, so before == after; recording the real
+            // on-hand figure keeps the row meaningful alongside the others.
+            QuantityBeforeMovement = item.QuantityOnHand,
+            QuantityAfterMovement = item.QuantityOnHand,
+            Remarks = dto.Remarks,
+            PerformedByUserId = userId,
+            DepartmentId = from.Id,
+            ToDepartmentId = to.Id,
+            MovementDate = DateTime.UtcNow
+        };
+        _db.StockMovements.Add(movement);
+
+        await _db.SaveChangesAsync();
+
+        await _audit.LogAsync(userId, "StockMovement_DepartmentTransfer", "StockMovement", movement.Id,
+            $"Item: {item.Name}, Qty: {dto.Quantity}, {from.Name} → {to.Name}");
+        await _notifications.BroadcastStockChangedAsync();
+
+        await _db.Entry(movement).Reference(m => m.InventoryItem).LoadAsync();
+        await _db.Entry(movement).Reference(m => m.PerformedByUser).LoadAsync();
+        await _db.Entry(movement).Reference(m => m.Department).LoadAsync();
+        await _db.Entry(movement).Reference(m => m.ToDepartment).LoadAsync();
+        return _mapper.Map<StockMovementDto>(movement);
+    }
+
     public async Task<StockMovementDto> VoidAsync(int movementId, string reason, string userId)
     {
         var original = await _db.StockMovements
             .Include(m => m.InventoryItem)
+            .Include(m => m.Department)
+            .Include(m => m.ToDepartment)
             .FirstOrDefaultAsync(m => m.Id == movementId)
             ?? throw new InvalidOperationException("Stock movement not found.");
 
@@ -197,8 +331,32 @@ public class StockMovementService : IStockMovementService
                 after = before + qty;
                 await RestoreBatchesFefoAsync(original.InventoryItemId, qty);
                 break;
+            case StockMovementType.DepartmentConsumption:
+            case StockMovementType.DepartmentTransfer:
+                // Neither touched central stock or batches, so there is nothing
+                // to restore here — only the department balances below.
+                after = before;
+                break;
             default:
                 throw new InvalidOperationException("This movement type can't be voided.");
+        }
+
+        // Undo the department-ledger side of the original movement too: a voided
+        // issuance takes the stock back out of the department; a voided return or
+        // ward consumption puts it back in. A voided transfer walks the units
+        // back across — destination first, so a receiving ward that has already
+        // used the stock fails the void before the source is credited.
+        if (original.MovementType == StockMovementType.DepartmentTransfer)
+        {
+            if (original.ToDepartment is null || original.Department is null)
+                throw new InvalidOperationException("This transfer is missing a department and can't be voided.");
+            await AdjustDepartmentStockAsync(original.ToDepartment, item, -qty);
+            await AdjustDepartmentStockAsync(original.Department, item, qty);
+        }
+        else if (original.Department is not null)
+        {
+            var deptDelta = original.MovementType == StockMovementType.Issuance ? -qty : qty;
+            await AdjustDepartmentStockAsync(original.Department, item, deptDelta);
         }
 
         item.QuantityOnHand = after;
@@ -215,6 +373,8 @@ public class StockMovementService : IStockMovementService
             InventoryItemId = original.InventoryItemId,
             MovementType = original.MovementType,
             Quantity = qty,
+            DepartmentId = original.DepartmentId,
+            ToDepartmentId = original.ToDepartmentId,
             QuantityBeforeMovement = before,
             QuantityAfterMovement = after,
             Remarks = $"Void of movement #{original.Id}. Reason: {reason}",
@@ -243,6 +403,35 @@ public class StockMovementService : IStockMovementService
         await _db.Entry(reversal).Reference(m => m.InventoryItem).LoadAsync();
         await _db.Entry(reversal).Reference(m => m.PerformedByUser).LoadAsync();
         return _mapper.Map<StockMovementDto>(reversal);
+    }
+
+    // Applies a delta to a department's balance of an item, creating the ledger
+    // row on first issuance and refusing to draw below zero.
+    private async Task AdjustDepartmentStockAsync(Department department, InventoryItem item, decimal delta)
+    {
+        var row = await _db.DepartmentStocks.FirstOrDefaultAsync(d =>
+            d.DepartmentId == department.Id && d.InventoryItemId == item.Id);
+
+        if (row is null)
+        {
+            if (delta < 0)
+                throw new InvalidOperationException(
+                    $"{department.Name} has no recorded stock of {item.Name} to return.");
+            _db.DepartmentStocks.Add(new DepartmentStock
+            {
+                DepartmentId = department.Id,
+                InventoryItemId = item.Id,
+                Quantity = delta
+            });
+            return;
+        }
+
+        if (row.Quantity + delta < 0)
+            throw new InvalidOperationException(
+                $"{department.Name} only has {row.Quantity} {item.Unit} of {item.Name} recorded — cannot process {Math.Abs(delta)}.");
+
+        row.Quantity += delta;
+        row.UpdatedAt = DateTime.UtcNow;
     }
 
     // Reverse of ConsumeBatchesFefoAsync: put voided stock back onto the batches

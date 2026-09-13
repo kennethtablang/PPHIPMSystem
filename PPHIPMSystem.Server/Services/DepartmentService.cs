@@ -33,6 +33,8 @@ public class DepartmentService : IDepartmentService
     public async Task<DepartmentDto> CreateAsync(CreateDepartmentDto dto)
     {
         var entity = _mapper.Map<Department>(dto);
+        // Blank input is stored as null so "no head recorded" is one value, not two.
+        entity.HeadOfDepartment = string.IsNullOrWhiteSpace(entity.HeadOfDepartment) ? null : entity.HeadOfDepartment.Trim();
         _db.Departments.Add(entity);
         await _db.SaveChangesAsync();
         return _mapper.Map<DepartmentDto>(entity);
@@ -44,6 +46,7 @@ public class DepartmentService : IDepartmentService
         if (entity is null) return null;
         entity.Name = dto.Name;
         entity.Description = dto.Description;
+        entity.HeadOfDepartment = string.IsNullOrWhiteSpace(dto.HeadOfDepartment) ? null : dto.HeadOfDepartment.Trim();
         await _db.SaveChangesAsync();
         return _mapper.Map<DepartmentDto>(entity);
     }

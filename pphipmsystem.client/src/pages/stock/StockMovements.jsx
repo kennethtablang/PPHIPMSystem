@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { MdAdd, MdTrendingUp, MdUndo } from 'react-icons/md';
 import { getMovements, createMovement, voidMovement } from '../../api/stockMovements';
 import { getItems } from '../../api/inventory';
+import { getDepartments } from '../../api/departments';
 import Modal from '../../components/common/Modal';
 import SearchSelect from '../../components/common/SearchSelect';
 import { toast } from '../../components/common/Toast';
@@ -10,10 +11,22 @@ import { getAppPrefs } from '../../utils/appPrefs';
 import { fmtDateTime } from '../../utils/format';
 import { useAuth } from '../../context/AuthContext';
 
+// Types that can be created from this page. Ward usage is deliberately absent:
+// it is recorded on the Department Stock page, against a specific ward balance.
 const TYPES = ['Receipt', 'Issuance', 'Return', 'Disposal'];
-const BLANK = { inventoryItemId: '', movementType: 'Issuance', quantity: '', remarks: '' };
+// …but ward usage and ward-to-ward transfers still show up in the ledger, so
+// they are filterable here even though both are recorded elsewhere.
+const FILTER_TYPES = [...TYPES, 'DepartmentConsumption', 'DepartmentTransfer'];
+const BLANK = { inventoryItemId: '', movementType: 'Issuance', quantity: '', remarks: '', departmentId: '' };
 
-const TYPE_COLOR = { Receipt: 'green', Issuance: 'blue', Return: 'teal', Disposal: 'red', Adjustment: 'amber' };
+const TYPE_COLOR = {
+  Receipt: 'green', Issuance: 'blue', Return: 'teal',
+  Disposal: 'red', Adjustment: 'amber', DepartmentConsumption: 'purple',
+  DepartmentTransfer: 'blue',
+};
+// The enum names are a mouthful on a badge and a filter button.
+const TYPE_LABEL = { DepartmentConsumption: 'Ward Usage', DepartmentTransfer: 'Ward Transfer' };
+const typeLabel = t => TYPE_LABEL[t] ?? t;
 
 export default function StockMovements() {
   const { user } = useAuth();
@@ -21,6 +34,7 @@ export default function StockMovements() {
 
   const [movements, setMovements] = useState([]);
   const [items, setItems] = useState([]);
+  const [departments, setDepartments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [itemFilter, setItemFilter] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
@@ -51,7 +65,10 @@ export default function StockMovements() {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { getItems().then(r => setItems(r.data)); }, []);
+  useEffect(() => {
+    getItems().then(r => setItems(r.data));
+    getDepartments().then(r => setDepartments(r.data)).catch(() => {});
+  }, []);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: reload only when these inputs change
   useEffect(() => { load(); }, [itemFilter, typeFilter]);
 
@@ -60,7 +77,7 @@ export default function StockMovements() {
   const save = async () => {
     setSaving(true);
     try {
-      await createMovement({ ...form, inventoryItemId: +form.inventoryItemId, quantity: +form.quantity });
+      await createMovement({ ...form, inventoryItemId: +form.inventoryItemId, quantity: +form.quantity, departmentId: form.departmentId ? +form.departmentId : null });
       toast.success('Stock movement recorded.');
       setModal(false);
       load();
@@ -139,15 +156,15 @@ export default function StockMovements() {
           onChange={e => setItemFilter(e.target.value)}
           placeholder="All items — search to filter…"
           style={{ minWidth: 260 }}
-          options={items.map(i => ({ value: i.id, label: i.name, sublabel: `${i.quantityOnHand} ${i.unit} in stock` }))}
+          options={items.map(i => ({ value: i.id, label: i.name, sublabel: `${i.itemCode ? `${i.itemCode} · ` : ''}${i.quantityOnHand} ${i.unit} in stock` }))}
         />
         <div style={{ display: 'flex', gap: 6 }}>
-          {['', ...TYPES].map(t => (
+          {['', ...FILTER_TYPES].map(t => (
             <button
               key={t}
               className={`btn btn-sm ${typeFilter === t ? 'btn-primary' : 'btn-secondary'}`}
               onClick={() => setTypeFilter(t)}
-            >{t || 'All Types'}</button>
+            >{t ? typeLabel(t) : 'All Types'}</button>
           ))}
         </div>
       </div>
@@ -181,17 +198,30 @@ export default function StockMovements() {
                 return (
                 <tr key={m.id} style={m.isVoided ? { opacity: 0.55 } : undefined}>
                   <td>
-                    <span className={`badge badge-${TYPE_COLOR[m.movementType] ?? 'gray'}`}>{m.movementType}</span>
+                    <span className={`badge badge-${TYPE_COLOR[m.movementType] ?? 'gray'}`}>{typeLabel(m.movementType)}</span>
                     {m.isReversal && <span className="badge badge-gray" style={{ marginLeft: 4 }}>Reversal</span>}
                     {m.isVoided && <span className="badge badge-red" style={{ marginLeft: 4 }}>Voided</span>}
+                    {m.departmentName && (
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>
+                        {/* → into a ward, ← back to central, ⊗ used up inside
+                            the ward, A → B straight across between two wards */}
+                        {m.movementType === 'DepartmentTransfer'
+                          ? `${m.departmentName} → ${m.toDepartmentName ?? '—'}`
+                          : `${m.movementType === 'Issuance' ? '→'
+                              : m.movementType === 'DepartmentConsumption' ? '⊗ used at'
+                              : '←'} ${m.departmentName}`}
+                      </div>
+                    )}
                   </td>
                   <td>
                     <div style={{ fontWeight: 500, textDecoration: m.isVoided ? 'line-through' : undefined }}>{m.itemName}</div>
                     {m.itemCode && <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'monospace' }}>{m.itemCode}</div>}
                   </td>
                   <td style={{ textAlign: 'right', fontWeight: 700 }}>
-                    <span style={{ color: delta < 0 ? '#dc2626' : '#059669' }}>
-                      {delta < 0 ? '−' : '+'}{m.quantity}
+                    {/* A zero delta means central stock never moved (ward usage,
+                        ward-to-ward transfer) — a signed figure would imply it did. */}
+                    <span style={{ color: delta === 0 ? 'var(--text-muted)' : delta < 0 ? '#dc2626' : '#059669' }}>
+                      {delta === 0 ? '' : delta < 0 ? '−' : '+'}{m.quantity}
                     </span>
                   </td>
                   <td style={{ textAlign: 'right', color: 'var(--text-muted)' }}>{m.quantityBeforeMovement}</td>
@@ -251,7 +281,7 @@ export default function StockMovements() {
               options={items.map(i => ({
                 value: i.id,
                 label: i.name,
-                sublabel: `${i.quantityOnHand > 0 ? 'Available' : 'Not Available'} — ${i.quantityOnHand} ${i.unit}`,
+                sublabel: `${i.itemCode ? `${i.itemCode} · ` : ''}${i.quantityOnHand > 0 ? 'Available' : 'Not Available'} — ${i.quantityOnHand} ${i.unit}`,
               }))}
             />
             {/* Live stock card */}
@@ -287,6 +317,25 @@ export default function StockMovements() {
               <input className="form-control" type="number" min="0.01" step="0.01" value={form.quantity} onChange={set('quantity')} required />
             </div>
           </div>
+          {['Issuance', 'Return'].includes(form.movementType) && (
+            <div className="form-group">
+              <label className="form-label">
+                {form.movementType === 'Issuance' ? 'Issue to department' : 'Returned from department'}
+                <span style={{ fontWeight: 400, color: 'var(--text-muted)' }}> (optional)</span>
+              </label>
+              <SearchSelect
+                value={form.departmentId}
+                onChange={set('departmentId')}
+                placeholder={form.movementType === 'Issuance' ? 'External / unattributed' : 'Not from a department'}
+                options={departments.filter(d => d.isActive !== false).map(d => ({ value: d.id, label: d.name }))}
+              />
+              <p style={{ fontSize: 11, color: 'var(--text-muted)', margin: '6px 0 0' }}>
+                {form.movementType === 'Issuance'
+                  ? 'Selecting a department adds this quantity to its recorded balance (see Department Stock).'
+                  : 'Selecting a department deducts this quantity from its recorded balance.'}
+              </p>
+            </div>
+          )}
           <div className="form-group">
             <label className="form-label">Remarks</label>
             <textarea className="form-control" value={form.remarks} onChange={set('remarks')} rows={2} placeholder="Optional notes…" />
@@ -312,11 +361,17 @@ export default function StockMovements() {
         >
           <div className="alert alert-warning">
             This posts a compensating entry that reverses the movement's effect on stock
-            {['Issuance', 'Disposal'].includes(voidTarget.movementType) ? ' (restoring batch quantities)' : ''}.
+            {['Issuance', 'Disposal'].includes(voidTarget.movementType) ? ' (restoring batch quantities)' : ''}
+            {voidTarget.movementType === 'DepartmentConsumption'
+              ? ` (putting the units back into ${voidTarget.departmentName ?? "the ward's"} balance; central stock is unaffected)`
+              : ''}
+            {voidTarget.movementType === 'DepartmentTransfer'
+              ? ` (taking the units back out of ${voidTarget.toDepartmentName ?? 'the receiving ward'} and returning them to ${voidTarget.departmentName ?? 'the sending ward'}; central stock is unaffected, and the void fails if the receiving ward has already used them)`
+              : ''}.
             The original stays on record, marked as voided.
           </div>
           <div style={{ margin: '12px 0', fontSize: 13 }}>
-            <div><span style={{ color: 'var(--text-muted)' }}>Type:</span> <strong>{voidTarget.movementType}</strong></div>
+            <div><span style={{ color: 'var(--text-muted)' }}>Type:</span> <strong>{typeLabel(voidTarget.movementType)}</strong></div>
             <div><span style={{ color: 'var(--text-muted)' }}>Item:</span> <strong>{voidTarget.itemName}</strong></div>
             <div><span style={{ color: 'var(--text-muted)' }}>Quantity:</span> <strong>{voidTarget.quantity}</strong></div>
           </div>

@@ -12,5 +12,10 @@ public enum NotificationType
     StockAdjustmentRequested,
     StockAdjustmentApproved,
     StockAdjustmentRejected,
-    General
+    General,
+
+    // A department has passed its fiscal-year appropriation, or is closing on
+    // it. Appended last: values are stored as ints, so existing rows keep their
+    // meaning.
+    BudgetAlert
 }

@@ -69,6 +69,37 @@ public class AuthController : ControllerBase
         return NoContent();
     }
 
+    // ── Authenticator-app (TOTP) enrolment ──────────────────────────────────
+
+    [Authorize]
+    [HttpPost("authenticator/setup")]
+    public async Task<IActionResult> AuthenticatorSetup()
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        var result = await _auth.BeginAuthenticatorSetupAsync(userId);
+        return result is null ? NotFound() : Ok(result);
+    }
+
+    [Authorize]
+    [HttpPost("authenticator/confirm")]
+    public async Task<IActionResult> AuthenticatorConfirm([FromBody] AuthenticatorConfirmDto dto)
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        var ok = await _auth.ConfirmAuthenticatorAsync(userId, dto.Code);
+        return ok
+            ? Ok(new { message = "Authenticator enabled." })
+            : BadRequest(new { message = "That code didn't match — check the app and try again." });
+    }
+
+    [Authorize]
+    [HttpPost("authenticator/remove")]
+    public async Task<IActionResult> AuthenticatorRemove()
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        var ok = await _auth.RemoveAuthenticatorAsync(userId);
+        return ok ? Ok(new { message = "Authenticator removed." }) : NotFound();
+    }
+
     [Authorize]
     [HttpPost("change-password")]
     public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordDto dto)

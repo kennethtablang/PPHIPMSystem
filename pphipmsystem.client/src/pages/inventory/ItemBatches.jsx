@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { MdAdd, MdWarning, MdDeleteForever, MdEdit, MdDeleteSweep, MdFileDownload } from 'react-icons/md';
+import { MdAdd, MdWarning, MdDeleteForever, MdEdit, MdDeleteSweep, MdFileDownload, MdQrCode2 } from 'react-icons/md';
 import { getAllBatches, getExpiringBatches, createBatch, disposeBatch, updateBatchDetails, disposeExpired } from '../../api/batches';
 import { exportDisposalCertificate } from '../../api/reports';
 import { getItems } from '../../api/inventory';
+import LabelPrintModal from '../../components/common/LabelPrintModal';
 import Modal from '../../components/common/Modal';
 import SearchSelect from '../../components/common/SearchSelect';
 import { toast } from '../../components/common/Toast';
@@ -35,6 +36,8 @@ export default function ItemBatches() {
   // Correction of lot/expiry typos made at receiving (audit-logged server-side).
   const [editModal, setEditModal] = useState(null);
   const [editForm, setEditForm] = useState({ lotNumber: '', expirationDate: '' });
+  // QR label sheet for the batches currently shown.
+  const [labelModal, setLabelModal] = useState(false);
   // Bulk write-off of everything past expiry + certificate download.
   const [bulkModal, setBulkModal] = useState(false);
   const [bulkReason, setBulkReason] = useState('Expired — past expiration date');
@@ -145,6 +148,9 @@ export default function ItemBatches() {
         </div>
         {canEdit && (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <button className="btn btn-secondary" onClick={() => setLabelModal(true)} disabled={batches.length === 0} title="Print QR labels for the batches shown">
+              <MdQrCode2 size={16} /> Labels
+            </button>
             <button className="btn btn-secondary" onClick={() => setCertModal(true)} title="Excel certificate of disposals in a date range">
               <MdFileDownload size={16} /> Disposal Certificate
             </button>
@@ -235,6 +241,19 @@ export default function ItemBatches() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {labelModal && (
+        <LabelPrintModal
+          title="Batch QR Labels"
+          onClose={() => setLabelModal(false)}
+          labels={batches.map(b => ({
+            qr: b.lotNumber || `BATCH-${b.id}`,
+            title: b.itemName,
+            subtitle: b.lotNumber ?? `BATCH-${b.id}`,
+            meta: b.expirationDate ? `Exp ${new Date(b.expirationDate).toLocaleDateString('en-PH')}` : 'No expiry',
+          }))}
+        />
       )}
 
       {bulkModal && (
@@ -391,7 +410,7 @@ export default function ItemBatches() {
               value={form.inventoryItemId}
               onChange={set('inventoryItemId')}
               placeholder="Search items…"
-              options={items.map(i => ({ value: i.id, label: `${i.name} (${i.unit})` }))}
+              options={items.map(i => ({ value: i.id, label: `${i.name} (${i.unit})`, sublabel: i.itemCode ?? undefined }))}
             />
           </div>
           <div className="grid-2">
