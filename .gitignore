@@ -255,7 +255,9 @@ Generated_Code/
 # to a newer Visual Studio version. Backup files are not needed,
 # because we have git ;-)
 _UpgradeReport_Files/
-Backup*/
+# NOTE: default "Backup*/" rule removed — it was hiding source code (DTOs/Backup).
+# Keep runtime database backup files (.bak/.xlsx dumps) out of the repo.
+PPHIPMSystem.Server/Backups/
 UpgradeLog*.XML
 UpgradeLog*.htm
 ServiceFabricBackup/
