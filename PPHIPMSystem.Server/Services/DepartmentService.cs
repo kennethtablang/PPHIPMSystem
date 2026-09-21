@@ -20,7 +20,9 @@ public class DepartmentService : IDepartmentService
 
     public async Task<IEnumerable<DepartmentDto>> GetAllAsync()
     {
-        var items = await _db.Departments.Include(d => d.Users).ToListAsync();
+        // Delete is a soft delete, so only active rows belong in lists and pickers
+        // (same as inventory items).
+        var items = await _db.Departments.Include(d => d.Users).Where(d => d.IsActive).OrderBy(d => d.Name).ToListAsync();
         return _mapper.Map<IEnumerable<DepartmentDto>>(items);
     }
 

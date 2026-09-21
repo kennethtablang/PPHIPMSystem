@@ -6,7 +6,7 @@ namespace PPHIPMSystem.Server.Data.Seeders;
 
 /// <summary>
 /// Seeds comprehensive mock data so all features of the system can be tested.
-/// Runs AFTER DataSeeder (users, departments, categories, suppliers must exist).
+/// Runs AFTER DataSeeder (users, departments, categories must exist).
 /// </summary>
 public static class MockDataSeeder
 {
@@ -24,7 +24,6 @@ public static class MockDataSeeder
             return;
 
         var categories  = await db.Categories.ToListAsync();
-        var suppliers   = await db.Suppliers.ToListAsync();
         var users       = await db.Users.ToListAsync();
         var departments = await db.Departments.ToListAsync();
 
@@ -123,7 +122,7 @@ public static class MockDataSeeder
                     QuantityBeforeMovement = totalQty - batchQty,
                     QuantityAfterMovement  = totalQty,
                     MovementDate          = receiptDate,
-                    Remarks               = $"Received batch {batch.LotNumber} from supplier",
+                    Remarks               = $"Received batch {batch.LotNumber} from delivery",
                     PerformedByUserId     = invUser.Id,
                 });
             }

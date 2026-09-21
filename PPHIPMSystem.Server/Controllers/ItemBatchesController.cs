@@ -87,7 +87,14 @@ public class ItemBatchesController : ControllerBase
         if (string.IsNullOrWhiteSpace(reason))
             return BadRequest(new { message = "Disposal reason is required." });
         var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
-        var ok = await _batches.MarkExpiredForDisposalAsync(id, userId, reason);
-        return ok ? NoContent() : NotFound();
+        try
+        {
+            var ok = await _batches.MarkExpiredForDisposalAsync(id, userId, reason.Trim());
+            return ok ? NoContent() : NotFound();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 }

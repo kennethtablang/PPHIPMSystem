@@ -4,7 +4,7 @@ import {
   MdCheckCircle, MdShoppingCart, MdLocalShipping,
   MdTune, MdDeleteForever, MdCircle, MdAccountBalanceWallet,
 } from 'react-icons/md';
-import { getNotifications, markRead, markAllRead } from '../../api/notifications';
+import { getNotifications, markRead, markAllRead, notifyNotificationsChanged } from '../../api/notifications';
 import { signalRService } from '../../api/signalrService';
 import { toast } from '../../components/common/Toast';
 import { fmtDateTime } from '../../utils/format';
@@ -79,11 +79,12 @@ export default function NotificationsPage() {
     try {
       await markRead(id);
       setNotifications(n => n.map(x => x.id === id ? { ...x, isRead: true } : x));
+      notifyNotificationsChanged();
     } catch { toast.error('Failed to mark as read.'); }
   };
 
   const markAll = async () => {
-    try { await markAllRead(); toast.success('All notifications marked as read.'); load(); }
+    try { await markAllRead(); toast.success('All notifications marked as read.'); notifyNotificationsChanged(); load(); }
     catch { toast.error('Failed to mark all as read.'); }
   };
 

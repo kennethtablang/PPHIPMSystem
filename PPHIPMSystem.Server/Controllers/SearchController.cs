@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -21,7 +22,7 @@ public class SearchController : ControllerBase
     {
         q = (q ?? "").Trim();
         if (q.Length < 2)
-            return Ok(new { items = Array.Empty<object>(), suppliers = Array.Empty<object>(), requests = Array.Empty<object>(), purchaseOrders = Array.Empty<object>(), users = Array.Empty<object>() });
+            return Ok(new { items = Array.Empty<object>(), requests = Array.Empty<object>(), purchaseOrders = Array.Empty<object>(), users = Array.Empty<object>() });
 
         var items = await _db.InventoryItems.AsNoTracking()
             .Where(i => i.IsActive && (i.Name.Contains(q) || (i.ItemCode != null && i.ItemCode.Contains(q))))
@@ -30,22 +31,21 @@ public class SearchController : ControllerBase
             .Select(i => new { i.Id, Title = i.Name, Subtitle = i.ItemCode ?? i.Unit })
             .ToListAsync();
 
-        var suppliers = await _db.Suppliers.AsNoTracking()
-            .Where(s => s.IsActive && (s.Name.Contains(q) || (s.ContactPerson != null && s.ContactPerson.Contains(q))))
-            .OrderBy(s => s.Name)
-            .Take(MaxPerGroup)
-            .Select(s => new { s.Id, Title = s.Name, Subtitle = s.ContactPerson ?? "" })
-            .ToListAsync();
+        // Department heads only see their own department's requests and have no
+        // access to purchase orders (same scoping as ProcurementController).
+        var isDeptHead = User.IsInRole("DepartmentHead");
+        int? ownDeptId = int.TryParse(User.FindFirstValue("departmentId"), out var d) ? d : null;
 
         var requests = await _db.ProcurementRequests.AsNoTracking()
             .Where(r => r.RequestNumber.Contains(q))
+            .Where(r => !isDeptHead || r.DepartmentId == ownDeptId)
             .OrderByDescending(r => r.RequestedAt)
             .Take(MaxPerGroup)
             .Select(r => new { r.Id, Title = r.RequestNumber, Subtitle = r.Status.ToString() })
             .ToListAsync();
 
         var purchaseOrders = await _db.PurchaseOrders.AsNoTracking()
-            .Where(p => p.PONumber.Contains(q))
+            .Where(p => !isDeptHead && p.PONumber.Contains(q))
             .OrderByDescending(p => p.GeneratedAt)
             .Take(MaxPerGroup)
             .Select(p => new { p.Id, Title = p.PONumber, Subtitle = p.IsDelivered ? "Delivered" : "Pending delivery" })
@@ -62,6 +62,6 @@ public class SearchController : ControllerBase
                 .Select(u => new { Id = u.Id, Title = u.FirstName + " " + u.LastName, Subtitle = u.UserName ?? "" })
                 .ToListAsync();
 
-        return Ok(new { items, suppliers, requests, purchaseOrders, users });
+        return Ok(new { items, requests, purchaseOrders, users });
     }
 }

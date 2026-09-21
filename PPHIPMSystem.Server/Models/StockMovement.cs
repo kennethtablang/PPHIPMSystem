@@ -31,6 +31,12 @@ public class StockMovement
     public int? PurchaseOrderId { get; set; }
     public PurchaseOrder? PurchaseOrder { get; set; }
 
+    // The batch this movement received or disposed, when it concerns exactly
+    // one batch. Lets a void put stock back on (or take it off) that batch
+    // instead of guessing via FEFO. Null for FEFO issuances and legacy rows.
+    public int? ItemBatchId { get; set; }
+    public ItemBatch? ItemBatch { get; set; }
+
     // Destination (Issuance) or source (Return, DepartmentConsumption,
     // DepartmentTransfer) department.
     // Null = external / unattributed — the pre-transfer behaviour.

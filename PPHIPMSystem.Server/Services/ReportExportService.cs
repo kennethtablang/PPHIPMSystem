@@ -85,13 +85,9 @@ public class ReportExportService : IReportExportService
             ("Total PO amount (PHP)", data.TotalPOAmount),
         });
 
-        row = WriteTable(ws, row, "Requests by Status",
+        WriteTable(ws, row, "Requests by Status",
             ["Status", "Count"],
             data.ByStatus.Select(kv => new object[] { kv.Key, kv.Value }));
-
-        WriteTable(ws, row, "Top Suppliers",
-            ["Supplier", "PO Count", "Total Amount (PHP)"],
-            data.TopSuppliers.Select(s => new object[] { s.SupplierName, s.PoCount, s.TotalAmount }));
 
         ws.Columns().AdjustToContents();
         return ToBytes(wb);
@@ -126,6 +122,47 @@ public class ReportExportService : IReportExportService
             }));
 
         ws.Columns().AdjustToContents();
+        return ToBytes(wb);
+    }
+
+    public async Task<byte[]> ExportItemRankingsAsync(ReportFilterDto filter)
+    {
+        var data = await _reports.GetItemRankingsAsync(filter);
+        var org = (await _settings.GetAsync()).OrganizationName;
+        var scope = filter.CategoryId.HasValue
+            ? data.Categories.FirstOrDefault(c => c.CategoryId == filter.CategoryId)?.Category ?? "Selected Category"
+            : "All Categories";
+
+        using var wb = new XLWorkbook();
+
+        // One sheet per ranking: the overall list first, then a ranking inside
+        // each category so every category's leaders are visible on their own.
+        void WriteSheet(string name, string title, Func<ItemRankingDto, decimal> measure,
+            string[] headers, Func<int, ItemRankingDto, object[]> toRow)
+        {
+            var ws = wb.AddWorksheet(name);
+            var row = WriteDocumentHeader(ws, org, $"{title} — {data.Year} · {scope}", lastCol: headers.Length);
+
+            var ranked = data.Items.Where(i => measure(i) > 0)
+                .OrderByDescending(measure).ThenBy(i => i.ItemName).ToList();
+
+            row = WriteTable(ws, row, "Overall Ranking", headers, ranked.Select((i, n) => toRow(n + 1, i)));
+
+            foreach (var group in ranked.GroupBy(i => i.Category).OrderByDescending(g => g.Sum(measure)))
+                row = WriteTable(ws, row, $"Ranking — {group.Key}", headers,
+                    group.Select((i, n) => toRow(n + 1, i)));
+
+            ws.Columns().AdjustToContents();
+        }
+
+        WriteSheet("Most Used", "Most Used Items", i => i.QuantityUsed,
+            ["Rank", "Item", "Category", "Quantity Used", "Unit"],
+            (n, i) => [n, i.ItemName, i.Category, i.QuantityUsed, i.Unit]);
+
+        WriteSheet("Most Procured", "Most Procured Items", i => i.QuantityProcured,
+            ["Rank", "Item", "Category", "Quantity Procured", "Unit", "No. of POs", "Amount (PHP)"],
+            (n, i) => [n, i.ItemName, i.Category, i.QuantityProcured, i.Unit, i.PurchaseOrderCount, i.ProcuredAmount]);
+
         return ToBytes(wb);
     }
 

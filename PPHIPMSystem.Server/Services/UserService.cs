@@ -41,7 +41,7 @@ public class UserService : IUserService
         return user is null ? null : _mapper.Map<UserDto>(user);
     }
 
-    public async Task<UserDto> CreateAsync(CreateUserDto dto)
+    public async Task<UserDto> CreateAsync(CreateUserDto dto, string actorId)
     {
         var user = new ApplicationUser
         {
@@ -61,31 +61,41 @@ public class UserService : IUserService
         if (!result.Succeeded)
             throw new InvalidOperationException(string.Join("; ", result.Errors.Select(e => e.Description)));
 
-        await _audit.LogAsync(null, "UserCreated", "User", null, $"Username: {user.UserName}");
+        await _audit.LogAsync(actorId, "UserCreated", "User", null, $"Username: {user.UserName} (Role: {user.Role})");
         return _mapper.Map<UserDto>(user);
     }
 
-    public async Task<UserDto?> UpdateAsync(string id, UpdateUserDto dto)
+    public async Task<UserDto?> UpdateAsync(string id, UpdateUserDto dto, string actorId)
     {
-        var user = await _db.Users.FindAsync(id);
+        var user = await _userManager.FindByIdAsync(id);
         if (user is null) return null;
 
+        var wasActive = user.IsActive;
         user.FirstName = dto.FirstName;
         user.MiddleName = dto.MiddleName;
         user.LastName = dto.LastName;
-        user.Email = dto.Email;
         user.Role = dto.Role;
         user.DepartmentId = dto.DepartmentId;
         user.IsActive = dto.IsActive;
 
-        await _db.SaveChangesAsync();
-        await _audit.LogAsync(id, "UserUpdated", "User", null);
+        // Through UserManager so NormalizedEmail stays in sync (login-by-email,
+        // forgot-password and 2FA lookups use it) and the unique-email rule runs.
+        if (!string.Equals(user.Email, dto.Email, StringComparison.OrdinalIgnoreCase))
+            ThrowIfFailed(await _userManager.SetEmailAsync(user, dto.Email));
+        else
+            ThrowIfFailed(await _userManager.UpdateAsync(user));
+
+        // Evict the token-validation cache so a deactivation takes effect immediately.
+        if (wasActive != user.IsActive) _cache.Remove($"user-active:{id}");
+
+        await _audit.LogAsync(actorId, "UserUpdated", "User", null,
+            $"Username: {user.UserName}, Role: {user.Role}, Active: {user.IsActive}");
 
         var updated = await _db.Users.Include(u => u.Department).FirstAsync(u => u.Id == id);
         return _mapper.Map<UserDto>(updated);
     }
 
-    public async Task<bool> DeactivateAsync(string id)
+    public async Task<bool> DeactivateAsync(string id, string actorId)
     {
         var user = await _db.Users.FindAsync(id);
         if (user is null) return false;
@@ -94,18 +104,37 @@ public class UserService : IUserService
         // Evict the token-validation cache so the user's existing JWT stops
         // working immediately, not after the cache TTL.
         _cache.Remove($"user-active:{id}");
-        await _audit.LogAsync(id, "UserDeactivated", "User", null);
+        await _audit.LogAsync(actorId, "UserDeactivated", "User", null, $"Username: {user.UserName}");
         return true;
     }
 
-    public async Task<bool> DeleteAsync(string id)
+    public async Task<bool> DeleteAsync(string id, string actorId)
     {
         var user = await _db.Users.FindAsync(id);
         if (user is null) return false;
-        await _userManager.DeleteAsync(user);
+
+        IdentityResult result;
+        try
+        {
+            result = await _userManager.DeleteAsync(user);
+        }
+        catch (DbUpdateException)
+        {
+            // Requests, movements, approvals etc. reference the account.
+            throw new InvalidOperationException(
+                "This user has transaction history and cannot be deleted. Deactivate the account instead.");
+        }
+        ThrowIfFailed(result);
+
         _cache.Remove($"user-active:{id}");
-        await _audit.LogAsync(null, "UserDeleted", "User", null, $"UserId: {id}");
+        await _audit.LogAsync(actorId, "UserDeleted", "User", null, $"Username: {user.UserName}");
         return true;
+    }
+
+    private static void ThrowIfFailed(IdentityResult result)
+    {
+        if (!result.Succeeded)
+            throw new InvalidOperationException(string.Join("; ", result.Errors.Select(e => e.Description)));
     }
 
     public async Task<ProfileDto?> GetProfileAsync(string id)
@@ -133,21 +162,24 @@ public class UserService : IUserService
 
     public async Task<ProfileDto?> UpdateProfileAsync(string id, UpdateProfileDto dto)
     {
-        var user = await _db.Users.FindAsync(id);
+        var user = await _userManager.FindByIdAsync(id);
         if (user is null) return null;
 
         user.FirstName = dto.FirstName;
         user.LastName = dto.LastName;
-        user.Email = dto.Email;
         user.EmailNotificationsEnabled = dto.EmailNotificationsEnabled;
         user.EmailNotifyInventory = dto.EmailNotifyInventory;
         user.EmailNotifyProcurement = dto.EmailNotifyProcurement;
         user.EmailNotifyAdjustments = dto.EmailNotifyAdjustments;
+        user.TwoFactorEnabled = dto.TwoFactorEnabled;
 
-        var emailResult = await _userManager.SetEmailAsync(user, dto.Email);
-        var twoFactorResult = await _userManager.SetTwoFactorEnabledAsync(user, dto.TwoFactorEnabled);
+        // SetEmailAsync validates and normalizes; previously the raw value was
+        // assigned first and saved even when validation failed.
+        if (!string.Equals(user.Email, dto.Email, StringComparison.OrdinalIgnoreCase))
+            ThrowIfFailed(await _userManager.SetEmailAsync(user, dto.Email));
+        else
+            ThrowIfFailed(await _userManager.UpdateAsync(user));
 
-        await _db.SaveChangesAsync();
         await _audit.LogAsync(id, "ProfileUpdated", "User", null);
 
         return await GetProfileAsync(id);

@@ -4,6 +4,7 @@ import { getRequests, createRequest, submitRequest } from '../../api/procurement
 import { getItems } from '../../api/inventory';
 import AttachmentsPanel from '../../components/common/AttachmentsPanel';
 import Modal from '../../components/common/Modal';
+import Pagination, { usePagination } from '../../components/common/Pagination';
 import SearchSelect from '../../components/common/SearchSelect';
 import StatusBadge from '../../components/common/StatusBadge';
 import { toast } from '../../components/common/Toast';
@@ -28,6 +29,7 @@ export default function DepartmentRequestsPage() {
   const [viewModal, setViewModal] = useState(null);
   const [form, setForm] = useState(BLANK_FORM);
   const [saving, setSaving] = useState(false);
+  const pager = usePagination(requests);
 
   const load = () => {
     if (!user?.departmentId) {
@@ -49,6 +51,7 @@ export default function DepartmentRequestsPage() {
 
   useEffect(() => {
     load();
+    pager.setPage(1);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: reload only when these inputs change
   }, [statusFilter, user]);
 
@@ -64,6 +67,11 @@ export default function DepartmentRequestsPage() {
   });
 
   const save = async () => {
+    if (!form.justification.trim()) { toast.error('Justification is required.'); return; }
+    if (form.items.some(i => !i.inventoryItemId || !(+i.quantityRequested > 0))) {
+      toast.error('Every line needs an item and a quantity greater than zero.');
+      return;
+    }
     setSaving(true);
     try {
       await createRequest({
@@ -105,7 +113,9 @@ export default function DepartmentRequestsPage() {
     { value: 'ApprovedByInventoryOfficer', label: 'Inventory Approved' },
     { value: 'FullyApproved', label: 'Fully Approved' },
     { value: 'Rejected', label: 'Rejected' },
-    { value: 'ReturnedForRevision', label: 'Returned for Revision' }
+    { value: 'ReturnedForRevision', label: 'Returned for Revision' },
+    { value: 'PurchaseOrderGenerated', label: 'PO Generated' },
+    { value: 'Delivered', label: 'Delivered' },
   ];
 
   if (!user?.departmentId) {
@@ -139,6 +149,7 @@ export default function DepartmentRequestsPage() {
       {loading ? (
         <div className="loading-center"><div className="spinner" /></div>
       ) : (
+        <>
         <div className="table-wrap">
           <table>
             <thead>
@@ -154,7 +165,7 @@ export default function DepartmentRequestsPage() {
             <tbody>
               {requests.length === 0 ? (
                 <tr><td colSpan={6} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>No requests found.</td></tr>
-              ) : requests.map(r => (
+              ) : pager.pageItems.map(r => (
                 <tr key={r.id}>
                   <td style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: 12 }}>{r.requestNumber}</td>
                   <td>{r.requestedByFullName}</td>
@@ -185,6 +196,8 @@ export default function DepartmentRequestsPage() {
             </tbody>
           </table>
         </div>
+        <Pagination {...pager} />
+        </>
       )}
 
       {/* Create Modal */}

@@ -148,6 +148,16 @@ public class ProcurementService : IProcurementService
             _ => throw new InvalidOperationException("Invalid action.")
         };
 
+        // Only requests that are in the review chain can be acted on. Without this
+        // a Reject/Return would overwrite a Delivered or PO-generated request.
+        if (request.Status is not (ProcurementStatus.SubmittedToProcurement
+                                   or ProcurementStatus.ApprovedByProcurement
+                                   or ProcurementStatus.ApprovedByInventoryOfficer))
+            throw new InvalidOperationException($"This request is {request.Status} and can no longer be reviewed.");
+
+        if (action != ApprovalAction.Approved && string.IsNullOrWhiteSpace(dto.Remarks))
+            throw new InvalidOperationException("Remarks are required when rejecting or returning a request.");
+
         var level = request.Approvals.Count + 1;
         request.Approvals.Add(new ProcurementApproval
         {
@@ -203,9 +213,6 @@ public class ProcurementService : IProcurementService
         if (request.Status != ProcurementStatus.FullyApproved)
             throw new InvalidOperationException("Request is not fully approved.");
 
-        _ = await _db.Suppliers.FindAsync(dto.SupplierId)
-            ?? throw new InvalidOperationException("Supplier not found.");
-
         // GroupBy tolerates duplicate item ids in the payload (last one wins)
         // where ToDictionary would throw.
         var costMap = dto.ItemCosts
@@ -217,7 +224,6 @@ public class ProcurementService : IProcurementService
         {
             PONumber = $"PO-{DateTime.UtcNow:yyyyMM}-{count:D4}",
             ProcurementRequestId = requestId,
-            SupplierId = dto.SupplierId,
             GeneratedByUserId = userId,
             Items = request.Items.Select(i => new PurchaseOrderItem
             {
@@ -229,7 +235,7 @@ public class ProcurementService : IProcurementService
         po.TotalAmount = po.Items.Sum(i => i.QuantityOrdered * i.UnitCost);
 
         // Budget guard. The PO — not the approval — is where money is actually
-        // committed to a supplier, and it is the first point where real costs
+        // committed, and it is the first point where real costs
         // (rather than the requester's estimates) are known, so the department's
         // appropriation is checked here. Departments with no budget row for the
         // year are unbudgeted and pass straight through; whether an overrun
@@ -298,7 +304,6 @@ public class ProcurementService : IProcurementService
 
         return _mapper.Map<PurchaseOrderDto>(await _db.PurchaseOrders
             .Include(p => p.ProcurementRequest)
-            .Include(p => p.Supplier)
             .Include(p => p.GeneratedByUser)
             .Include(p => p.Items).ThenInclude(i => i.InventoryItem)
             .FirstAsync(p => p.Id == po.Id));
@@ -308,7 +313,6 @@ public class ProcurementService : IProcurementService
     {
         var po = await _db.PurchaseOrders
             .Include(p => p.ProcurementRequest)
-            .Include(p => p.Supplier)
             .Include(p => p.GeneratedByUser)
             .Include(p => p.Items).ThenInclude(i => i.InventoryItem)
             .FirstOrDefaultAsync(p => p.Id == id);
@@ -319,7 +323,6 @@ public class ProcurementService : IProcurementService
     {
         var pos = await _db.PurchaseOrders
             .Include(p => p.ProcurementRequest)
-            .Include(p => p.Supplier)
             .Include(p => p.GeneratedByUser)
             .Include(p => p.Items).ThenInclude(i => i.InventoryItem)
             .OrderByDescending(p => p.GeneratedAt)
@@ -362,7 +365,7 @@ public class ProcurementService : IProcurementService
 
             // Every delivered line becomes a batch so expiration tracking and
             // FEFO issuance can see PO-received stock.
-            _db.ItemBatches.Add(new ItemBatch
+            var batch = new ItemBatch
             {
                 InventoryItemId = item.InventoryItemId,
                 Quantity = received,
@@ -372,7 +375,8 @@ public class ProcurementService : IProcurementService
                 UnitCost = item.UnitCost, // carries acquisition cost for valuation
                 PurchaseOrderId = purchaseOrderId,
                 ReceivedDate = DateTime.UtcNow
-            });
+            };
+            _db.ItemBatches.Add(batch);
 
             _db.StockMovements.Add(new StockMovement
             {
@@ -383,7 +387,8 @@ public class ProcurementService : IProcurementService
                 QuantityAfterMovement = invItem.QuantityOnHand,
                 Remarks = $"Received via PO {po.PONumber}",
                 PerformedByUserId = userId,
-                PurchaseOrderId = purchaseOrderId
+                PurchaseOrderId = purchaseOrderId,
+                ItemBatch = batch
             });
         }
 

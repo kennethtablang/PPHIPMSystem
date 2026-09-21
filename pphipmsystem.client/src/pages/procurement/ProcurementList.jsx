@@ -9,6 +9,7 @@ import { getItems } from '../../api/inventory';
 import AttachmentsPanel from '../../components/common/AttachmentsPanel';
 import LabelPrintModal from '../../components/common/LabelPrintModal';
 import Modal from '../../components/common/Modal';
+import Pagination, { usePagination } from '../../components/common/Pagination';
 import SearchSelect from '../../components/common/SearchSelect';
 import StatusBadge from '../../components/common/StatusBadge';
 import { toast } from '../../components/common/Toast';
@@ -49,6 +50,7 @@ export default function ProcurementList() {
   // QR label sheet for the requests currently listed — the QR encodes the
   // request number, which global search (Ctrl+K) resolves back to the request.
   const [labelModal, setLabelModal] = useState(false);
+  const pager = usePagination(requests);
 
   const load = () => {
     setLoading(true);
@@ -57,7 +59,7 @@ export default function ProcurementList() {
 
   useEffect(() => { getItems().then(r => setItems(r.data)); }, []);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: reload only when these inputs change
-  useEffect(() => { load(); }, [statusFilter]);
+  useEffect(() => { load(); pager.setPage(1); }, [statusFilter]);
 
   // FR-3.4: pre-fill from Dashboard / Inventory "reorder" navigation.
   // Accepts a single item (prefillItem) or a batch (prefillItems with suggested quantities).
@@ -92,13 +94,18 @@ export default function ProcurementList() {
   });
 
   const save = async () => {
+    if (!form.justification.trim()) { toast.error('Justification is required.'); return; }
+    if (form.items.some(i => !i.inventoryItemId || !(+i.quantityRequested > 0))) {
+      toast.error('Every line needs an item and a quantity greater than zero.');
+      return;
+    }
     setSaving(true);
     try {
       await createRequest({
         justification: form.justification,
         items: form.items.map(i => ({ inventoryItemId: +i.inventoryItemId, quantityRequested: +i.quantityRequested, estimatedUnitCost: i.estimatedUnitCost ? +i.estimatedUnitCost : null, remarks: i.remarks || null }))
       });
-      toast.success('Procurement request submitted.');
+      toast.success('Procurement request created. Submit it to send it for review.');
       setCreateModal(false);
       load();
     } catch (e) { toast.error(e.response?.data?.message ?? 'Failed to submit.'); }
@@ -116,6 +123,10 @@ export default function ProcurementList() {
   };
 
   const submitApproval = async () => {
+    if (approveForm.action !== 'Approve' && !approveForm.remarks.trim()) {
+      toast.error('Remarks are required when rejecting or returning a request.');
+      return;
+    }
     setSaving(true);
     try {
       await approveRequest(approveModal.id, { action: approveForm.action, remarks: approveForm.remarks });
@@ -196,6 +207,7 @@ export default function ProcurementList() {
       {loading ? (
         <div className="loading-center"><div className="spinner" /></div>
       ) : (
+        <>
         <div className="table-wrap">
           <table>
             <thead>
@@ -212,7 +224,7 @@ export default function ProcurementList() {
             <tbody>
               {requests.length === 0 ? (
                 <tr><td colSpan={7} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>No requests found.</td></tr>
-              ) : requests.map(r => (
+              ) : pager.pageItems.map(r => (
                 <tr key={r.id}>
                   <td style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: 12 }}>{r.requestNumber}</td>
                   <td>{r.departmentName}</td>
@@ -237,7 +249,8 @@ export default function ProcurementList() {
                           Review (Procurement)
                         </button>
                       )}
-                      {canApprove && r.status === 'SubmittedToProcurement' && ['SuperAdmin', 'HospitalAdministrator', 'InventoryOfficer'].includes(user?.role) && (
+                      {/* Admins already get the Procurement review above (the server treats both as the same step for them). */}
+                      {canApprove && r.status === 'SubmittedToProcurement' && user?.role === 'InventoryOfficer' && (
                         <button className="btn btn-success btn-sm" onClick={() => openApprove(r)}>
                           Review (Inventory)
                         </button>
@@ -264,6 +277,8 @@ export default function ProcurementList() {
             </tbody>
           </table>
         </div>
+        <Pagination {...pager} />
+        </>
       )}
 
       {labelModal && (

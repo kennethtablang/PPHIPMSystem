@@ -33,6 +33,10 @@ public class ReportsController : ControllerBase
     public async Task<IActionResult> ForecastAccuracy([FromQuery] ReportFilterDto filter)
         => Ok(await _reports.GetForecastAccuracyReportAsync(filter));
 
+    [HttpGet("item-rankings")]
+    public async Task<IActionResult> ItemRankings([FromQuery] ReportFilterDto filter)
+        => Ok(await _reports.GetItemRankingsAsync(filter));
+
     // ── Excel document exports ───────────────────────────────────────────────
 
     [HttpGet("consumption/export")]
@@ -49,6 +53,11 @@ public class ReportsController : ControllerBase
     public async Task<IActionResult> ExportForecastAccuracy([FromQuery] ReportFilterDto filter)
         => File(await _exports.ExportForecastAccuracyAsync(filter), XlsxMime,
             $"forecast-accuracy-report-{DateTime.Now:yyyyMMdd}.xlsx");
+
+    [HttpGet("item-rankings/export")]
+    public async Task<IActionResult> ExportItemRankings([FromQuery] ReportFilterDto filter)
+        => File(await _exports.ExportItemRankingsAsync(filter), XlsxMime,
+            $"item-rankings-report-{DateTime.Now:yyyyMMdd}.xlsx");
 
     [HttpGet("inventory-snapshot/export")]
     public async Task<IActionResult> ExportInventorySnapshot()

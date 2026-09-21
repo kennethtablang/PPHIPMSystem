@@ -1,17 +1,22 @@
 import { useState } from 'react';
-import { MdBarChart, MdShowChart, MdPieChart, MdPrint, MdFileDownload, MdInsights } from 'react-icons/md';
-import { getConsumptionReport, getProcurementReport, getForecastAccuracyReport, exportReportExcel } from '../../api/reports';
+import { MdBarChart, MdShowChart, MdPieChart, MdPrint, MdFileDownload, MdInsights, MdLeaderboard } from 'react-icons/md';
+import { getConsumptionReport, getProcurementReport, getForecastAccuracyReport, getItemRankingsReport, exportReportExcel } from '../../api/reports';
 import { toast } from '../../components/common/Toast';
 import { ChartCard, MonthlyBars, RankedBars, GroupedBars, ProgressMeter } from './ReportCharts';
-import { useChartPalette, fmtQty, fmtPeso, fmtCount } from './chartTheme';
+import ItemRankingsReport from './ItemRankings';
+import { useChartPalette, fmtQty, fmtCount } from './chartTheme';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 const TAB_LABELS = {
   consumption: 'Consumption Report',
   procurement: 'Procurement Report',
+  rankings: 'Item Rankings Report',
   forecast: 'Forecast Accuracy Report',
 };
+
+// Tab id → server report path, for the Excel export.
+const EXPORT_TYPES = { forecast: 'forecast-accuracy', rankings: 'item-rankings' };
 
 // Pipeline order for the status breakdown, with the shortened labels used on
 // StatusBadge so the chart and the request lists read the same.
@@ -31,6 +36,11 @@ const STATUS_LABELS = {
 };
 
 const PRINT_CSS = `
+  /* Light-theme tokens, so inline var(--…) styles resolve in the print window. */
+  :root {
+    --green-700: #1a6a36; --green-600: #1f8042; --green-50: #edfaf2; --border: #d1e8d8;
+    --text-primary: #111c15; --text-secondary: #4b6155; --text-muted: #7a9484; --red-700: #b91c1c; --text-accent: #1a6a36;
+  }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: Arial, sans-serif; font-size: 12px; color: #111; background: #fff; }
   .print-header { border-bottom: 2px solid #1a6a36; padding-bottom: 12px; margin-bottom: 20px; }
@@ -55,10 +65,15 @@ const PRINT_CSS = `
   .badge-blue  { background: #dbeafe; color: #1e40af; }
   .badge-red   { background: #fee2e2; color: #991b1b; }
   .badge-amber { background: #fef9c3; color: #78350f; }
+  .badge-purple { background: #ede9fe; color: #5b21b6; }
+  .badge-teal  { background: #ccfbf1; color: #115e59; }
+  .badge-gray  { background: #f1f5f9; color: #334155; }
+  .empty-state { text-align: center; color: #888; }
   /* Charts are cloned as live SVG — keep them inside the page box. */
   svg { max-width: 100%; height: auto; }
   .recharts-responsive-container, .recharts-wrapper { max-width: 100% !important; }
-  .chart-view-toggle { display: none; }
+  /* !important: the toggles set display inline, which beats a plain rule. */
+  .chart-view-toggle { display: none !important; }
   .print-footer { margin-top: 24px; padding-top: 10px; border-top: 1px solid #ddd; font-size: 10px; color: #888; display: flex; justify-content: space-between; }
   @media print {
     body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
@@ -131,7 +146,7 @@ export default function ReportsPage() {
 
   // Same filters the on-screen preview used, mapped to the export endpoint.
   const exportExcel = async () => {
-    const type = tab === 'forecast' ? 'forecast-accuracy' : tab;
+    const type = EXPORT_TYPES[tab] ?? tab;
     const p = tab === 'procurement'
       ? { startDate: params.startDate, endDate: params.endDate }
       : { year: params.year };
@@ -151,8 +166,17 @@ export default function ReportsPage() {
     setData(null);
     try {
       let r;
-      if (tab === 'consumption') r = await getConsumptionReport({ year: params.year });
+      if (tab === 'consumption') {
+        // The consumption preview carries the item rankings too, so its
+        // "most used / most procured" leaderboard has its own dropdowns.
+        const [c, rk] = await Promise.all([
+          getConsumptionReport({ year: params.year }),
+          getItemRankingsReport({ year: params.year }),
+        ]);
+        r = { data: { ...c.data, rankings: rk.data } };
+      }
       else if (tab === 'procurement') r = await getProcurementReport({ startDate: params.startDate, endDate: params.endDate });
+      else if (tab === 'rankings') r = await getItemRankingsReport({ year: params.year });
       else r = await getForecastAccuracyReport({ year: params.year });
       setData(r.data);
     } catch { toast.error('Failed to load report data.'); }
@@ -162,6 +186,7 @@ export default function ReportsPage() {
   const tabs = [
     { id: 'consumption', label: 'Consumption Report', icon: <MdBarChart /> },
     { id: 'procurement', label: 'Procurement Report', icon: <MdShowChart /> },
+    { id: 'rankings', label: 'Item Rankings', icon: <MdLeaderboard /> },
     { id: 'forecast', label: 'Forecast Accuracy', icon: <MdPieChart /> },
   ];
 
@@ -170,10 +195,10 @@ export default function ReportsPage() {
       <div className="page-header">
         <div>
           <h1 className="page-title">Reports & Analytics</h1>
-          <p className="page-subtitle">Visualize the data first, then generate the consumption, procurement, or forecast accuracy report</p>
+          <p className="page-subtitle">Visualize the data first, then generate the consumption, procurement, item ranking, or forecast accuracy report</p>
         </div>
         {data && (
-          <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button className="btn btn-primary" onClick={exportExcel} disabled={exporting}>
               <MdFileDownload size={16} /> {exporting ? 'Exporting…' : 'Generate Excel'}
             </button>
@@ -196,7 +221,7 @@ export default function ReportsPage() {
       <div className="card" style={{ marginBottom: 24 }}>
         <div className="card-body">
           <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-            {(tab === 'consumption' || tab === 'forecast') && (
+            {tab !== 'procurement' && (
               <div className="form-group" style={{ margin: 0 }}>
                 <label className="form-label">Year</label>
                 <input className="form-control" type="number" value={params.year} onChange={set('year')} style={{ width: 100 }} min="2020" max={now.getFullYear()} />
@@ -256,6 +281,7 @@ export default function ReportsPage() {
       <div id="report-print-area">
         {data && tab === 'consumption' && <ConsumptionReport data={data} year={params.year} palette={palette} />}
         {data && tab === 'procurement' && <ProcurementReport data={data} palette={palette} />}
+        {data && tab === 'rankings' && <ItemRankingsReport data={data} year={params.year} />}
         {data && tab === 'forecast' && <ForecastAccuracyReport data={data} year={params.year} palette={palette} />}
       </div>
     </div>
@@ -268,9 +294,6 @@ function ConsumptionReport({ data, year, palette }) {
     total: Number((data.byMonth ?? []).find(b => b.month === i + 1)?.totalQuantity ?? 0),
   }));
   const hasMonthly = byMonth.some(m => m.total > 0);
-
-  const topItems = (data.topItems ?? []).slice(0, 10);
-  const topItemBars = topItems.map(it => ({ label: it.itemName, value: Number(it.totalQuantity ?? 0), unit: it.unit }));
 
   // Rolled up server-side across every consumed item, so these shares are of
   // the true annual total — not just the top 10.
@@ -337,31 +360,9 @@ function ConsumptionReport({ data, year, palette }) {
         <RankedBars data={categoryBars} palette={palette} name="Quantity consumed" labelWidth={150} />
       </ChartCard>
 
-      <ChartCard
-        title="Top Consumed Items"
-        subtitle={`Highest total consumption in ${year} (top ${topItemBars.length})`}
-        empty={topItemBars.length === 0 && 'No item consumption to rank.'}
-        table={
-          <div className="table-wrap" style={{ margin: 0 }}>
-            <table>
-              <thead><tr><th>#</th><th>Item</th><th>Category</th><th>Total Qty</th><th>Unit</th></tr></thead>
-              <tbody>
-                {topItems.map((it, i) => (
-                  <tr key={it.itemId}>
-                    <td style={{ color: 'var(--text-muted)', fontWeight: 600 }}>{i + 1}</td>
-                    <td style={{ fontWeight: 500 }}>{it.itemName}</td>
-                    <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{it.category}</td>
-                    <td style={{ fontWeight: 700, color: 'var(--green-700)', fontVariantNumeric: 'tabular-nums' }}>{fmtQty(it.totalQuantity)}</td>
-                    <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{it.unit}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        }
-      >
-        <RankedBars data={topItemBars} palette={palette} name="Quantity consumed" />
-      </ChartCard>
+      {/* Replaces the fixed "Top Consumed Items" chart: most used or most
+          procured, overall or per category, each item tagged with its category. */}
+      {data.rankings && <ItemRankingsReport data={data.rankings} year={year} embedded />}
     </>
   );
 }
@@ -376,8 +377,6 @@ function ProcurementReport({ data, palette }) {
     .filter(s => !STATUS_ORDER.includes(s))
     .map(s => ({ label: s, value: byStatus[s] }));
   const allStatusBars = [...statusBars, ...extraStatuses];
-
-  const supplierBars = (data.topSuppliers ?? []).map(s => ({ label: s.supplierName, value: Number(s.totalAmount ?? 0) }));
 
   const approvalRate = data.totalRequests > 0 ? Math.round((data.fullyApproved / data.totalRequests) * 100) : 0;
 
@@ -427,30 +426,6 @@ function ProcurementReport({ data, palette }) {
           />
         </div>
       </div>
-
-      <ChartCard
-        title="Top Suppliers by PO Amount"
-        subtitle="Total value of purchase orders awarded in the selected range"
-        empty={supplierBars.length === 0 && 'No purchase orders issued in this date range.'}
-        table={
-          <div className="table-wrap" style={{ margin: 0 }}>
-            <table>
-              <thead><tr><th>Supplier</th><th>No. of POs</th><th>Total Amount</th></tr></thead>
-              <tbody>
-                {(data.topSuppliers ?? []).map(s => (
-                  <tr key={s.supplierId}>
-                    <td style={{ fontWeight: 500 }}>{s.supplierName}</td>
-                    <td style={{ fontVariantNumeric: 'tabular-nums' }}>{s.poCount}</td>
-                    <td style={{ fontWeight: 700, color: 'var(--green-700)', fontVariantNumeric: 'tabular-nums' }}>₱{s.totalAmount?.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        }
-      >
-        <RankedBars data={supplierBars} palette={palette} name="PO amount" format={fmtPeso} />
-      </ChartCard>
     </>
   );
 }

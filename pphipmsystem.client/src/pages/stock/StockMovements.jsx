@@ -30,7 +30,7 @@ const typeLabel = t => TYPE_LABEL[t] ?? t;
 
 export default function StockMovements() {
   const { user } = useAuth();
-  const canCreate = ['HospitalAdministrator', 'InventoryOfficer'].includes(user?.role);
+  const canCreate = ['SuperAdmin', 'HospitalAdministrator', 'InventoryOfficer'].includes(user?.role);
 
   const [movements, setMovements] = useState([]);
   const [items, setItems] = useState([]);

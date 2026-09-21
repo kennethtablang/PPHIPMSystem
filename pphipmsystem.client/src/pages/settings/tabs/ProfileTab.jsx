@@ -2,8 +2,10 @@ import { useState, useEffect } from 'react';
 import { getProfile, updateProfile } from '../../../api/users';
 import { toast } from '../../../components/common/Toast';
 import { MdSave, MdEmail, MdNotificationsActive } from 'react-icons/md';
+import { useAuth } from '../../../context/AuthContext';
 
 export default function ProfileTab() {
+  const { updateUser } = useAuth();
   // The full profile is kept in state (including twoFactorEnabled and email
   // preferences) so that saving personal info never clears fields owned by
   // other tabs.
@@ -49,16 +51,19 @@ export default function ProfileTab() {
       toast.error('First and last name are required.');
       return;
     }
-    if (profile.twoFactorEnabled && !profile.email.trim()) {
-      toast.error('Email is required while Two-Factor Authentication is enabled.');
+    // Required by the server: login codes and password-reset links go to it.
+    if (!profile.email.trim()) {
+      toast.error('Email address is required.');
       return;
     }
     setSaving(true);
     try {
-      await updateProfile(profile);
+      const { data } = await updateProfile(profile);
+      // Sidebar and topbar read the name from the signed-in session.
+      updateUser({ fullName: `${data.firstName} ${data.lastName}` });
       toast.success('Profile updated successfully.');
-    } catch {
-      toast.error('Failed to update profile.');
+    } catch (err) {
+      toast.error(err.response?.data?.message ?? 'Failed to update profile.');
     } finally {
       setSaving(false);
     }

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { MdCheckCircle, MdError, MdWarning, MdClose, MdInfo } from 'react-icons/md';
 
 let addToastFn = null;
+let nextToastId = 0; // Date.now() collided when two toasts fired in the same millisecond
 export const toast = {
   success: msg => addToastFn?.({ type: 'success', msg }),
   error: msg => addToastFn?.({ type: 'error', msg }),
@@ -17,7 +18,7 @@ export default function ToastContainer() {
 
   useEffect(() => {
     addToastFn = ({ type, msg }) => {
-      const id = Date.now();
+      const id = ++nextToastId;
       setToasts(prev => [...prev, { id, type, msg }]);
       setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 4000);
     };
@@ -27,12 +28,12 @@ export default function ToastContainer() {
   const remove = id => setToasts(prev => prev.filter(t => t.id !== id));
 
   return (
-    <div style={{ position: 'fixed', bottom: 24, right: 24, display: 'flex', flexDirection: 'column', gap: 10, zIndex: 2000 }}>
+    <div style={{ position: 'fixed', bottom: 24, right: 24, left: 'auto', maxWidth: 'calc(100vw - 48px)', display: 'flex', flexDirection: 'column', gap: 10, zIndex: 2000 }}>
       {toasts.map(t => {
         const Icon = ICONS[t.type];
         return (
           <div key={t.id} style={{
-            minWidth: 280, maxWidth: 360, padding: '14px 18px',
+            minWidth: 'min(280px, calc(100vw - 48px))', maxWidth: 360, padding: '14px 18px',
             background: 'var(--surface)', borderRadius: 'var(--radius-md)',
             boxShadow: 'var(--shadow-lg)', borderLeft: `4px solid ${COLORS[t.type]}`,
             animation: 'slideInRight .25s ease',

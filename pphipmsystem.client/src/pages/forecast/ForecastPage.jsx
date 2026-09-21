@@ -9,6 +9,7 @@ import { fmtDateTime } from '../../utils/format';
 import { useAuth } from '../../context/AuthContext';
 import Modal from '../../components/common/Modal';
 import SearchSelect from '../../components/common/SearchSelect';
+import ForecastExplainer, { ChartReadingGuide } from './ForecastExplainer';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -115,6 +116,18 @@ export default function ForecastPage() {
     const map = {};
     consumption.forEach(c => { const k = `${c.year}-${String(c.month).padStart(2, '0')}`; map[k] = { period: `${MONTHS[c.month - 1]} ${c.year}`, consumption: c.quantityConsumed }; });
     forecasts.forEach(f => { const k = `${f.forecastYear}-${String(f.forecastMonth).padStart(2, '0')}`; map[k] = { ...(map[k] ?? { period: `${MONTHS[f.forecastMonth - 1]} ${f.forecastYear}` }), forecast: f.forecastedQuantity, reorder: f.suggestedReorderQuantity }; });
+    // Keep the axis continuous. A month with no record inside the consumption
+    // history is plotted as zero — the forecast engine counts it the same way.
+    const keys = Object.keys(map).sort();
+    if (keys.length > 1) {
+      const lastConsumed = consumption.reduce((m, c) => Math.max(m, c.year * 12 + c.month - 1), -1);
+      const toIdx = k => +k.slice(0, 4) * 12 + (+k.slice(5) - 1);
+      for (let i = toIdx(keys[0]); i < toIdx(keys[keys.length - 1]); i++) {
+        const y = Math.floor(i / 12), m = (i % 12) + 1;
+        const k = `${y}-${String(m).padStart(2, '0')}`;
+        if (!map[k]) map[k] = { period: `${MONTHS[m - 1]} ${y}`, ...(i < lastConsumed ? { consumption: 0 } : {}) };
+      }
+    }
     return Object.keys(map).sort().map(k => map[k]);
   })();
 
@@ -123,10 +136,11 @@ export default function ForecastPage() {
   // nearest upcoming month, falling back to the most recent one.
   const ascending = [...forecasts].sort((a, b) =>
     (a.forecastYear - b.forecastYear) || (a.forecastMonth - b.forecastMonth));
-  const nextForecast = ascending.find(f =>
+  const isUpcoming = f =>
     f.forecastYear > now.getFullYear() ||
-    (f.forecastYear === now.getFullYear() && f.forecastMonth > now.getMonth())
-  ) ?? ascending[ascending.length - 1] ?? null;
+    (f.forecastYear === now.getFullYear() && f.forecastMonth > now.getMonth());
+  const upcoming = ascending.filter(isUpcoming);
+  const nextForecast = upcoming[0] ?? ascending[ascending.length - 1] ?? null;
 
   return (
     <div>
@@ -228,6 +242,23 @@ export default function ForecastPage() {
             </div>
           )}
 
+          {/* Plain-language reading of the forecast */}
+          {currentItem && nextForecast ? (
+            <ForecastExplainer
+              item={currentItem}
+              nextForecast={nextForecast}
+              upcoming={upcoming}
+              forecasts={forecasts}
+              consumption={consumption}
+            />
+          ) : consumption.length > 0 && (
+            <div className="alert alert-info" style={{ marginBottom: 24 }}>
+              No forecast yet for this item. {canGenerate
+                ? <>Select <strong>Generate Forecast</strong> above to get a plain-language summary of expected demand and what to order.</>
+                : 'Once a forecast is generated, a plain-language summary of expected demand and what to order will appear here.'}
+            </div>
+          )}
+
           {/* Trend Chart */}
           {chartData.length > 0 ? (
             <div className="card" style={{ marginBottom: 24 }}>
@@ -250,6 +281,7 @@ export default function ForecastPage() {
                     <Line type="monotone" dataKey="reorder" name="Suggested Reorder" stroke="#f59e0b" strokeWidth={1} strokeDasharray="3 3" dot={false} />
                   </LineChart>
                 </ResponsiveContainer>
+                <ChartReadingGuide />
               </div>
             </div>
           ) : (
@@ -277,7 +309,7 @@ export default function ForecastPage() {
                         <tr key={c.id}>
                           <td>{MONTHS[c.month - 1]}</td>
                           <td>{c.year}</td>
-                          <td style={{ fontWeight: 600 }}>{c.quantity}</td>
+                          <td style={{ fontWeight: 600 }}>{c.quantityConsumed}</td>
                           <td style={{ color: 'var(--text-muted)', fontSize: 12 }}>{currentItem?.unit}</td>
                         </tr>
                       ))}

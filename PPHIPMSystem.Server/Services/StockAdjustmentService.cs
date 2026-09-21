@@ -147,17 +147,28 @@ public class StockAdjustmentService : IStockAdjustmentService
 
         if (dto.Approved)
         {
+            // Apply the counted variance to today's balance rather than overwriting
+            // it with the count: receipts or issuances recorded between the count
+            // and this approval would otherwise be silently erased.
             var item = adjustment.InventoryItem;
-            item.QuantityOnHand = adjustment.PhysicalCount;
+            var variance = adjustment.PhysicalCount - adjustment.RecordedQuantity;
+            var before = item.QuantityOnHand;
+            var after = before + variance;
+            if (after < 0)
+                throw new InvalidOperationException(
+                    $"Stock of {item.Name} has changed since the count ({before} on hand now); applying the " +
+                    $"variance of {variance} would go below zero. Reject this adjustment and recount.");
+
+            item.QuantityOnHand = after;
             item.UpdatedAt = DateTime.UtcNow;
 
             _db.StockMovements.Add(new StockMovement
             {
                 InventoryItemId = item.Id,
                 MovementType = StockMovementType.Adjustment,
-                Quantity = Math.Abs(adjustment.PhysicalCount - adjustment.RecordedQuantity),
-                QuantityBeforeMovement = adjustment.RecordedQuantity,
-                QuantityAfterMovement = adjustment.PhysicalCount,
+                Quantity = Math.Abs(variance),
+                QuantityBeforeMovement = before,
+                QuantityAfterMovement = after,
                 Remarks = $"Adjustment #{id}: {adjustment.Reason}",
                 PerformedByUserId = approverId
             });

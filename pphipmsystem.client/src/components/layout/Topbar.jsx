@@ -8,19 +8,24 @@ import GlobalSearch from './GlobalSearch';
 import { toast } from '../common/Toast';
 import { getAppPrefs } from '../../utils/appPrefs';
 import { playNotificationSound } from '../../utils/sound';
+import { NOTIFICATIONS_CHANGED } from '../../api/notifications';
 
 const TITLES = {
   '/dashboard': 'Dashboard',
   '/inventory': 'Inventory Items',
+  '/materials': 'Materials List',
   '/batches': 'Batches & Expiry',
+  '/department-stock': 'Department Stock',
   '/stock-movements': 'Stock Movements',
   '/stock-adjustments': 'Stock Adjustments',
   '/procurement': 'Procurement Requests',
+  '/department-requests': 'Department Requests',
   '/purchase-orders': 'Purchase Orders',
-  '/suppliers': 'Supplier Management',
+  '/budgets': 'Department Budgets',
   '/forecast': 'Demand Forecasting',
   '/reports': 'Reports',
   '/notifications': 'Notifications',
+  '/profile': 'Settings',
   '/users': 'User Management',
   '/departments': 'Departments',
   '/categories': 'Categories',
@@ -39,9 +44,17 @@ export default function Topbar() {
 
   const title = TITLES[location.pathname] ?? 'IPMS';
 
+  // The badge only counts up from SignalR, so re-sync with the server whenever
+  // notifications are marked read (NotificationsPage fires NOTIFICATIONS_CHANGED).
+  useEffect(() => {
+    const refresh = () => getUnreadCount().then(r => setUnread(r.data.count)).catch(() => {});
+    window.addEventListener(NOTIFICATIONS_CHANGED, refresh);
+    return () => window.removeEventListener(NOTIFICATIONS_CHANGED, refresh);
+  }, []);
+
   useEffect(() => {
     getUnreadCount().then(r => setUnread(r.data.count)).catch(() => {});
-    
+
     signalRService.startNotificationConnection();
 
     const handleNotification = (notif) => {
@@ -81,7 +94,7 @@ export default function Topbar() {
 
   return (
     <>
-      <header style={{
+      <header className="topbar" style={{
         height: 'var(--topbar-height)',
         background: 'var(--topbar-bg)',
         backdropFilter: 'blur(18px)',
@@ -92,15 +105,15 @@ export default function Topbar() {
         position: 'sticky', top: 0, zIndex: 50,
         boxShadow: 'var(--shadow-sm)',
       }}>
-        <div>
-          <h1 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)' }}>{title}</h1>
-          <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>
+        <div style={{ minWidth: 0 }}>
+          <h1 className="topbar-title" style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)' }}>{title}</h1>
+          <p className="topbar-subtitle" style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 1 }}>
             Pangasinan Provincial Hospital
           </p>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <GlobalSearch />
+          <div className="topbar-search"><GlobalSearch /></div>
           <button
             className="btn btn-ghost btn-icon"
             onClick={() => window.location.reload()}
@@ -150,7 +163,7 @@ export default function Topbar() {
               }}>
                 {user?.fullName?.charAt(0) ?? 'U'}
               </div>
-              <div style={{ textAlign: 'left' }}>
+              <div className="topbar-user-text" style={{ textAlign: 'left' }}>
                 <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.2 }}>
                   {user?.fullName}
                 </div>

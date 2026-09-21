@@ -52,8 +52,9 @@ public class InventoryService : IInventoryService
 
     public async Task<InventoryItemDto> CreateAsync(CreateInventoryItemDto dto)
     {
-        _ = await _db.Categories.FindAsync(dto.CategoryId)
-            ?? throw new InvalidOperationException("Category not found.");
+        var category = await _db.Categories.FindAsync(dto.CategoryId);
+        if (category is null || !category.IsActive)
+            throw new InvalidOperationException("Category not found.");
 
         var entity = _mapper.Map<InventoryItem>(dto);
         _db.InventoryItems.Add(entity);
@@ -126,11 +127,14 @@ public class InventoryService : IInventoryService
                 b.ExpirationDate.HasValue && b.ExpirationDate.Value.Date < now.Date && b.RemainingQuantity > 0))
             .Count();
 
+        // Requests still moving through the approval chain. Rejected is terminal,
+        // so it must not inflate the "pending" figure.
         var pendingProcurement = await _db.ProcurementRequests
-            .CountAsync(r => r.Status != Models.Enums.ProcurementStatus.Delivered &&
-                             r.Status != Models.Enums.ProcurementStatus.Cancelled &&
-                             r.Status != Models.Enums.ProcurementStatus.FullyApproved &&
-                             r.Status != Models.Enums.ProcurementStatus.PurchaseOrderGenerated);
+            .CountAsync(r => r.Status == Models.Enums.ProcurementStatus.SubmittedByDepartment ||
+                             r.Status == Models.Enums.ProcurementStatus.SubmittedToProcurement ||
+                             r.Status == Models.Enums.ProcurementStatus.ApprovedByProcurement ||
+                             r.Status == Models.Enums.ProcurementStatus.ApprovedByInventoryOfficer ||
+                             r.Status == Models.Enums.ProcurementStatus.ReturnedForRevision);
 
         var pendingAdjustments = await _db.StockAdjustments
             .CountAsync(a => a.Status == Models.Enums.AdjustmentStatus.Pending);
@@ -146,7 +150,10 @@ public class InventoryService : IInventoryService
 
         var sixMonthsAgo = now.AddMonths(-5);
         // Use Quantity as a proxy value (no UnitCost on InventoryItem in current schema)
+        // Voided originals and their reversal rows cancel out; counting both
+        // would double a voided issuance/receipt in the chart.
         var recentTrends = await _db.StockMovements
+            .Where(m => !m.IsVoided && m.ReversalOfMovementId == null)
             .Where(m => m.MovementDate >= new DateTime(sixMonthsAgo.Year, sixMonthsAgo.Month, 1))
             .GroupBy(m => new { m.MovementDate.Year, m.MovementDate.Month, m.MovementType })
             .Select(g => new {

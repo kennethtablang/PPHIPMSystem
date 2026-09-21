@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PPHIPMSystem.Server.Data;
 
@@ -11,9 +12,11 @@ using PPHIPMSystem.Server.Data;
 namespace PPHIPMSystem.Server.Data.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260916113627_AddItemBatchToStockMovement")]
+    partial class AddItemBatchToStockMovement
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -863,6 +866,9 @@ namespace PPHIPMSystem.Server.Data.Migrations
                     b.Property<int>("ProcurementRequestId")
                         .HasColumnType("int");
 
+                    b.Property<int>("SupplierId")
+                        .HasColumnType("int");
+
                     b.Property<decimal>("TotalAmount")
                         .HasColumnType("decimal(18,2)");
 
@@ -875,6 +881,8 @@ namespace PPHIPMSystem.Server.Data.Migrations
 
                     b.HasIndex("ProcurementRequestId")
                         .IsUnique();
+
+                    b.HasIndex("SupplierId");
 
                     b.ToTable("PurchaseOrders");
                 });
@@ -1132,6 +1140,56 @@ namespace PPHIPMSystem.Server.Data.Migrations
                     b.ToTable("StockMovements");
                 });
 
+            modelBuilder.Entity("PPHIPMSystem.Server.Models.Supplier", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime?>("AccreditationExpiry")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("AccreditationNumber")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("Address")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("ContactPerson")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Email")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<bool>("IsAccredited")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Phone")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("Suppliers");
+                });
+
             modelBuilder.Entity("PPHIPMSystem.Server.Models.SystemSetting", b =>
                 {
                     b.Property<string>("Key")
@@ -1381,9 +1439,17 @@ namespace PPHIPMSystem.Server.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("PPHIPMSystem.Server.Models.Supplier", "Supplier")
+                        .WithMany("PurchaseOrders")
+                        .HasForeignKey("SupplierId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
                     b.Navigation("GeneratedByUser");
 
                     b.Navigation("ProcurementRequest");
+
+                    b.Navigation("Supplier");
                 });
 
             modelBuilder.Entity("PPHIPMSystem.Server.Models.PurchaseOrderItem", b =>
@@ -1579,6 +1645,11 @@ namespace PPHIPMSystem.Server.Data.Migrations
                     b.Navigation("ReceivedBatches");
 
                     b.Navigation("StockMovements");
+                });
+
+            modelBuilder.Entity("PPHIPMSystem.Server.Models.Supplier", b =>
+                {
+                    b.Navigation("PurchaseOrders");
                 });
 #pragma warning restore 612, 618
         }

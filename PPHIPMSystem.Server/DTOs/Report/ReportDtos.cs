@@ -53,6 +53,41 @@ public class ConsumptionTopItemDto
     public string Unit { get; set; } = string.Empty;
 }
 
+// ── Item Rankings ─────────────────────────────────────────────────────────────
+
+/// <summary>
+/// Every item that was either consumed or purchased in the year, carrying both
+/// measures so the page can switch between "most used" and "most procured"
+/// rankings — overall or per category — without another round trip.
+/// </summary>
+public class ItemRankingsDto
+{
+    public int Year { get; set; }
+    public IEnumerable<ItemRankingCategoryDto> Categories { get; set; } = [];
+    public IEnumerable<ItemRankingDto> Items { get; set; } = [];
+}
+
+public class ItemRankingCategoryDto
+{
+    public int CategoryId { get; set; }
+    public string Category { get; set; } = string.Empty;
+}
+
+public class ItemRankingDto
+{
+    public int ItemId { get; set; }
+    public string ItemName { get; set; } = string.Empty;
+    public int CategoryId { get; set; }
+    public string Category { get; set; } = string.Empty;
+    public string Unit { get; set; } = string.Empty;
+    /// <summary>Units issued/consumed in the year.</summary>
+    public decimal QuantityUsed { get; set; }
+    /// <summary>Units ordered on purchase orders generated in the year.</summary>
+    public decimal QuantityProcured { get; set; }
+    public int PurchaseOrderCount { get; set; }
+    public decimal ProcuredAmount { get; set; }
+}
+
 // ── Procurement Report ────────────────────────────────────────────────────────
 
 public class ProcurementSummaryDto
@@ -63,15 +98,6 @@ public class ProcurementSummaryDto
     public int DeliveredPOs { get; set; }
     public int TotalPOs { get; set; }
     public Dictionary<string, int> ByStatus { get; set; } = [];
-    public IEnumerable<ProcurementTopSupplierDto> TopSuppliers { get; set; } = [];
-}
-
-public class ProcurementTopSupplierDto
-{
-    public int SupplierId { get; set; }
-    public string SupplierName { get; set; } = string.Empty;
-    public int PoCount { get; set; }
-    public decimal TotalAmount { get; set; }
 }
 
 // ── Forecast Accuracy Report ──────────────────────────────────────────────────

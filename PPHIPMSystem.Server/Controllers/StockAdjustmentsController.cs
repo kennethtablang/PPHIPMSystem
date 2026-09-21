@@ -63,7 +63,14 @@ public class StockAdjustmentsController : ControllerBase
     public async Task<IActionResult> Approve(int id, [FromBody] ApproveAdjustmentDto dto)
     {
         var approverId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
-        var result = await _adjustments.ProcessApprovalAsync(id, dto, approverId);
-        return result is null ? NotFound() : Ok(result);
+        try
+        {
+            var result = await _adjustments.ProcessApprovalAsync(id, dto, approverId);
+            return result is null ? NotFound(new { message = "Adjustment not found or already processed." }) : Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 }

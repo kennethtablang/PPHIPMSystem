@@ -53,6 +53,8 @@
   --text-secondary: #4b6155;
   --text-muted: #7a9484;
   --text-inverse: #ffffff;
+  /* Emphasised figures in green — readable on light and dark surfaces. */
+  --text-accent: var(--green-700);
 
   --border: #d1e8d8;
   --shadow-sm: 0 1px 3px rgba(5,46,16,.08);
@@ -99,6 +101,7 @@ html[data-theme="dark"] {
   --text-secondary: #aac3b4;
   --text-muted: #7f9a89;
   --text-inverse: #0a140e;
+  --text-accent: var(--green-300);
 
   --border: #263a2e;
   --shadow-sm: 0 1px 3px rgba(0,0,0,.45);
@@ -523,4 +526,15 @@ html[data-density="compact"] thead th { padding: 6px 12px; }
   .modal-header { padding: 14px 16px; border-radius: var(--radius-md) var(--radius-md) 0 0; }
   .modal-body { padding: 16px; }
   .modal-footer { padding: 12px 16px; border-radius: 0 0 var(--radius-md) var(--radius-md); flex-wrap: wrap; }
+}
+
+/* ── Topbar responsiveness ── */
+.topbar-title, .topbar-subtitle { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 900px) {
+  .topbar-search { display: none; }
+}
+@media (max-width: 640px) {
+  .topbar { padding: 0 12px !important; }
+  .topbar-user-text, .topbar-subtitle { display: none; }
+  .topbar-title { font-size: 15px !important; }
 }

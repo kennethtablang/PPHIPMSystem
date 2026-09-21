@@ -4,7 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { getDisplayPrefs } from '../../utils/displayPrefs';
 import {
   MdDashboard, MdInventory, MdWarehouse, MdSwapVert, MdTune,
-  MdShoppingCart, MdLocalShipping, MdStore, MdBarChart,
+  MdShoppingCart, MdLocalShipping, MdBarChart,
   MdPeople, MdBusiness, MdCategory, MdHistory, MdAnalytics,
   MdNotifications, MdChevronLeft, MdChevronRight,
   MdGridView, MdBackup, MdAccountBalanceWallet,
@@ -122,11 +122,9 @@ export default function Sidebar() {
               {is(ROLE.SuperAdmin, ROLE.Admin, ROLE.DeptHead) && (
                 <Item to="/department-requests" Icon={MdShoppingCart} label="Dept. Requests" collapsed={collapsed} />
               )}
-              {is(ROLE.SuperAdmin, ROLE.Admin, ROLE.Procurement) && (
-                <>
-                  <Item to="/purchase-orders" Icon={MdLocalShipping} label="Purchase Orders" collapsed={collapsed} />
-                  <Item to="/suppliers"       Icon={MdStore}         label="Suppliers"       collapsed={collapsed} />
-                </>
+              {/* Inventory officers confirm deliveries on the Purchase Orders page. */}
+              {is(ROLE.SuperAdmin, ROLE.Admin, ROLE.Procurement, ROLE.Inventory) && (
+                <Item to="/purchase-orders" Icon={MdLocalShipping} label="Purchase Orders" collapsed={collapsed} />
               )}
               {is(ROLE.SuperAdmin, ROLE.Admin, ROLE.Procurement, ROLE.DeptHead) && (
                 <Item to="/budgets" Icon={MdAccountBalanceWallet} label="Budgets" collapsed={collapsed} />
@@ -231,12 +229,12 @@ const CSS = `
   /* ── Header ── */
   .sb-header {
     display: flex; align-items: center; justify-content: space-between;
-    padding: 16px 12px 14px; flex-shrink: 0; gap: 8;
+    padding: 16px 12px 14px; flex-shrink: 0; gap: 8px;
     border-bottom: 1px solid rgba(255,255,255,.06);
   }
   .sb--collapsed .sb-header { justify-content: center; }
 
-  .sb-logo { display: flex; align-items: center; gap: 10; min-width: 0; }
+  .sb-logo { display: flex; align-items: center; gap: 10px; min-width: 0; }
   .sb-logo-icon {
     width: 38px; height: 38px; border-radius: 50%; flex-shrink: 0;
     background: linear-gradient(135deg, #1a6a36, #4fd07a);
@@ -274,7 +272,7 @@ const CSS = `
     background: rgba(79,208,122,.07);
     border: 1px solid rgba(79,208,122,.14);
     border-radius: 20px;
-    display: flex; align-items: center; gap: 10;
+    display: flex; align-items: center; gap: 10px;
     flex-shrink: 0; overflow: hidden;
     position: relative;
     backdrop-filter: blur(10px);
@@ -312,7 +310,7 @@ const CSS = `
   .sb-nav {
     flex: 1; padding: 4px 8px 8px;
     display: flex; flex-direction: column;
-    gap: 0; overflow-y: auto; overflow-x: hidden;
+    gap: 0px; overflow-y: auto; overflow-x: hidden;
   }
   .sb-nav::-webkit-scrollbar { width: 0; }
 
@@ -320,7 +318,7 @@ const CSS = `
   .sb-group { margin-bottom: 4px; }
 
   .sb-group-label {
-    display: flex; align-items: center; gap: 8;
+    display: flex; align-items: center; gap: 8px;
     padding: 10px 6px 5px;
   }
   .sb-group-line {
@@ -341,7 +339,7 @@ const CSS = `
 
   /* ── Nav item ── */
   .sb-item {
-    display: flex; align-items: center; gap: 10;
+    display: flex; align-items: center; gap: 10px;
     padding: 7px 10px; border-radius: 50px; margin-bottom: 2px;
     text-decoration: none;
     color: rgba(255,255,255,.48);

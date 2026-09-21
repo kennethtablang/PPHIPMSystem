@@ -18,7 +18,7 @@ export default function InventoryList() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const canEdit = ['HospitalAdministrator', 'InventoryOfficer'].includes(user?.role);
+  const canEdit = ['SuperAdmin', 'HospitalAdministrator', 'InventoryOfficer'].includes(user?.role);
   // Matches the ReportsController role guard.
   const canExport = ['SuperAdmin', 'HospitalAdministrator', 'ProcurementStaff', 'InventoryOfficer'].includes(user?.role);
   // Roles allowed to create procurement requests (matches ProcurementList.canCreate).

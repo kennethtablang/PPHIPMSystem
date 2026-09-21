@@ -91,7 +91,7 @@ public class ReportService : IReportService
     public async Task<ProcurementSummaryDto> GetProcurementReportAsync(ReportFilterDto filter)
     {
         var query = _db.ProcurementRequests.AsNoTracking()
-            .Include(r => r.PurchaseOrder).ThenInclude(po => po!.Supplier)
+            .Include(r => r.PurchaseOrder)
             .AsQueryable();
 
         if (filter.StartDate.HasValue) query = query.Where(r => r.RequestedAt >= filter.StartDate.Value);
@@ -109,20 +109,6 @@ public class ReportService : IReportService
             .GroupBy(r => r.Status.ToString())
             .ToDictionary(g => g.Key, g => g.Count());
 
-        var topSuppliers = pos
-            .Where(po => po.Supplier != null)
-            .GroupBy(po => new { po.SupplierId, po.Supplier.Name })
-            .Select(g => new ProcurementTopSupplierDto
-            {
-                SupplierId = g.Key.SupplierId,
-                SupplierName = g.Key.Name,
-                PoCount = g.Count(),
-                TotalAmount = g.Sum(po => po.TotalAmount)
-            })
-            .OrderByDescending(s => s.TotalAmount)
-            .Take(5)
-            .ToList();
-
         return new ProcurementSummaryDto
         {
             TotalRequests = requests.Count,
@@ -132,8 +118,89 @@ public class ReportService : IReportService
             TotalPOs = pos.Count,
             DeliveredPOs = pos.Count(po => po.IsDelivered),
             TotalPOAmount = pos.Sum(po => po.TotalAmount),
-            ByStatus = byStatus,
-            TopSuppliers = topSuppliers
+            ByStatus = byStatus
+        };
+    }
+
+    public async Task<ItemRankingsDto> GetItemRankingsAsync(ReportFilterDto filter)
+    {
+        var year = filter.Year ?? DateTime.UtcNow.Year;
+
+        var consumptionQuery = _db.ConsumptionRecords.AsNoTracking().Where(c => c.Year == year);
+        // Cancelled/rejected requests never turn into real purchases, even if a
+        // PO row was generated before the request was pulled.
+        var poItemQuery = _db.PurchaseOrderItems.AsNoTracking()
+            .Where(pi => pi.PurchaseOrder.GeneratedAt.Year == year
+                && pi.PurchaseOrder.ProcurementRequest.Status != ProcurementStatus.Cancelled
+                && pi.PurchaseOrder.ProcurementRequest.Status != ProcurementStatus.Rejected);
+
+        if (filter.CategoryId.HasValue)
+        {
+            consumptionQuery = consumptionQuery.Where(c => c.InventoryItem.CategoryId == filter.CategoryId.Value);
+            poItemQuery = poItemQuery.Where(pi => pi.InventoryItem.CategoryId == filter.CategoryId.Value);
+        }
+
+        var used = await consumptionQuery
+            .GroupBy(c => c.InventoryItemId)
+            .Select(g => new { ItemId = g.Key, Qty = g.Sum(c => c.QuantityConsumed) })
+            .ToDictionaryAsync(x => x.ItemId, x => x.Qty);
+
+        var procured = await poItemQuery
+            .GroupBy(pi => pi.InventoryItemId)
+            .Select(g => new
+            {
+                ItemId = g.Key,
+                Qty = g.Sum(pi => pi.QuantityOrdered),
+                PoCount = g.Select(pi => pi.PurchaseOrderId).Distinct().Count(),
+                Amount = g.Sum(pi => pi.QuantityOrdered * pi.UnitCost)
+            })
+            .ToDictionaryAsync(x => x.ItemId);
+
+        var itemIds = used.Keys.Union(procured.Keys).ToList();
+
+        var items = await _db.InventoryItems.AsNoTracking()
+            .Where(i => itemIds.Contains(i.Id))
+            .Select(i => new { i.Id, i.Name, i.Unit, i.CategoryId, CategoryName = i.Category.Name })
+            .ToListAsync();
+
+        var rankings = items
+            .Select(i =>
+            {
+                procured.TryGetValue(i.Id, out var p);
+                return new ItemRankingDto
+                {
+                    ItemId = i.Id,
+                    ItemName = i.Name,
+                    CategoryId = i.CategoryId,
+                    Category = string.IsNullOrWhiteSpace(i.CategoryName) ? "Uncategorized" : i.CategoryName,
+                    Unit = i.Unit,
+                    QuantityUsed = used.GetValueOrDefault(i.Id),
+                    QuantityProcured = p?.Qty ?? 0,
+                    PurchaseOrderCount = p?.PoCount ?? 0,
+                    ProcuredAmount = p?.Amount ?? 0
+                };
+            })
+            .OrderBy(i => i.ItemName)
+            .ToList();
+
+        // Every active category is offered in the dropdown, even ones with no
+        // activity this year, so the list doesn't shift from year to year.
+        var categories = await _db.Categories.AsNoTracking()
+            .Where(c => c.IsActive)
+            .Select(c => new ItemRankingCategoryDto { CategoryId = c.Id, Category = c.Name })
+            .ToListAsync();
+        foreach (var missing in rankings
+            .Where(r => categories.All(c => c.CategoryId != r.CategoryId))
+            .DistinctBy(r => r.CategoryId))
+        {
+            categories.Add(new ItemRankingCategoryDto { CategoryId = missing.CategoryId, Category = missing.Category });
+        }
+
+        return new ItemRankingsDto
+        {
+            Year = year,
+            Categories = categories.OrderBy(c => c.Category).ToList(),
+            Items = rankings
         };
     }
 

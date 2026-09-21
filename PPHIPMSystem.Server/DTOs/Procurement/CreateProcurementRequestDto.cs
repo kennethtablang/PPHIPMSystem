@@ -37,9 +37,6 @@ public class ApproveProcurementDto
 
 public class GeneratePurchaseOrderDto
 {
-    [Range(1, int.MaxValue)]
-    public int SupplierId { get; set; }
-
     [Required, MinLength(1)]
     public List<POItemCostDto> ItemCosts { get; set; } = [];
 }

@@ -22,7 +22,6 @@ import StockMovements from './pages/stock/StockMovements';
 import StockAdjustments from './pages/stock/StockAdjustments';
 import DepartmentStockPage from './pages/stock/DepartmentStockPage';
 
-import SupplierList from './pages/suppliers/SupplierList';
 import ProcurementList from './pages/procurement/ProcurementList';
 import PurchaseOrders from './pages/procurement/PurchaseOrders';
 import DepartmentRequestsPage from './pages/procurement/DepartmentRequestsPage';
@@ -47,6 +46,11 @@ function PrivateRoute({ children, roles }) {
   return children;
 }
 
+// Route guards mirror the sidebar and the server's [Authorize] role lists, so a
+// typed URL can't open a page whose API calls would all come back 403.
+const INVENTORY_ROLES = ['SuperAdmin', 'HospitalAdministrator', 'InventoryOfficer'];
+const STAFF_ROLES = ['SuperAdmin', 'HospitalAdministrator', 'InventoryOfficer', 'ProcurementStaff'];
+
 function AdminRoute({ children }) {
   return <PrivateRoute roles={['SuperAdmin', 'HospitalAdministrator']}>{children}</PrivateRoute>;
 }
@@ -70,14 +74,14 @@ export default function App() {
           <Route path="materials" element={<MaterialsList />} />
           <Route path="batches" element={<ItemBatches />} />
 
-          <Route path="stock-movements" element={<StockMovements />} />
-          <Route path="stock-adjustments" element={<StockAdjustments />} />
+          <Route path="stock-movements" element={<PrivateRoute roles={INVENTORY_ROLES}><StockMovements /></PrivateRoute>} />
+          <Route path="stock-adjustments" element={<PrivateRoute roles={INVENTORY_ROLES}><StockAdjustments /></PrivateRoute>} />
           <Route path="department-stock" element={<DepartmentStockPage />} />
 
-          <Route path="suppliers" element={<SupplierList />} />
-          <Route path="procurement" element={<ProcurementList />} />
+          {/* Department heads land here from "reorder" shortcuts; the server scopes them to their own department. */}
+          <Route path="procurement" element={<PrivateRoute roles={[...STAFF_ROLES, 'DepartmentHead']}><ProcurementList /></PrivateRoute>} />
           <Route path="department-requests" element={<PrivateRoute roles={['SuperAdmin', 'HospitalAdministrator', 'DepartmentHead']}><DepartmentRequestsPage /></PrivateRoute>} />
-          <Route path="purchase-orders" element={<PurchaseOrders />} />
+          <Route path="purchase-orders" element={<PrivateRoute roles={STAFF_ROLES}><PurchaseOrders /></PrivateRoute>} />
           {/* Admins set the figures; procurement staff and department heads read
               them (the server scopes heads to their own department). */}
           <Route
@@ -89,8 +93,8 @@ export default function App() {
             }
           />
 
-          <Route path="forecast" element={<ForecastPage />} />
-          <Route path="reports" element={<ReportsPage />} />
+          <Route path="forecast" element={<PrivateRoute roles={STAFF_ROLES}><ForecastPage /></PrivateRoute>} />
+          <Route path="reports" element={<PrivateRoute roles={STAFF_ROLES}><ReportsPage /></PrivateRoute>} />
           <Route path="notifications" element={<NotificationsPage />} />
 
           <Route path="users" element={<AdminRoute><UsersPage /></AdminRoute>} />

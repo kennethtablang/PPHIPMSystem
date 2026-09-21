@@ -1,18 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { MdSearch, MdInventory, MdStore, MdShoppingCart, MdLocalShipping, MdPerson } from 'react-icons/md';
+import { MdSearch, MdInventory, MdShoppingCart, MdLocalShipping, MdPerson } from 'react-icons/md';
 import api from '../../api/axios';
+import { useAuth } from '../../context/AuthContext';
 
 const GROUPS = [
   { key: 'items', label: 'Inventory Items', Icon: MdInventory, to: r => ({ path: '/inventory', state: { search: r.title } }) },
-  { key: 'suppliers', label: 'Suppliers', Icon: MdStore, to: r => ({ path: '/suppliers', state: { search: r.title } }) },
-  { key: 'requests', label: 'Procurement Requests', Icon: MdShoppingCart, to: () => ({ path: '/procurement' }) },
+  // Department heads work from their own requests page (the server already limits their results).
+  { key: 'requests', label: 'Procurement Requests', Icon: MdShoppingCart, to: (r, role) => ({ path: role === 'DepartmentHead' ? '/department-requests' : '/procurement' }) },
   { key: 'purchaseOrders', label: 'Purchase Orders', Icon: MdLocalShipping, to: () => ({ path: '/purchase-orders' }) },
   { key: 'users', label: 'Users', Icon: MdPerson, to: r => ({ path: '/users', state: { search: r.title } }) },
 ];
 
 export default function GlobalSearch() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [q, setQ] = useState('');
   const [results, setResults] = useState(null);
   const [open, setOpen] = useState(false);
@@ -39,14 +41,19 @@ export default function GlobalSearch() {
     return () => document.removeEventListener('keydown', handler);
   }, []);
 
+  // Ignore responses that arrive after a newer query was typed.
+  const latestQuery = useRef('');
+
   const onChange = e => {
     const value = e.target.value;
     setQ(value);
+    latestQuery.current = value.trim();
     clearTimeout(debounceRef.current);
     if (value.trim().length < 2) { setResults(null); setOpen(false); return; }
     debounceRef.current = setTimeout(async () => {
       try {
         const { data } = await api.get('/search', { params: { q: value.trim() } });
+        if (latestQuery.current !== value.trim()) return;
         setResults(data);
         setActiveIdx(-1);
         setOpen(true);
@@ -55,7 +62,7 @@ export default function GlobalSearch() {
   };
 
   const go = (group, r) => {
-    const { path, state } = group.to(r);
+    const { path, state } = group.to(r, user?.role);
     setOpen(false);
     setQ('');
     setResults(null);
@@ -88,7 +95,7 @@ export default function GlobalSearch() {
         onFocus={() => { if (results) setOpen(true); }}
         onKeyDown={onKeyDown}
         placeholder="Search…  (Ctrl+K)"
-        title="Search items, suppliers, PR/PO — Ctrl+K"
+        title="Search items, PR/PO — Ctrl+K"
         style={{ width: 240, paddingLeft: 34, borderRadius: 99, fontSize: 12.5 }}
       />
 

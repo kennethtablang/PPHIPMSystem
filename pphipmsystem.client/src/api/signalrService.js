@@ -18,7 +18,8 @@ class SignalRService {
 
         this.notificationConnection = new signalR.HubConnectionBuilder()
             .withUrl(`${BASE_URL}/hubs/notifications`, {
-                accessTokenFactory: () => token
+                // Read on every (re)connect so a refreshed JWT is picked up.
+                accessTokenFactory: () => localStorage.getItem('token')
             })
             .withAutomaticReconnect()
             .build();
@@ -35,7 +36,8 @@ class SignalRService {
 
         this.forecastConnection = new signalR.HubConnectionBuilder()
             .withUrl(`${BASE_URL}/hubs/forecast`, {
-                accessTokenFactory: () => token
+                // Read on every (re)connect so a refreshed JWT is picked up.
+                accessTokenFactory: () => localStorage.getItem('token')
             })
             .withAutomaticReconnect()
             .build();

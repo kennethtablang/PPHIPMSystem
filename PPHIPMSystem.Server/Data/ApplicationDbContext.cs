@@ -15,7 +15,6 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<ConsumptionRecord> ConsumptionRecords => Set<ConsumptionRecord>();
     public DbSet<StockMovement> StockMovements => Set<StockMovement>();
     public DbSet<StockAdjustment> StockAdjustments => Set<StockAdjustment>();
-    public DbSet<Supplier> Suppliers => Set<Supplier>();
     public DbSet<ProcurementRequest> ProcurementRequests => Set<ProcurementRequest>();
     public DbSet<ProcurementRequestItem> ProcurementRequestItems => Set<ProcurementRequestItem>();
     public DbSet<ProcurementApproval> ProcurementApprovals => Set<ProcurementApproval>();
@@ -30,6 +29,21 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<RequestAttachment> RequestAttachments => Set<RequestAttachment>();
     public DbSet<DepartmentStock> DepartmentStocks => Set<DepartmentStock>();
     public DbSet<DepartmentBudget> DepartmentBudgets => Set<DepartmentBudget>();
+
+    // Every timestamp is written as DateTime.UtcNow, but SQL Server hands values
+    // back with Kind=Unspecified, which serializes without a "Z". Browsers then
+    // read them as local time and show everything 8 hours early (UTC+8).
+    // Marking values read from the database as UTC fixes the JSON output.
+    protected override void ConfigureConventions(ModelConfigurationBuilder configurationBuilder)
+    {
+        configurationBuilder.Properties<DateTime>().HaveConversion<UtcDateTimeConverter>();
+        configurationBuilder.Properties<DateTime?>().HaveConversion<UtcDateTimeConverter>();
+    }
+
+    private sealed class UtcDateTimeConverter()
+        : Microsoft.EntityFrameworkCore.Storage.ValueConversion.ValueConverter<DateTime, DateTime>(
+            v => v,
+            v => DateTime.SpecifyKind(v, DateTimeKind.Utc));
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -68,6 +82,11 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
             e.HasOne(m => m.ToDepartment)
              .WithMany()
              .HasForeignKey(m => m.ToDepartmentId)
+             .OnDelete(DeleteBehavior.Restrict);
+
+            e.HasOne(m => m.ItemBatch)
+             .WithMany()
+             .HasForeignKey(m => m.ItemBatchId)
              .OnDelete(DeleteBehavior.Restrict);
         });
 

@@ -7,4 +7,5 @@ public interface IReportService
     Task<ConsumptionSummaryDto> GetConsumptionReportAsync(ReportFilterDto filter);
     Task<ProcurementSummaryDto> GetProcurementReportAsync(ReportFilterDto filter);
     Task<ForecastSummaryDto> GetForecastAccuracyReportAsync(ReportFilterDto filter);
+    Task<ItemRankingsDto> GetItemRankingsAsync(ReportFilterDto filter);
 }

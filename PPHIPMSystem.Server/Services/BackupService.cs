@@ -113,7 +113,6 @@ public class BackupService : IBackupService
         total += AddSheet(wb, "StockMovements", await _db.StockMovements.AsNoTracking().ToListAsync());
         total += AddSheet(wb, "StockAdjustments", await _db.StockAdjustments.AsNoTracking().ToListAsync());
         total += AddSheet(wb, "DepartmentStocks", await _db.DepartmentStocks.AsNoTracking().ToListAsync());
-        total += AddSheet(wb, "Suppliers", await _db.Suppliers.AsNoTracking().ToListAsync());
         total += AddSheet(wb, "ProcurementRequests", await _db.ProcurementRequests.AsNoTracking().ToListAsync());
         total += AddSheet(wb, "ProcurementRequestItems", await _db.ProcurementRequestItems.AsNoTracking().ToListAsync());
         total += AddSheet(wb, "ProcurementApprovals", await _db.ProcurementApprovals.AsNoTracking().ToListAsync());

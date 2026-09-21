@@ -128,7 +128,6 @@ namespace PPHIPMSystem.Server
             builder.Services.AddScoped<IItemBatchService, ItemBatchService>();
             builder.Services.AddScoped<IStockMovementService, StockMovementService>();
             builder.Services.AddScoped<IStockAdjustmentService, StockAdjustmentService>();
-            builder.Services.AddScoped<ISupplierService, SupplierService>();
             builder.Services.AddScoped<IProcurementService, ProcurementService>();
             builder.Services.AddScoped<IDepartmentBudgetService, DepartmentBudgetService>();
             builder.Services.AddScoped<IForecastService, ForecastService>();
@@ -259,7 +258,10 @@ namespace PPHIPMSystem.Server
 
             // Seed database
             await DataSeeder.SeedAsync(app.Services);
-            await MockDataSeeder.SeedAsync(app.Services);
+            // Demo inventory only belongs in development; a fresh production
+            // database must not be populated with fake items and movements.
+            if (app.Environment.IsDevelopment())
+                await MockDataSeeder.SeedAsync(app.Services);
 
             app.Run();
         }

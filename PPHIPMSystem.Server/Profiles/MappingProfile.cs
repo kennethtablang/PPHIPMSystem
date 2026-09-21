@@ -9,7 +9,6 @@ using PPHIPMSystem.Server.DTOs.Notification;
 using PPHIPMSystem.Server.DTOs.Procurement;
 using PPHIPMSystem.Server.DTOs.StockAdjustment;
 using PPHIPMSystem.Server.DTOs.StockMovement;
-using PPHIPMSystem.Server.DTOs.Supplier;
 using PPHIPMSystem.Server.DTOs.User;
 using PPHIPMSystem.Server.Models;
 
@@ -82,11 +81,6 @@ public class MappingProfile : Profile
             .ForMember(d => d.ApprovedByFullName, o => o.MapFrom(s =>
                 s.ApprovedByUser != null ? $"{s.ApprovedByUser.FirstName} {s.ApprovedByUser.LastName}" : null));
 
-        // Supplier
-        CreateMap<Supplier, SupplierDto>()
-            .ForMember(d => d.TotalOrders, o => o.MapFrom(s => s.PurchaseOrders.Count));
-        CreateMap<CreateSupplierDto, Supplier>();
-
         // ProcurementRequest
         CreateMap<ProcurementRequest, ProcurementRequestDto>()
             .ForMember(d => d.DepartmentName, o => o.MapFrom(s => s.Department.Name))
@@ -106,7 +100,6 @@ public class MappingProfile : Profile
         // PurchaseOrder
         CreateMap<PurchaseOrder, PurchaseOrderDto>()
             .ForMember(d => d.RequestNumber, o => o.MapFrom(s => s.ProcurementRequest.RequestNumber))
-            .ForMember(d => d.SupplierName, o => o.MapFrom(s => s.Supplier.Name))
             .ForMember(d => d.GeneratedByFullName, o => o.MapFrom(s => $"{s.GeneratedByUser.FirstName} {s.GeneratedByUser.LastName}"));
 
         CreateMap<PurchaseOrderItem, PurchaseOrderItemDto>()

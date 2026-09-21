@@ -23,9 +23,22 @@ const refreshSession = async () => {
   return data.token;
 };
 
+// ASP.NET model validation returns ProblemDetails ({ title, errors: { Field: [..] } })
+// with no `message`. Pages read `err.response.data.message`, so lift the first
+// validation error into it instead of showing a generic failure.
+const normalizeErrorMessage = err => {
+  const data = err.response?.data;
+  if (!data || typeof data !== 'object' || data instanceof Blob || data.message) return;
+  const first = data.errors && Object.values(data.errors).flat()[0];
+  if (first) data.message = first;
+  else if (err.response.status === 403) data.message = 'You do not have permission to perform this action.';
+};
+
 api.interceptors.response.use(
   r => r,
   async err => {
+    normalizeErrorMessage(err);
+
     const original = err.config;
     const status = err.response?.status;
 
@@ -41,6 +54,8 @@ api.interceptors.response.use(
       } catch {
         localStorage.clear();
         window.location.href = '/login';
+        // Still reject: resolving with undefined crashes callers reading `res.data`.
+        return Promise.reject(err);
       }
     }
 

@@ -8,17 +8,25 @@ import { toast } from '../../components/common/Toast';
 import Pagination, { usePagination } from '../../components/common/Pagination';
 import { validatePassword, passwordHint, usePasswordPolicy } from '../../utils/password';
 import { fmtDateTime } from '../../utils/format';
+import { useAuth } from '../../context/AuthContext';
 
 const ROLES = ['SuperAdmin', 'HospitalAdministrator', 'InventoryOfficer', 'ProcurementStaff', 'DepartmentHead'];
+// Only a Super Admin may create, edit, or reset administrator accounts (enforced by the server).
+const PRIVILEGED_ROLES = ['SuperAdmin', 'HospitalAdministrator'];
 const BLANK = { username: '', password: '', firstName: '', middleName: '', lastName: '', employeeId: '', role: 'InventoryOfficer', departmentId: '', email: '', isActive: true };
 
 export default function UsersPage() {
   const pwPolicy = usePasswordPolicy();
+  const { user: me } = useAuth();
+  const isSuperAdmin = me?.role === 'SuperAdmin';
+  const assignableRoles = isSuperAdmin ? ROLES : ROLES.filter(r => !PRIVILEGED_ROLES.includes(r));
+  const canManage = u => isSuperAdmin || !PRIVILEGED_ROLES.includes(u.role);
   const location = useLocation();
   const [users, setUsers] = useState([]);
   const [departments, setDepartments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState(() => location.state?.search ?? ''); // pre-filled by global search
+  const [debouncedSearch, setDebouncedSearch] = useState(search);
   const [modal, setModal] = useState(null);
   const [form, setForm] = useState(BLANK);
   const [errors, setErrors] = useState({});
@@ -29,14 +37,23 @@ export default function UsersPage() {
 
   const load = () => {
     setLoading(true);
-    getUsers(search ? { search } : {}).then(r => setUsers(r.data)).finally(() => setLoading(false));
+    getUsers(debouncedSearch ? { search: debouncedSearch } : {})
+      .then(r => setUsers(r.data))
+      .catch(() => toast.error('Failed to load users.'))
+      .finally(() => setLoading(false));
   };
 
   useEffect(() => { getDepartments().then(r => setDepartments(r.data)); }, []);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: reload only when these inputs change
-  useEffect(() => { load(); }, [search]);
+  useEffect(() => { load(); }, [debouncedSearch]);
+  // Wait for typing to pause instead of querying the server on every keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search.trim()), 300);
+    return () => clearTimeout(t);
+  }, [search]);
 
   const openCreate = () => { setForm(BLANK); setErrors({}); setModal('create'); };
+  const isSelf = modal && modal !== 'create' && modal.id === me?.userId;
   const openEdit = u => {
     setForm({ username: u.userName ?? '', password: '', firstName: u.firstName, middleName: u.middleName ?? '', lastName: u.lastName, employeeId: u.employeeId ?? '', role: u.role, departmentId: u.departmentId ?? '', email: u.email ?? '', isActive: u.isActive });
     setErrors({});
@@ -140,8 +157,14 @@ export default function UsersPage() {
                   <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{u.lastLoginAt ? fmtDateTime(u.lastLoginAt) : 'Never'}</td>
                   <td>
                     <div style={{ display: 'flex', gap: 4 }}>
-                      <button className="btn btn-ghost btn-icon btn-sm" onClick={() => openEdit(u)} title="Edit"><MdEdit size={15} /></button>
-                      <button className="btn btn-secondary btn-sm" onClick={() => { setPwModal(u); setNewPw(''); }} style={{ fontSize: 11 }}>Reset PW</button>
+                      {canManage(u) ? (
+                        <>
+                          <button className="btn btn-ghost btn-icon btn-sm" onClick={() => openEdit(u)} title="Edit"><MdEdit size={15} /></button>
+                          <button className="btn btn-secondary btn-sm" onClick={() => { setPwModal(u); setNewPw(''); }} style={{ fontSize: 11 }}>Reset PW</button>
+                        </>
+                      ) : (
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Super Admin only</span>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -204,8 +227,8 @@ export default function UsersPage() {
             </div>
             <div className="form-group">
               <label className="form-label">Role *</label>
-              <select className="form-control" value={form.role} onChange={set('role')}>
-                {ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+              <select className="form-control" value={form.role} onChange={set('role')} disabled={isSelf}>
+                {(assignableRoles.includes(form.role) ? assignableRoles : [form.role, ...assignableRoles]).map(r => <option key={r} value={r}>{r}</option>)}
               </select>
             </div>
             <div className="form-group">
@@ -213,6 +236,10 @@ export default function UsersPage() {
               <select className="form-control" value={form.departmentId} onChange={set('departmentId')}>
                 <option value="">No Department</option>
                 {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                {/* Keep a since-deleted department selectable so saving doesn't silently clear it. */}
+                {modal !== 'create' && modal.departmentId && !departments.some(d => d.id === modal.departmentId) && (
+                  <option value={modal.departmentId}>{modal.departmentName ?? 'Inactive department'}</option>
+                )}
               </select>
             </div>
             <div className="form-group">
@@ -225,6 +252,7 @@ export default function UsersPage() {
                 <label className="form-label">Status</label>
                 <select
                   className="form-control"
+                  disabled={isSelf}
                   value={form.isActive ? 'active' : 'inactive'}
                   onChange={e => setForm(p => ({ ...p, isActive: e.target.value === 'active' }))}
                 >

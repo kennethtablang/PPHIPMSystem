@@ -69,8 +69,7 @@ public class ItemBatchService : IItemBatchService
 
         var item = await _db.InventoryItems.FindAsync(dto.InventoryItemId)
             ?? throw new InvalidOperationException("Item not found.");
-        item.QuantityOnHand += dto.Quantity;
-        item.UpdatedAt = DateTime.UtcNow;
+        AddReceiptMovement(entity, item, dto, userId);
 
         await _db.SaveChangesAsync();
 
@@ -131,9 +130,10 @@ public class ItemBatchService : IItemBatchService
             var entity = _mapper.Map<ItemBatch>(line);
             _db.ItemBatches.Add(entity);
 
+            // Applied line by line, so two lines for the same item chain their
+            // before/after figures correctly.
             var item = items[line.InventoryItemId];
-            item.QuantityOnHand += line.Quantity;
-            item.UpdatedAt = DateTime.UtcNow;
+            AddReceiptMovement(entity, item, line, userId);
 
             created.Add((entity, item, line));
         }
@@ -176,6 +176,58 @@ public class ItemBatchService : IItemBatchService
         };
     }
 
+    // Every batch receipt raises on-hand stock, so it gets a Receipt movement.
+    // Without one, the ledger, "units received" totals and the dashboard trend
+    // miss manually received stock. The movement is linked to the batch so a
+    // void can take the stock back off that same batch.
+    private void AddReceiptMovement(ItemBatch batch, InventoryItem item, CreateItemBatchDto line, string userId)
+    {
+        var before = item.QuantityOnHand;
+        item.QuantityOnHand += line.Quantity;
+        item.UpdatedAt = DateTime.UtcNow;
+
+        _db.StockMovements.Add(new StockMovement
+        {
+            InventoryItemId = item.Id,
+            MovementType = StockMovementType.Receipt,
+            Quantity = line.Quantity,
+            QuantityBeforeMovement = before,
+            QuantityAfterMovement = item.QuantityOnHand,
+            Remarks = string.IsNullOrWhiteSpace(line.LotNumber)
+                ? "Batch receipt"
+                : $"Batch receipt — Lot {line.LotNumber.Trim()}",
+            PerformedByUserId = userId,
+            PurchaseOrderId = line.PurchaseOrderId,
+            ItemBatch = batch, // FK is filled in when both rows are inserted together
+            MovementDate = DateTime.UtcNow
+        });
+    }
+
+    // Disposal of one batch's remaining stock. The movement records what actually
+    // left on-hand (which can be less than the batch remainder if on-hand had
+    // drifted below it), so a later void restores exactly that much.
+    private void AddBatchDisposalMovement(ItemBatch batch, string reason, string userId)
+    {
+        var item = batch.InventoryItem;
+        var before = item.QuantityOnHand;
+        item.QuantityOnHand = Math.Max(0, before - batch.RemainingQuantity);
+        item.UpdatedAt = DateTime.UtcNow;
+        batch.RemainingQuantity = 0;
+
+        _db.StockMovements.Add(new StockMovement
+        {
+            InventoryItemId = item.Id,
+            MovementType = StockMovementType.Disposal,
+            Quantity = before - item.QuantityOnHand,
+            QuantityBeforeMovement = before,
+            QuantityAfterMovement = item.QuantityOnHand,
+            Remarks = $"Disposal — {reason}. Batch: {batch.LotNumber ?? batch.Id.ToString()}",
+            PerformedByUserId = userId,
+            ItemBatchId = batch.Id,
+            MovementDate = DateTime.UtcNow
+        });
+    }
+
     public async Task<ItemBatchDto?> UpdateDetailsAsync(int batchId, UpdateItemBatchDetailsDto dto, string userId)
     {
         var batch = await _db.ItemBatches.Include(b => b.InventoryItem).FirstOrDefaultAsync(b => b.Id == batchId);
@@ -199,28 +251,17 @@ public class ItemBatchService : IItemBatchService
     {
         var batch = await _db.ItemBatches.Include(b => b.InventoryItem).FirstOrDefaultAsync(b => b.Id == batchId);
         if (batch is null) return false;
+        if (batch.RemainingQuantity <= 0)
+            throw new InvalidOperationException("This batch has no remaining stock to dispose.");
 
         var disposalQty = batch.RemainingQuantity;
-        batch.RemainingQuantity = 0;
-
         var item = batch.InventoryItem;
-        item.QuantityOnHand = Math.Max(0, item.QuantityOnHand - disposalQty);
-        item.UpdatedAt = DateTime.UtcNow;
-
-        _db.StockMovements.Add(new StockMovement
-        {
-            InventoryItemId = item.Id,
-            MovementType = StockMovementType.Disposal,
-            Quantity = disposalQty,
-            QuantityBeforeMovement = item.QuantityOnHand + disposalQty,
-            QuantityAfterMovement = item.QuantityOnHand,
-            Remarks = $"Disposal — {reason}. Batch: {batch.LotNumber ?? batchId.ToString()}",
-            PerformedByUserId = userId
-        });
+        AddBatchDisposalMovement(batch, reason, userId);
 
         await _db.SaveChangesAsync();
         await _audit.LogAsync(userId, "BatchDisposed", "ItemBatch", batchId,
             $"Disposed {disposalQty} of {item.Name}. Reason: {reason}. Batch: {batch.LotNumber ?? batchId.ToString()}");
+        await _notifications.BroadcastStockChangedAsync();
         return true;
     }
 
@@ -239,22 +280,7 @@ public class ItemBatchService : IItemBatchService
         foreach (var batch in expired)
         {
             var qty = batch.RemainingQuantity;
-            batch.RemainingQuantity = 0;
-
-            var item = batch.InventoryItem;
-            item.QuantityOnHand = Math.Max(0, item.QuantityOnHand - qty);
-            item.UpdatedAt = DateTime.UtcNow;
-
-            _db.StockMovements.Add(new StockMovement
-            {
-                InventoryItemId = item.Id,
-                MovementType = StockMovementType.Disposal,
-                Quantity = qty,
-                QuantityBeforeMovement = item.QuantityOnHand + qty,
-                QuantityAfterMovement = item.QuantityOnHand,
-                Remarks = $"Disposal — {reason}. Batch: {batch.LotNumber ?? batch.Id.ToString()}",
-                PerformedByUserId = userId
-            });
+            AddBatchDisposalMovement(batch, reason, userId);
 
             result.BatchesDisposed++;
             result.TotalQuantity += qty;

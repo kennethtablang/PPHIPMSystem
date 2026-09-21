@@ -8,6 +8,7 @@ public interface IReportExportService
     Task<byte[]> ExportConsumptionAsync(ReportFilterDto filter);
     Task<byte[]> ExportProcurementAsync(ReportFilterDto filter);
     Task<byte[]> ExportForecastAccuracyAsync(ReportFilterDto filter);
+    Task<byte[]> ExportItemRankingsAsync(ReportFilterDto filter);
     Task<byte[]> ExportInventorySnapshotAsync();
     Task<byte[]> ExportDepartmentBudgetsAsync(int fiscalYear);
     Task<byte[]> ExportDisposalCertificateAsync(DateTime startDate, DateTime endDate);

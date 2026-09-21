@@ -20,7 +20,8 @@ public class CategoryService : ICategoryService
 
     public async Task<IEnumerable<CategoryDto>> GetAllAsync()
     {
-        var items = await _db.Categories.Include(c => c.InventoryItems).ToListAsync();
+        // Delete is a soft delete, so only active rows belong in lists and pickers.
+        var items = await _db.Categories.Include(c => c.InventoryItems).Where(c => c.IsActive).OrderBy(c => c.Name).ToListAsync();
         return _mapper.Map<IEnumerable<CategoryDto>>(items);
     }
 

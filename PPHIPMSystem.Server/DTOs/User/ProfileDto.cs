@@ -29,7 +29,7 @@ public class UpdateProfileDto
     [Required, MaxLength(100)]
     public string LastName { get; set; } = string.Empty;
 
-    [EmailAddress, MaxLength(100)]
+    [Required, EmailAddress, MaxLength(100)]
     public string Email { get; set; } = string.Empty;
 
     public bool TwoFactorEnabled { get; set; }

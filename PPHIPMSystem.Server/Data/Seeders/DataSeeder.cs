@@ -19,7 +19,6 @@ public static class DataSeeder
         await SeedCategories(db);
         await SeedSuperAdmin(db, userManager);
         await SeedUsers(db, userManager);
-        await SeedSuppliers(db);
     }
 
     private static async Task SeedDepartments(ApplicationDbContext db)
@@ -164,61 +163,5 @@ public static class DataSeeder
                 throw new Exception($"Failed to seed user {user.UserName}: {errors}");
             }
         }
-    }
-
-    private static async Task SeedSuppliers(ApplicationDbContext db)
-    {
-        if (await db.Suppliers.AnyAsync()) return;
-
-        var suppliers = new[]
-        {
-            new Supplier
-            {
-                Name = "Unilab Inc.",
-                ContactPerson = "Mark Villanueva",
-                Email = "procurement@unilab.com.ph",
-                Phone = "02-8689-1111",
-                Address = "66 United St., Mandaluyong City, Metro Manila",
-                AccreditationNumber = "DOH-SUP-2024-001",
-                IsAccredited = true,
-                AccreditationExpiry = new DateTime(2026, 12, 31)
-            },
-            new Supplier
-            {
-                Name = "Medilink Corp.",
-                ContactPerson = "Cynthia Lim",
-                Email = "sales@medilink.com.ph",
-                Phone = "02-8525-2222",
-                Address = "Km 18, West Service Road, Paranaque City",
-                AccreditationNumber = "DOH-SUP-2024-002",
-                IsAccredited = true,
-                AccreditationExpiry = new DateTime(2026, 6, 30)
-            },
-            new Supplier
-            {
-                Name = "PhilHealth Medical Supplies",
-                ContactPerson = "Roberto Cruz",
-                Email = "supply@philhealthmed.ph",
-                Phone = "075-523-3333",
-                Address = "Lingayen, Pangasinan",
-                AccreditationNumber = "DOH-SUP-2024-003",
-                IsAccredited = true,
-                AccreditationExpiry = new DateTime(2025, 12, 31)
-            },
-            new Supplier
-            {
-                Name = "Pascual Laboratories Inc.",
-                ContactPerson = "Elena Pascual",
-                Email = "orders@pascuallabs.com.ph",
-                Phone = "02-8921-4444",
-                Address = "PALAD, Marikina City, Metro Manila",
-                AccreditationNumber = "DOH-SUP-2024-004",
-                IsAccredited = true,
-                AccreditationExpiry = new DateTime(2027, 3, 31)
-            }
-        };
-
-        await db.Suppliers.AddRangeAsync(suppliers);
-        await db.SaveChangesAsync();
     }
 }

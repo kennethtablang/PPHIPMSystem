@@ -13,9 +13,6 @@ public class PurchaseOrder
     public int ProcurementRequestId { get; set; }
     public ProcurementRequest ProcurementRequest { get; set; } = null!;
 
-    public int SupplierId { get; set; }
-    public Supplier Supplier { get; set; } = null!;
-
     public string GeneratedByUserId { get; set; } = string.Empty;
     public ApplicationUser GeneratedByUser { get; set; } = null!;
 

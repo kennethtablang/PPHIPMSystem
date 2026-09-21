@@ -109,14 +109,6 @@ public class AuthController : ControllerBase
         return ok ? Ok(new { message = "Password changed." }) : BadRequest(new { message = "Current password is incorrect." });
     }
 
-    [Authorize(Roles = "SuperAdmin,HospitalAdministrator")]
-    [HttpPost("reset-password/{userId}")]
-    public async Task<IActionResult> ResetPassword(string userId, [FromBody] string newPassword)
-    {
-        var ok = await _auth.ResetPasswordAsync(userId, newPassword);
-        return ok ? Ok(new { message = "Password reset." }) : NotFound();
-    }
-
     [HttpPost("forgot-password")]
     [EnableRateLimiting("auth-email")]
     public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordDto dto)

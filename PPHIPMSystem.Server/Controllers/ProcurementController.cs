@@ -74,6 +74,9 @@ public class ProcurementController : ControllerBase
     [Authorize(Roles = "SuperAdmin,HospitalAdministrator,DepartmentHead")]
     public async Task<IActionResult> Submit(int id)
     {
+        // Department heads may only push their own department's requests forward.
+        if (!await CanAccessRequestAsync(id)) return Forbid();
+
         var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
         try
         {

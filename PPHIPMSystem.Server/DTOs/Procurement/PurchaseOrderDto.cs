@@ -31,8 +31,6 @@ public class PurchaseOrderDto
     public string PONumber { get; set; } = string.Empty;
     public int ProcurementRequestId { get; set; }
     public string RequestNumber { get; set; } = string.Empty;
-    public int SupplierId { get; set; }
-    public string SupplierName { get; set; } = string.Empty;
     public string GeneratedByFullName { get; set; } = string.Empty;
     public decimal TotalAmount { get; set; }
     public bool IsDelivered { get; set; }

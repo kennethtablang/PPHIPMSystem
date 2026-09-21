@@ -314,6 +314,12 @@ public class StockMovementService : IStockMovementService
         var before = item.QuantityOnHand;
         decimal after;
 
+        // Movements tied to one batch (batch receipts, batch disposals) are
+        // reversed on that batch; everything else falls back to FEFO.
+        var batch = original.ItemBatchId.HasValue
+            ? await _db.ItemBatches.FindAsync(original.ItemBatchId.Value)
+            : null;
+
         switch (original.MovementType)
         {
             case StockMovementType.Receipt:
@@ -323,13 +329,26 @@ public class StockMovementService : IStockMovementService
                 if (qty > before)
                     throw new InvalidOperationException(
                         "Can't void: on-hand stock has since dropped below the quantity to reverse.");
+                if (batch is not null)
+                {
+                    // A received batch can only be un-received while all of it is
+                    // still on the shelf; otherwise later issuances depend on it.
+                    if (batch.RemainingQuantity < qty)
+                        throw new InvalidOperationException(
+                            $"Can't void: {batch.Quantity - batch.RemainingQuantity} unit(s) of this batch have already " +
+                            "been issued or disposed. Void those movements first, or record a stock adjustment.");
+                    batch.RemainingQuantity -= qty;
+                }
                 after = before - qty;
                 break;
             case StockMovementType.Issuance:
             case StockMovementType.Disposal:
                 // Original removed stock and consumed batches; reversing restores both.
                 after = before + qty;
-                await RestoreBatchesFefoAsync(original.InventoryItemId, qty);
+                if (batch is not null)
+                    batch.RemainingQuantity = Math.Min(batch.Quantity, batch.RemainingQuantity + qty);
+                else
+                    await RestoreBatchesFefoAsync(original.InventoryItemId, qty);
                 break;
             case StockMovementType.DepartmentConsumption:
             case StockMovementType.DepartmentTransfer:
@@ -380,6 +399,7 @@ public class StockMovementService : IStockMovementService
             Remarks = $"Void of movement #{original.Id}. Reason: {reason}",
             PerformedByUserId = userId,
             ReversalOfMovementId = original.Id,
+            ItemBatchId = original.ItemBatchId,
             MovementDate = now
         };
         _db.StockMovements.Add(reversal);
