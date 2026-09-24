@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
-import { MdAdd, MdVisibility, MdSchedule, MdFileDownload, MdQrCode2, MdBalance, MdOutbox, MdWarning } from 'react-icons/md';
+import { MdAdd, MdVisibility, MdSchedule, MdFileDownload, MdQrCode2, MdBalance, MdOutbox, MdWarning, MdEdit, MdCancel, MdSend, MdLocalShipping } from 'react-icons/md';
 import { exportRisForm, exportPurchaseRequestForm } from '../../api/reports';
-import { getRequests, approveRequest, submitRequest, releaseRequest, getAllocation } from '../../api/procurement';
+import { getRequests, approveRequest, submitRequest, releaseRequest, getAllocation, cancelRequest } from '../../api/procurement';
 import { checkRequestBudget } from '../../api/departmentBudgets';
 import { getItems } from '../../api/inventory';
 import AttachmentsPanel from '../../components/common/AttachmentsPanel';
@@ -36,6 +36,9 @@ export default function ProcurementList() {
   const navigate = useNavigate();
   const canCreate = ['SuperAdmin', 'HospitalAdministrator', 'DepartmentHead'].includes(user?.role);
   const isAdmin = ['SuperAdmin', 'HospitalAdministrator'].includes(user?.role);
+  // Replenishment Purchase Requests: the Supply Officer (Procurement) drafts
+  // them, the Administrator approves as Chief of Hospital.
+  const canManagePr = isAdmin || user?.role === 'ProcurementStaff';
   // Inventory review (stock check + allocation) and release: Inventory Officer,
   // or an administrator standing in. Final approval: administrators only.
   const canInventory = isAdmin || user?.role === 'InventoryOfficer';
@@ -44,6 +47,13 @@ export default function ProcurementList() {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
+  // Which queue is shown: ward supply requests, or the storeroom's own
+  // replenishment Purchase Requests. Procurement starts on its own queue.
+  const [tab, setTab] = useState(() =>
+    location.state?.prefillItem || location.state?.prefillItems || user?.role === 'ProcurementStaff' ? 'Replenishment' : 'DepartmentSupply');
+  const isPrTab = tab === 'Replenishment';
+  const [cancelModal, setCancelModal] = useState(null);
+  const [cancelReason, setCancelReason] = useState('');
   // null = closed; { prefill } opens the shared request form.
   const [createModal, setCreateModal] = useState(null);
   const [viewModal, setViewModal] = useState(null);
@@ -66,7 +76,7 @@ export default function ProcurementList() {
 
   const load = () => {
     setLoading(true);
-    getRequests(statusFilter ? { status: statusFilter } : {}).then(r => setRequests(r.data)).finally(() => setLoading(false));
+    getRequests({ type: tab, ...(statusFilter ? { status: statusFilter } : {}) }).then(r => setRequests(r.data)).finally(() => setLoading(false));
   };
 
   const loadItems = () => getItems().then(r => setItems(r.data));
@@ -78,7 +88,7 @@ export default function ProcurementList() {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- load once
   useEffect(() => { loadItems(); loadShortages(); }, []);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: reload only when these inputs change
-  useEffect(() => { load(); pager.setPage(1); }, [statusFilter]);
+  useEffect(() => { load(); pager.setPage(1); }, [statusFilter, tab]);
   const itemMap = Object.fromEntries(items.map(i => [String(i.id), i]));
 
   // FR-3.4: pre-fill from Dashboard / Inventory "reorder" navigation.
@@ -86,14 +96,16 @@ export default function ProcurementList() {
   useEffect(() => {
     const single = location.state?.prefillItem;
     const many = location.state?.prefillItems;
-    if (!canCreate || (!single && !many?.length)) return;
+    if (!canManagePr || (!single && !many?.length)) return;
 
     const lines = (many ?? [single]).map(p => ({
       inventoryItemId: p.id,
       quantityRequested: p.suggestedQty ?? '',
       remarks: `Low stock alert — ${p.name}`,
     }));
+    setTab('Replenishment');
     setCreateModal({
+      replenishment: true,
       prefill: {
         justification: many?.length > 1
           ? `Replenishment request for ${many.length} low-stock items.`
@@ -116,7 +128,7 @@ export default function ProcurementList() {
 
     setAllocInfo({});
     setLineAlloc({});
-    if (INVENTORY_STAGE.includes(r.status)) {
+    if (r.type !== 'Replenishment' && INVENTORY_STAGE.includes(r.status)) {
       getAllocation().then(res => {
         const byItem = Object.fromEntries(res.data.map(i => [i.inventoryItemId, i]));
         setAllocInfo(byItem);
@@ -134,7 +146,8 @@ export default function ProcurementList() {
     }
   };
 
-  const isInventoryReview = approveModal && INVENTORY_STAGE.includes(approveModal.status);
+  const isPrReview = approveModal?.type === 'Replenishment';
+  const isInventoryReview = approveModal && !isPrReview && INVENTORY_STAGE.includes(approveModal.status);
   const lineContext = line => {
     const info = allocInfo[line.inventoryItemId];
     const mine = info?.lines.find(l => l.procurementRequestItemId === line.id);
@@ -174,6 +187,7 @@ export default function ProcurementList() {
       const res = await approveRequest(approveModal.id, { action: approveForm.action, remarks: approveForm.remarks, allocations });
       const pastTense = { Approve: 'Approved', Reject: 'Rejected', Return: 'Returned' };
       if (res.data.status === 'Released') toast.success(`Approved and released — stock moved to ${res.data.departmentName}.`);
+      else if (isPrReview && res.data.status === 'FullyApproved') toast.success('Purchase Request approved — Procurement can now generate the purchase order.');
       else if (res.data.status === 'FullyApproved') toast.warning('Approved, but stock is short — Procurement has been notified to replenish.');
       else toast.success(`Request ${pastTense[approveForm.action] ?? approveForm.action + 'd'}.`);
       setApproveModal(null);
@@ -182,11 +196,11 @@ export default function ProcurementList() {
     finally { setSaving(false); }
   };
 
-  const handleSubmitToProcurement = async id => {
+  const handleSubmitToProcurement = async r => {
     setSaving(true);
     try {
-      await submitRequest(id);
-      toast.success('Procurement request submitted to Procurement Staff.');
+      await submitRequest(r.id);
+      toast.success(r.type === 'Replenishment' ? 'Purchase Request sent to the Chief for approval.' : 'Request submitted for inventory review.');
       load();
     } catch (e) {
       toast.error(e.response?.data?.message ?? 'Failed to submit request.');
@@ -195,7 +209,36 @@ export default function ProcurementList() {
     }
   };
 
-  const STATUSES = [
+  const confirmCancel = async () => {
+    setSaving(true);
+    try {
+      await cancelRequest(cancelModal.id, cancelReason.trim() || null);
+      toast.success(`${cancelModal.requestNumber} cancelled.`);
+      setCancelModal(null);
+      load();
+    } catch (e) {
+      toast.error(e.response?.data?.message ?? 'Failed to cancel.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const EDITABLE = ['SubmittedByDepartment', 'SubmittedToProcurement', 'ReturnedForRevision'];
+  const SUBMITTABLE = ['SubmittedByDepartment', 'ReturnedForRevision'];
+
+  const PR_STATUSES = [
+    { value: '', label: 'All' },
+    { value: 'SubmittedByDepartment', label: 'Draft' },
+    { value: 'SubmittedToProcurement', label: 'For Chief Approval' },
+    { value: 'FullyApproved', label: 'Approved – for PO' },
+    { value: 'PurchaseOrderGenerated', label: 'PO Generated' },
+    { value: 'Delivered', label: 'Delivered' },
+    { value: 'ReturnedForRevision', label: 'Returned' },
+    { value: 'Rejected', label: 'Rejected' },
+    { value: 'Cancelled', label: 'Cancelled' },
+  ];
+
+  const DEPT_STATUSES = [
     { value: '', label: 'All' },
     { value: 'SubmittedByDepartment', label: 'Draft' },
     { value: 'SubmittedToProcurement', label: 'Inventory Review' },
@@ -208,16 +251,21 @@ export default function ProcurementList() {
     { value: 'PurchaseOrderGenerated', label: 'PO Generated' },
     { value: 'Delivered', label: 'Delivered' },
   ];
+  const STATUSES = isPrTab ? PR_STATUSES : DEPT_STATUSES;
 
   return (
     <div>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Department Supply Requests</h1>
-          <p className="page-subtitle">Inventory review &amp; allocation → Administrator approval → automatic release to department stock</p>
+          <h1 className="page-title">{isPrTab ? 'Purchase Requests' : 'Department Supply Requests'}</h1>
+          <p className="page-subtitle">
+            {isPrTab
+              ? 'Storeroom replenishment: Supply Officer drafts → Chief of Hospital approves → purchase order → delivery to central stock'
+              : 'Inventory review & allocation → Administrator approval → automatic release to department stock'}
+          </p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          {canInventory && (
+          {canInventory && !isPrTab && (
             <button className="btn btn-secondary" onClick={() => setBoardOpen(true)} title="Split limited stock fairly across competing department requests">
               <MdBalance size={16} /> Stock Allocation
               {shortCount > 0 && <span className="badge badge-amber" style={{ marginLeft: 6 }}>{shortCount} short</span>}
@@ -231,12 +279,25 @@ export default function ProcurementList() {
           >
             <MdQrCode2 size={16} /> QR Labels
           </button>
-          {canCreate && (
+          {isPrTab ? canManagePr && (
+            <button className="btn btn-primary" onClick={() => setCreateModal({ replenishment: true })}>
+              <MdAdd size={16} /> New Purchase Request
+            </button>
+          ) : canCreate && (
             <button className="btn btn-primary" onClick={() => setCreateModal({})}>
               <MdAdd size={16} /> New Request
             </button>
           )}
         </div>
+      </div>
+
+      <div className="pl-tabs">
+        <style>{TABS_CSS}</style>
+        {[['DepartmentSupply', 'Department Requests'], ['Replenishment', 'Purchase Requests (Replenishment)']].map(([key, label]) => (
+          <button key={key} className={`pl-tab ${tab === key ? 'on' : ''}`} onClick={() => { setTab(key); setStatusFilter(''); }}>
+            {label}
+          </button>
+        ))}
       </div>
 
       <div className="filter-bar" style={{ overflowX: 'auto', flexWrap: 'nowrap' }}>
@@ -282,7 +343,7 @@ export default function ProcurementList() {
                   <td>{r.requestedByName || r.requestedByFullName}</td>
                   <td><span className="badge badge-blue">{r.items?.length ?? 0} items</span></td>
                   <td>
-                    <StatusBadge status={r.status} />
+                    <StatusBadge status={r.status} type={r.type} />
                     {isStalled(r) && (
                       <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 600, color: daysWaiting(r) >= 14 ? '#dc2626' : '#d97706' }}>
                         <MdSchedule size={12} /> waiting {daysWaiting(r)}d
@@ -295,25 +356,49 @@ export default function ProcurementList() {
                       <button className="btn btn-ghost btn-sm" onClick={() => setViewModal(r)}>
                         <MdVisibility size={14} /> View
                       </button>
-                      {canInventory && INVENTORY_STAGE.includes(r.status) && (
-                        <button className="btn btn-success btn-sm" onClick={() => openApprove(r)}>
-                          Review &amp; Allocate
-                        </button>
-                      )}
-                      {isAdmin && r.status === 'ApprovedByInventoryOfficer' && (
-                        <button className="btn btn-primary btn-sm" onClick={() => openApprove(r)}>
-                          Final Approve
-                        </button>
-                      )}
-                      {canInventory && r.status === 'FullyApproved' && (
-                        <button className="btn btn-primary btn-sm" onClick={() => handleRelease(r)} disabled={saving} title="Release now that stock is available">
-                          <MdOutbox size={14} /> Release
-                        </button>
-                      )}
-                      {(r.status === 'SubmittedByDepartment' || r.status === 'ReturnedForRevision') && ['SuperAdmin', 'HospitalAdministrator', 'DepartmentHead'].includes(user?.role) && (
-                        <button className="btn btn-success btn-sm" onClick={() => handleSubmitToProcurement(r.id)} disabled={saving}>
-                          Submit
-                        </button>
+                      {r.type === 'Replenishment' ? (
+                        <>
+                          {canManagePr && EDITABLE.includes(r.status) && (
+                            <button className="btn btn-ghost btn-sm" onClick={() => setCreateModal({ request: r })}><MdEdit size={14} /> Edit</button>
+                          )}
+                          {canManagePr && SUBMITTABLE.includes(r.status) && (
+                            <button className="btn btn-success btn-sm" onClick={() => handleSubmitToProcurement(r)} disabled={saving}><MdSend size={14} /> Submit</button>
+                          )}
+                          {isAdmin && INVENTORY_STAGE.includes(r.status) && (
+                            <button className="btn btn-primary btn-sm" onClick={() => openApprove(r)}>Chief Approval</button>
+                          )}
+                          {r.status === 'FullyApproved' && ['SuperAdmin', 'HospitalAdministrator', 'ProcurementStaff'].includes(user?.role) && (
+                            <button className="btn btn-primary btn-sm" onClick={() => navigate('/purchase-orders', { state: { generateFor: r.id } })}>
+                              <MdLocalShipping size={14} /> Create PO
+                            </button>
+                          )}
+                          {canManagePr && EDITABLE.includes(r.status) && (
+                            <button className="btn btn-danger btn-sm" onClick={() => { setCancelReason(''); setCancelModal(r); }}><MdCancel size={14} /> Cancel</button>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          {canInventory && INVENTORY_STAGE.includes(r.status) && (
+                            <button className="btn btn-success btn-sm" onClick={() => openApprove(r)}>
+                              Review &amp; Allocate
+                            </button>
+                          )}
+                          {isAdmin && r.status === 'ApprovedByInventoryOfficer' && (
+                            <button className="btn btn-primary btn-sm" onClick={() => openApprove(r)}>
+                              Final Approve
+                            </button>
+                          )}
+                          {canInventory && r.status === 'FullyApproved' && (
+                            <button className="btn btn-primary btn-sm" onClick={() => handleRelease(r)} disabled={saving} title="Release now that stock is available">
+                              <MdOutbox size={14} /> Release
+                            </button>
+                          )}
+                          {SUBMITTABLE.includes(r.status) && ['SuperAdmin', 'HospitalAdministrator', 'DepartmentHead'].includes(user?.role) && (
+                            <button className="btn btn-success btn-sm" onClick={() => handleSubmitToProcurement(r)} disabled={saving}>
+                              Submit
+                            </button>
+                          )}
+                        </>
                       )}
                     </div>
                   </td>
@@ -341,7 +426,9 @@ export default function ProcurementList() {
 
       {createModal && (
         <RequestFormModal
+          request={createModal.request ?? null}
           prefill={createModal.prefill}
+          replenishment={!!createModal.replenishment}
           showCost={user?.role !== 'DepartmentHead'}
           onClose={() => setCreateModal(null)}
           onSaved={() => { setCreateModal(null); refresh(); }}
@@ -374,19 +461,19 @@ export default function ProcurementList() {
               >
                 <MdFileDownload size={15} /> PR Form
               </button>
-              {canInventory && viewModal.status === 'FullyApproved' && (
+              {canInventory && viewModal.status === 'FullyApproved' && viewModal.type !== 'Replenishment' && (
                 <button className="btn btn-primary" onClick={() => handleRelease(viewModal)} disabled={saving} style={{ marginLeft: 'auto' }}>
                   <MdOutbox size={15} /> Release
                 </button>
               )}
-              <button className="btn btn-secondary" onClick={() => setViewModal(null)} style={viewModal.status === 'FullyApproved' && canInventory ? undefined : { marginLeft: 'auto' }}>Close</button>
+              <button className="btn btn-secondary" onClick={() => setViewModal(null)} style={viewModal.status === 'FullyApproved' && canInventory && viewModal.type !== 'Replenishment' ? undefined : { marginLeft: 'auto' }}>Close</button>
             </>
           }
         >
           <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
             <div className="grid-2" style={{ flex: 1 }}>
               <div><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Department</span><br /><strong>{viewModal.departmentName}</strong></div>
-              <div><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Status</span><br /><StatusBadge status={viewModal.status} /></div>
+              <div><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Status</span><br /><StatusBadge status={viewModal.status} type={viewModal.type} /></div>
               <div><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Requested By</span><br /><strong>{viewModal.requestedByName || viewModal.requestedByFullName}</strong></div>
               <div><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Date</span><br /><strong>{new Date(viewModal.requestedAt).toLocaleDateString('en-PH')}</strong></div>
             </div>
@@ -401,7 +488,7 @@ export default function ProcurementList() {
               </div>
             </div>
           </div>
-          <RequestProgress status={viewModal.status} />
+          <RequestProgress status={viewModal.status} type={viewModal.type} />
           <div className="alert alert-info"><strong>Purpose:</strong>&nbsp;{viewModal.justification}</div>
           <div>
             <label className="form-label">Items Requested</label>
@@ -423,12 +510,28 @@ export default function ProcurementList() {
         </Modal>
       )}
 
+      {cancelModal && (
+        <Modal title={`Cancel ${cancelModal.requestNumber}?`} onClose={() => setCancelModal(null)}
+          footer={
+            <>
+              <button className="btn btn-secondary" onClick={() => setCancelModal(null)}>Keep</button>
+              <button className="btn btn-danger" onClick={confirmCancel} disabled={saving}>{saving ? 'Cancelling…' : 'Cancel Purchase Request'}</button>
+            </>
+          }
+        >
+          <div className="form-group">
+            <label className="form-label">Reason (optional)</label>
+            <textarea className="form-control" rows={2} value={cancelReason} onChange={e => setCancelReason(e.target.value)} maxLength={1000} />
+          </div>
+        </Modal>
+      )}
+
       {/* Approve Modal */}
       {approveModal && (
         <Modal
-          title={`${isInventoryReview ? 'Inventory Review' : 'Final Approval'}: ${approveModal.requestNumber} — ${approveModal.departmentName}`}
+          title={`${isPrReview ? 'Chief Approval — Purchase Request' : isInventoryReview ? 'Inventory Review' : 'Final Approval'}: ${approveModal.requestNumber} — ${approveModal.departmentName}`}
           onClose={() => setApproveModal(null)}
-          size={isInventoryReview || approveModal.status === 'ApprovedByInventoryOfficer' ? 'modal-xl' : ''}
+          size={isInventoryReview || isPrReview || approveModal.status === 'ApprovedByInventoryOfficer' ? 'modal-xl' : ''}
           footer={
             <>
               <button className="btn btn-secondary" onClick={() => setApproveModal(null)}>Cancel</button>
@@ -537,6 +640,16 @@ export default function ProcurementList() {
             </div>
           )}
 
+          {isPrReview && (
+            <div style={{ marginBottom: 14 }}>
+              <label className="form-label">Items to Purchase</label>
+              <RequestLinesTable request={approveModal} itemMap={itemMap} showCost />
+              <div className="alert alert-info" style={{ marginTop: 10, fontSize: 12 }}>
+                <strong>Purpose:</strong>&nbsp;{approveModal.justification}. Approving hands the PR to Procurement to raise the purchase order; the delivery restocks central inventory.
+              </div>
+            </div>
+          )}
+
           {approveModal.status === 'ApprovedByInventoryOfficer' && (() => {
             const short = approveModal.items.filter(l => (itemMap[String(l.inventoryItemId)]?.quantityOnHand ?? 0) < (l.quantityApproved ?? l.quantityRequested));
             return (
@@ -571,3 +684,10 @@ export default function ProcurementList() {
     </div>
   );
 }
+
+const TABS_CSS = `
+.pl-tabs { display: flex; gap: 4px; margin-bottom: 14px; border-bottom: 1px solid var(--border); }
+.pl-tab { border: 0; background: none; font: inherit; font-size: 13px; font-weight: 600; color: var(--text-muted); padding: 10px 16px; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.pl-tab:hover { color: var(--text-primary); }
+.pl-tab.on { color: var(--text-accent); border-bottom-color: var(--green-500); }
+`;

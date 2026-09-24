@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using PPHIPMSystem.Server.DTOs.Procurement;
 using PPHIPMSystem.Server.Interfaces;
+using PPHIPMSystem.Server.Models.Enums;
 
 namespace PPHIPMSystem.Server.Controllers;
 
@@ -24,29 +25,42 @@ public class ProcurementController : ControllerBase
     // their own department's requests.
     private bool IsDepartmentScoped => User.IsInRole("DepartmentHead") || User.IsInRole("DepartmentStaff");
     private bool IsAdmin => User.IsInRole("SuperAdmin") || User.IsInRole("HospitalAdministrator");
+    private bool IsProcurement => User.IsInRole("ProcurementStaff");
+    private int? OwnDepartmentId => int.TryParse(User.FindFirstValue("departmentId"), out var d) ? d : null;
 
     // Which department a new request is filed under: department accounts are
-    // pinned to their own; administrators pick one on the form (falling back
-    // to their own department when they have one).
-    private int? ResolveRequestDepartment(int? requested)
+    // pinned to their own; administrators (and Procurement, for replenishment
+    // PRs) pick one on the form, falling back to their own department.
+    private int? ResolveRequestDepartment(int? requested, bool replenishment)
     {
-        int? own = int.TryParse(User.FindFirstValue("departmentId"), out var d) ? d : null;
-        if (IsAdmin && requested.HasValue) return requested;
-        return own;
+        var mayChoose = IsAdmin || (replenishment && IsProcurement);
+        if (mayChoose && requested.HasValue) return requested;
+        return OwnDepartmentId;
+    }
+
+    // Who may edit / submit / cancel a request. A replenishment Purchase
+    // Request belongs to Procurement (and administrators); a department
+    // request to its own department (and administrators) — Procurement no
+    // longer handles department requests at all.
+    private bool CanManage(ProcurementRequestDto request)
+    {
+        if (IsAdmin) return true;
+        if (request.Type == RequestType.Replenishment) return IsProcurement;
+        return IsDepartmentScoped && request.DepartmentId == OwnDepartmentId;
     }
 
     [HttpGet]
-    public async Task<IActionResult> GetAll([FromQuery] string? status, [FromQuery] int? departmentId)
+    public async Task<IActionResult> GetAll([FromQuery] string? status, [FromQuery] int? departmentId, [FromQuery] string? type)
     {
+        RequestType? requestType = Enum.TryParse<RequestType>(type, ignoreCase: true, out var t) ? t : null;
         if (IsDepartmentScoped)
         {
-            var deptClaim = User.FindFirstValue("departmentId");
-            if (int.TryParse(deptClaim, out var userDeptId))
-                departmentId = userDeptId;
-            else
-                return Forbid();
+            if (OwnDepartmentId is not { } userDeptId) return Forbid();
+            departmentId = userDeptId;
+            // Wards see their own supply requests, not the storeroom's PRs.
+            requestType = RequestType.DepartmentSupply;
         }
-        return Ok(await _procurement.GetAllAsync(status, departmentId));
+        return Ok(await _procurement.GetAllAsync(status, departmentId, requestType));
     }
 
     [HttpGet("{id}")]
@@ -54,23 +68,27 @@ public class ProcurementController : ControllerBase
     {
         var result = await _procurement.GetByIdAsync(id);
         if (result is null) return NotFound();
-        
-        if (IsDepartmentScoped)
-        {
-            var deptClaim = User.FindFirstValue("departmentId");
-            if (!int.TryParse(deptClaim, out var userDeptId) || result.DepartmentId != userDeptId)
-                return Forbid();
-        }
-        
+
+        if (IsDepartmentScoped &&
+            (result.DepartmentId != OwnDepartmentId || result.Type != RequestType.DepartmentSupply))
+            return Forbid();
+
         return Ok(result);
     }
 
     [HttpPost]
-    [Authorize(Roles = "SuperAdmin,HospitalAdministrator,DepartmentHead,DepartmentStaff")]
+    [Authorize(Roles = "SuperAdmin,HospitalAdministrator,DepartmentHead,DepartmentStaff,ProcurementStaff")]
     public async Task<IActionResult> Create([FromBody] CreateProcurementRequestDto dto)
     {
+        // Procurement files replenishment PRs only; departments file supply
+        // requests only; administrators can do either.
+        if (dto.IsReplenishment && !(IsAdmin || IsProcurement))
+            return BadRequest(new { message = "Only Procurement or an administrator can raise a replenishment Purchase Request." });
+        if (!dto.IsReplenishment && IsProcurement && !IsAdmin)
+            return BadRequest(new { message = "Procurement raises replenishment Purchase Requests; department supply requests come from the departments." });
+
         var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
-        if (ResolveRequestDepartment(dto.DepartmentId) is not { } deptId)
+        if (ResolveRequestDepartment(dto.DepartmentId, dto.IsReplenishment) is not { } deptId)
             return BadRequest(new { message = "Choose the requesting department." });
         // A shared department PC is logged in as the ward, not a person.
         if (User.IsInRole("DepartmentStaff") && string.IsNullOrWhiteSpace(dto.RequestedByName))
@@ -89,18 +107,19 @@ public class ProcurementController : ControllerBase
 
     // Edit quantities / add or remove lines while nobody has approved it yet.
     [HttpPut("{id}")]
-    [Authorize(Roles = "SuperAdmin,HospitalAdministrator,DepartmentHead,DepartmentStaff")]
+    [Authorize(Roles = "SuperAdmin,HospitalAdministrator,DepartmentHead,DepartmentStaff,ProcurementStaff")]
     public async Task<IActionResult> Update(int id, [FromBody] UpdateProcurementRequestDto dto)
     {
-        if (!await CanAccessRequestAsync(id)) return Forbid();
         var existing = await _procurement.GetByIdAsync(id);
         if (existing is null) return NotFound();
+        if (!CanManage(existing)) return Forbid();
         if (User.IsInRole("DepartmentStaff") && string.IsNullOrWhiteSpace(dto.RequestedByName))
             return BadRequest(new { message = "Enter the name of the person making the request." });
 
         var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
         // Department accounts can't move a request to another department.
-        var deptId = IsAdmin ? dto.DepartmentId ?? existing.DepartmentId : existing.DepartmentId;
+        var mayMove = IsAdmin || (existing.Type == RequestType.Replenishment && IsProcurement);
+        var deptId = mayMove ? dto.DepartmentId ?? existing.DepartmentId : existing.DepartmentId;
         try
         {
             var result = await _procurement.UpdateAsync(id, dto, userId, deptId);
@@ -113,10 +132,12 @@ public class ProcurementController : ControllerBase
     }
 
     [HttpPatch("{id}/cancel")]
-    [Authorize(Roles = "SuperAdmin,HospitalAdministrator,DepartmentHead,DepartmentStaff")]
+    [Authorize(Roles = "SuperAdmin,HospitalAdministrator,DepartmentHead,DepartmentStaff,ProcurementStaff")]
     public async Task<IActionResult> Cancel(int id, [FromBody] CancelProcurementRequestDto? dto)
     {
-        if (!await CanAccessRequestAsync(id)) return Forbid();
+        var existing = await _procurement.GetByIdAsync(id);
+        if (existing is null) return NotFound();
+        if (!CanManage(existing)) return Forbid();
         var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
         try
         {
@@ -130,11 +151,12 @@ public class ProcurementController : ControllerBase
     }
 
     [HttpPatch("{id}/submit")]
-    [Authorize(Roles = "SuperAdmin,HospitalAdministrator,DepartmentHead,DepartmentStaff")]
+    [Authorize(Roles = "SuperAdmin,HospitalAdministrator,DepartmentHead,DepartmentStaff,ProcurementStaff")]
     public async Task<IActionResult> Submit(int id)
     {
-        // Department heads may only push their own department's requests forward.
-        if (!await CanAccessRequestAsync(id)) return Forbid();
+        var existing = await _procurement.GetByIdAsync(id);
+        if (existing is null) return NotFound();
+        if (!CanManage(existing)) return Forbid();
 
         var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
         try

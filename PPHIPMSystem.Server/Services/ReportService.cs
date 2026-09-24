@@ -114,7 +114,8 @@ public class ReportService : IReportService
             TotalRequests = requests.Count,
             FullyApproved = requests.Count(r => r.Status == ProcurementStatus.FullyApproved
                 || r.Status == ProcurementStatus.PurchaseOrderGenerated
-                || r.Status == ProcurementStatus.Delivered),
+                || r.Status == ProcurementStatus.Delivered
+                || r.Status == ProcurementStatus.Released),
             TotalPOs = pos.Count,
             DeliveredPOs = pos.Count(po => po.IsDelivered),
             TotalPOAmount = pos.Sum(po => po.TotalAmount),

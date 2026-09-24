@@ -22,15 +22,16 @@ const EXPORT_TYPES = { forecast: 'forecast-accuracy', rankings: 'item-rankings' 
 // StatusBadge so the chart and the request lists read the same.
 const STATUS_ORDER = [
   'Draft', 'SubmittedByDepartment', 'SubmittedToProcurement', 'ApprovedByInventoryOfficer',
-  'ApprovedByProcurement', 'FullyApproved', 'PurchaseOrderGenerated', 'Delivered',
+  'ApprovedByProcurement', 'FullyApproved', 'Released', 'PurchaseOrderGenerated', 'Delivered',
   'ReturnedForRevision', 'Rejected', 'Cancelled',
 ];
 const STATUS_LABELS = {
   SubmittedByDepartment: 'Dept. Request',
-  SubmittedToProcurement: 'Submitted',
-  ApprovedByInventoryOfficer: 'Inv. Approved',
+  SubmittedToProcurement: 'In Review',
+  ApprovedByInventoryOfficer: 'Admin Approval',
   ApprovedByProcurement: 'Proc. Approved',
-  FullyApproved: 'Approved',
+  FullyApproved: 'Approved (pending stock/PO)',
+  Released: 'Released',
   PurchaseOrderGenerated: 'PO Generated',
   ReturnedForRevision: 'Returned',
 };

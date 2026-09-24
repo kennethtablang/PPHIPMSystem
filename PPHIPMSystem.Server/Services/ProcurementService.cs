@@ -62,9 +62,11 @@ public class ProcurementService : IProcurementService
             .Include(r => r.Approvals).ThenInclude(a => a.ApproverUser)
             .Include(r => r.PurchaseOrder);
 
-    public async Task<IEnumerable<ProcurementRequestDto>> GetAllAsync(string? status, int? departmentId)
+    public async Task<IEnumerable<ProcurementRequestDto>> GetAllAsync(string? status, int? departmentId, RequestType? type = null)
     {
         var query = BaseQuery().AsQueryable();
+        if (type.HasValue)
+            query = query.Where(r => r.Type == type.Value);
         if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<ProcurementStatus>(status, out var s))
             query = query.Where(r => r.Status == s);
         if (departmentId.HasValue)
@@ -122,6 +124,7 @@ public class ProcurementService : IProcurementService
             RequestedByName = CleanName(dto.RequestedByName),
             Justification = dto.Justification,
             Status = ProcurementStatus.SubmittedByDepartment,
+            Type = dto.IsReplenishment ? RequestType.Replenishment : RequestType.DepartmentSupply,
             Items = BuildLines(dto)
         };
         _db.ProcurementRequests.Add(request);
@@ -153,7 +156,7 @@ public class ProcurementService : IProcurementService
         if (request is null) return null;
 
         if (!IsEditable(request.Status))
-            throw new InvalidOperationException("This request has already been approved by Inventory and can no longer be edited.");
+            throw new InvalidOperationException(LockedMessage(request, "edited"));
 
         await ValidateRequestAsync(dto, departmentId);
 
@@ -170,10 +173,10 @@ public class ProcurementService : IProcurementService
         await _audit.LogAsync(userId, "ProcurementEdited", "ProcurementRequest", request.Id, request.RequestNumber);
 
         if (request.Status == ProcurementStatus.SubmittedToProcurement)
-            await _notifications.CreateForRoleAsync(UserRole.InventoryOfficer,
+            await _notifications.CreateForRoleAsync(ReviewerRole(request),
                 NotificationType.ProcurementSubmitted,
-                "Department Request Updated",
-                $"Request {request.RequestNumber} was edited by the department before review.",
+                "Request Updated",
+                $"Request {request.RequestNumber} was edited before review.",
                 request.Id, "ProcurementRequest");
 
         return _mapper.Map<ProcurementRequestDto>(await BaseQuery().FirstAsync(r => r.Id == id));
@@ -185,7 +188,7 @@ public class ProcurementService : IProcurementService
         if (request is null) return null;
 
         if (!IsEditable(request.Status))
-            throw new InvalidOperationException("This request has already been approved by Inventory and can no longer be cancelled.");
+            throw new InvalidOperationException(LockedMessage(request, "cancelled"));
 
         var wasInReview = request.Status == ProcurementStatus.SubmittedToProcurement;
         request.Status = ProcurementStatus.Cancelled;
@@ -196,14 +199,25 @@ public class ProcurementService : IProcurementService
             string.IsNullOrWhiteSpace(reason) ? request.RequestNumber : $"{request.RequestNumber}: {reason.Trim()}");
 
         if (wasInReview)
-            await _notifications.CreateForRoleAsync(UserRole.InventoryOfficer,
+            await _notifications.CreateForRoleAsync(ReviewerRole(request),
                 NotificationType.General,
-                "Department Request Cancelled",
-                $"Request {request.RequestNumber} was cancelled by {request.Department.Name}.",
+                "Request Cancelled",
+                $"Request {request.RequestNumber} ({request.Department.Name}) was cancelled.",
                 request.Id, "ProcurementRequest");
 
         return _mapper.Map<ProcurementRequestDto>(request);
     }
+
+    // Who acts on a freshly submitted request: Inventory checks stock for a
+    // department request; the Administrator (Chief of Hospital) approves a
+    // replenishment Purchase Request.
+    private static UserRole ReviewerRole(ProcurementRequest r) =>
+        r.Type == RequestType.Replenishment ? UserRole.HospitalAdministrator : UserRole.InventoryOfficer;
+
+    private static string LockedMessage(ProcurementRequest r, string verb) =>
+        r.Type == RequestType.Replenishment
+            ? $"This Purchase Request has already been approved and can no longer be {verb}."
+            : $"This request has already been approved by Inventory and can no longer be {verb}.";
 
     public async Task<ProcurementRequestDto?> SubmitAsync(int id, string userId)
     {
@@ -219,11 +233,19 @@ public class ProcurementService : IProcurementService
 
         // Department requests go to Inventory first: it checks stock and
         // allocates. Procurement only hears about it if stock runs short.
-        await _notifications.CreateForRoleAsync(UserRole.InventoryOfficer,
-            NotificationType.ProcurementSubmitted,
-            "Department Request Needs Inventory Review",
-            $"Department request {request.RequestNumber} has been submitted. Please check stock and allocate quantities.",
-            request.Id, "ProcurementRequest");
+        // Replenishment PRs go straight to the Chief for approval.
+        if (request.Type == RequestType.Replenishment)
+            await _notifications.CreateForRoleAsync(UserRole.HospitalAdministrator,
+                NotificationType.ProcurementSubmitted,
+                "Purchase Request for Approval",
+                $"Replenishment Purchase Request {request.RequestNumber} ({request.Items.Count} item(s)) needs your approval.",
+                request.Id, "ProcurementRequest");
+        else
+            await _notifications.CreateForRoleAsync(UserRole.InventoryOfficer,
+                NotificationType.ProcurementSubmitted,
+                "Department Request Needs Inventory Review",
+                $"Department request {request.RequestNumber} has been submitted. Please check stock and allocate quantities.",
+                request.Id, "ProcurementRequest");
 
         await _audit.LogAsync(userId, "ProcurementSubmitted", "ProcurementRequest", request.Id, request.RequestNumber);
 
@@ -257,6 +279,9 @@ public class ProcurementService : IProcurementService
             throw new InvalidOperationException("Remarks are required when rejecting or returning a request.");
 
         var isAdmin = approver.Role is UserRole.HospitalAdministrator or UserRole.SuperAdmin;
+
+        if (request.Type == RequestType.Replenishment)
+            return await ProcessReplenishmentApprovalAsync(request, action, dto.Remarks, approver);
 
         // Department requests follow PPH's chain: Inventory checks stock and
         // allocates → Administrator gives final approval → the system releases.
@@ -324,6 +349,56 @@ public class ProcurementService : IProcurementService
         return _mapper.Map<ProcurementRequestDto>(await BaseQuery().FirstAsync(r => r.Id == id));
     }
 
+    // Replenishment Purchase Request: one approval, by the Administrator as
+    // Chief of Hospital. Approved PRs are handed to Procurement to raise the
+    // purchase order; there is no allocation and nothing is released to a ward.
+    private async Task<ProcurementRequestDto> ProcessReplenishmentApprovalAsync(
+        ProcurementRequest request, ApprovalAction action, string? remarks, ApplicationUser approver)
+    {
+        if (approver.Role is not (UserRole.HospitalAdministrator or UserRole.SuperAdmin))
+            throw new InvalidOperationException("Purchase Requests are approved by the Hospital Administrator (Chief of Hospital).");
+        if (request.Status is not (ProcurementStatus.SubmittedToProcurement or ProcurementStatus.ApprovedByProcurement))
+            throw new InvalidOperationException($"This Purchase Request is {request.Status} and can no longer be reviewed.");
+
+        request.Approvals.Add(new ProcurementApproval
+        {
+            ProcurementRequestId = request.Id,
+            ApproverUserId = approver.Id,
+            ApproverRole = approver.Role,
+            Action = action,
+            ApprovalLevel = request.Approvals.Count + 1,
+            Remarks = remarks
+        });
+        request.Status = action switch
+        {
+            ApprovalAction.Approved => ProcurementStatus.FullyApproved,
+            ApprovalAction.Rejected => ProcurementStatus.Rejected,
+            _ => ProcurementStatus.ReturnedForRevision
+        };
+        request.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+
+        var notifType = action switch
+        {
+            ApprovalAction.Approved => NotificationType.ProcurementApproved,
+            ApprovalAction.Rejected => NotificationType.ProcurementRejected,
+            _ => NotificationType.ProcurementReturnedForRevision
+        };
+        await _notifications.CreateAsync(request.RequestedByUserId, notifType,
+            $"Purchase Request {action}",
+            $"Purchase Request {request.RequestNumber} was {action} by {approver.FirstName} {approver.LastName}." +
+            (action == ApprovalAction.Approved ? " Proceed with the purchase order." : ""),
+            request.Id, "ProcurementRequest");
+        if (action == ApprovalAction.Approved)
+            await _notifications.CreateForRoleAsync(UserRole.ProcurementStaff, NotificationType.ProcurementApproved,
+                "Purchase Request Approved",
+                $"Purchase Request {request.RequestNumber} is approved — generate its purchase order.",
+                request.Id, "ProcurementRequest");
+
+        await _audit.LogAsync(approver.Id, $"Procurement{action}", "ProcurementRequest", request.Id, remarks);
+        return _mapper.Map<ProcurementRequestDto>(await BaseQuery().FirstAsync(r => r.Id == request.Id));
+    }
+
     // Sets each line's approved quantity from the Inventory Officer's
     // allocation. Lines not mentioned keep an allocation saved earlier from the
     // allocation board, or default to the full requested quantity.
@@ -359,6 +434,8 @@ public class ProcurementService : IProcurementService
         if (request is null) return null;
         if (request.Status != ProcurementStatus.FullyApproved)
             throw new InvalidOperationException("Only fully approved requests that have not been released can be released.");
+        if (request.Type == RequestType.Replenishment)
+            throw new InvalidOperationException("Purchase Requests restock the storeroom; there is nothing to release to a department.");
 
         var shortages = await TryReleaseAsync(request, userId, notifyOnShortage: false);
         if (shortages.Count > 0)
@@ -461,13 +538,15 @@ public class ProcurementService : IProcurementService
         var pending = await _db.ProcurementRequestItems
             .Include(i => i.ProcurementRequest).ThenInclude(r => r.Department)
             .Include(i => i.InventoryItem).ThenInclude(ii => ii.Category)
-            .Where(i => awaiting.Contains(i.ProcurementRequest.Status))
+            .Where(i => awaiting.Contains(i.ProcurementRequest.Status)
+                        && i.ProcurementRequest.Type == RequestType.DepartmentSupply)
             .AsNoTracking()
             .ToListAsync();
 
         var itemIds = pending.Select(p => p.InventoryItemId).Distinct().ToList();
         var reserved = await _db.ProcurementRequestItems
-            .Where(i => itemIds.Contains(i.InventoryItemId) && reserving.Contains(i.ProcurementRequest.Status))
+            .Where(i => itemIds.Contains(i.InventoryItemId) && reserving.Contains(i.ProcurementRequest.Status)
+                        && i.ProcurementRequest.Type == RequestType.DepartmentSupply)
             .GroupBy(i => i.InventoryItemId)
             .Select(g => new { g.Key, Qty = g.Sum(i => i.QuantityApproved ?? i.QuantityRequested) })
             .ToDictionaryAsync(x => x.Key, x => x.Qty);
@@ -558,7 +637,8 @@ public class ProcurementService : IProcurementService
         foreach (var input in dto.Lines)
         {
             var line = lines.First(l => l.Id == input.ProcurementRequestItemId);
-            if (!AwaitingInventoryStatuses.Contains(line.ProcurementRequest.Status))
+            if (!AwaitingInventoryStatuses.Contains(line.ProcurementRequest.Status)
+                || line.ProcurementRequest.Type != RequestType.DepartmentSupply)
                 throw new InvalidOperationException(
                     $"{line.ProcurementRequest.RequestNumber} is no longer awaiting inventory review.");
             if (input.QuantityApproved > line.QuantityRequested)
@@ -784,7 +864,8 @@ public class ProcurementService : IProcurementService
         if (fullyDelivered)
         {
             var request = await BaseQuery().FirstOrDefaultAsync(r => r.Id == po.ProcurementRequestId);
-            if (request is not null && request.Items.Any(i => i.QuantityApproved != null))
+            if (request is not null && request.Type == RequestType.DepartmentSupply
+                && request.Items.Any(i => i.QuantityApproved != null))
                 await TryReleaseAsync(request, userId, notifyOnShortage: false);
         }
 

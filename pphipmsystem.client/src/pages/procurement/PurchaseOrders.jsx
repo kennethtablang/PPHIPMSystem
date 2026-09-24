@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import { MdAdd, MdVisibility, MdLocalShipping, MdPrint, MdCheckCircle, MdAssignment, MdPendingActions, MdQrCode2 } from 'react-icons/md';
 import { getPurchaseOrders, getPurchaseOrder, generatePO, confirmDelivery, getRequests } from '../../api/procurement';
@@ -25,6 +26,8 @@ function StatCard({ label, value, icon: Icon, color, onClick }) {
 
 export default function PurchaseOrders() {
   const { user } = useAuth();
+  const location = useLocation();
+  const navigate = useNavigate();
   const canGenerate = ['SuperAdmin', 'HospitalAdministrator', 'ProcurementStaff'].includes(user?.role);
   // Procurement receives deliveries: actual quantity, lot/batch no., expiry.
   const canDeliver = ['SuperAdmin', 'ProcurementStaff'].includes(user?.role);
@@ -53,27 +56,39 @@ export default function PurchaseOrders() {
     getPurchaseOrders().then(r => setOrders(r.data)).finally(() => setLoading(false));
   };
 
-  useEffect(() => {
-    load();
-    getRequests({ status: 'FullyApproved' }).then(r => setApprovedReqs(r.data));
-  }, []);
-
-  const openView = async id => {
-    const { data } = await getPurchaseOrder(id);
-    setViewModal(data);
-  };
-
-  const onRequestSelect = e => {
-    const reqId = e.target.value;
-    const req = approvedReqs.find(r => r.id == reqId);
+  const onRequestSelect = e => selectRequest(e.target.value, approvedReqs);
+  const selectRequest = (reqId, list) => {
+    const req = list.find(r => r.id == reqId);
     setGenForm(p => ({
       ...p, requestId: reqId,
-      itemCosts: (req?.items ?? []).map(i => ({ procurementRequestItemId: i.id, itemName: i.itemName, unit: i.unit, quantityRequested: i.quantityRequested, unitCost: '' }))
+      // The PR's estimated unit costs are the starting point for the PO.
+      itemCosts: (req?.items ?? []).map(i => ({ procurementRequestItemId: i.id, itemName: i.itemName, unit: i.unit, quantityRequested: i.quantityRequested, unitCost: i.estimatedUnitCost ?? '' }))
     }));
     // Show what the department has left before any costs are typed in, so an
     // over-budget order is obvious here rather than at submit time.
     setBudget(null);
     if (reqId) checkRequestBudget(reqId).then(r => setBudget(r.data)).catch(() => {});
+  };
+
+  useEffect(() => {
+    load();
+    getRequests({ status: 'FullyApproved' }).then(r => {
+      setApprovedReqs(r.data);
+      // "Create PO" from an approved Purchase Request lands here with the
+      // request picked and its estimated costs filled in.
+      const target = location.state?.generateFor;
+      if (target && canGenerate && r.data.some(x => x.id === target)) {
+        selectRequest(String(target), r.data);
+        setGenModal(true);
+      }
+      if (target) navigate(location.pathname, { replace: true, state: null });
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- load once
+  }, []);
+
+  const openView = async id => {
+    const { data } = await getPurchaseOrder(id);
+    setViewModal(data);
   };
 
   // Live PO total from the entered unit costs, weighed against the department's
@@ -300,7 +315,11 @@ export default function PurchaseOrders() {
             <label className="form-label">Approved Request *</label>
             <select className="form-control" value={genForm.requestId} onChange={onRequestSelect} required>
               <option value="">Select request</option>
-              {approvedReqs.map(r => <option key={r.id} value={r.id}>{r.requestNumber} — {r.departmentName}</option>)}
+              {approvedReqs.map(r => (
+                <option key={r.id} value={r.id}>
+                  {r.requestNumber} — {r.type === 'Replenishment' ? 'Replenishment PR' : `${r.departmentName} (short stock)`}
+                </option>
+              ))}
             </select>
           </div>
           {budget && (

@@ -14,6 +14,7 @@ public class ProcurementRequestDto
     public string Justification { get; set; } = string.Empty;
     public ProcurementStatus Status { get; set; }
     public string StatusName => Status.ToString();
+    public RequestType Type { get; set; }
     public DateTime RequestedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
     public DateTime? ReleasedAt { get; set; }

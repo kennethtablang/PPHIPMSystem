@@ -12,6 +12,10 @@ public class CreateProcurementRequestDto
     [MaxLength(150)]
     public string? RequestedByName { get; set; }
 
+    // Replenishment Purchase Request (Procurement restocking the storeroom)
+    // rather than a department supply request. Ignored on edit.
+    public bool IsReplenishment { get; set; }
+
     [Required, MaxLength(1000)]
     public string Justification { get; set; } = string.Empty;
 

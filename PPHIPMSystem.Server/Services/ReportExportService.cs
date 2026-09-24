@@ -401,7 +401,7 @@ public class ReportExportService : IReportExportService
 
         using var wb = new XLWorkbook();
         var ws = wb.AddWorksheet("RIS");
-        var row = WriteDocumentHeader(ws, org, "REQUISITION AND ISSUE SLIP (RIS)", lastCol: 6);
+        var row = WriteDocumentHeader(ws, org, "REQUISITION AND ISSUE SLIP (RIS)", lastCol: 7);
 
         row = WriteKeyValueBlock(ws, row, "Details", new (string, object)[]
         {
@@ -411,16 +411,26 @@ public class ReportExportService : IReportExportService
             ("Fund Cluster", "____________"),
         });
 
+        // Issue side of the slip. Once the system has released the request the
+        // issued quantities are known; before that "Stock Available" reflects
+        // the storeroom right now and the issued column is left for ink.
+        var released = request.Status == Models.Enums.ProcurementStatus.Released;
         row = WriteTable(ws, row, "Requisition",
-            ["Stock No.", "Unit", "Description", "Quantity Requested", "Quantity Issued", "Remarks"],
+            ["Stock No.", "Unit", "Description", "Quantity Requested", "Stock Available", "Quantity Issued", "Remarks"],
             request.Items.Select(i => new object[]
             {
                 i.InventoryItem.ItemCode ?? "—",
                 i.InventoryItem.Unit,
                 i.InventoryItem.Name,
                 i.QuantityRequested,
-                "", // completed by the issuing officer on the printed copy
-                i.Remarks ?? "",
+                released || i.InventoryItem.QuantityOnHand >= (i.QuantityApproved ?? i.QuantityRequested) ? "Yes" : "No",
+                i.QuantityReleased is decimal q ? q : "",
+                // An allocation below the request is explained on the slip.
+                string.Join("; ", new[]
+                {
+                    i.QuantityApproved is decimal a && a < i.QuantityRequested ? $"Allocated {a:0.##} (limited stock)" : null,
+                    i.Remarks,
+                }.Where(x => !string.IsNullOrWhiteSpace(x))),
             }));
 
         ws.Cell(row, 1).Value = $"Purpose: {request.Justification}";
@@ -498,12 +508,20 @@ public class ReportExportService : IReportExportService
             .Where(a => a.Action == Models.Enums.ApprovalAction.Approved)
             .OrderByDescending(a => a.ApprovalLevel)
             .FirstOrDefault();
+        var inventoryApprover = request.Approvals
+            .Where(a => a.Action == Models.Enums.ApprovalAction.Approved && a.ApproverRole == Models.Enums.UserRole.InventoryOfficer)
+            .OrderByDescending(a => a.ApprovalLevel)
+            .FirstOrDefault();
 
         foreach (var role in roles)
         {
             var name = role switch
             {
-                "Requested by" => $"{request.RequestedByUser.FirstName} {request.RequestedByUser.LastName}",
+                // The typed name wins: on a shared department PC the account
+                // is the ward's, not the person who needed the supplies.
+                "Requested by" => request.RequestedByName ?? $"{request.RequestedByUser.FirstName} {request.RequestedByUser.LastName}",
+                "Issued by" when request.Status == Models.Enums.ProcurementStatus.Released && inventoryApprover is not null =>
+                    $"{inventoryApprover.ApproverUser.FirstName} {inventoryApprover.ApproverUser.LastName}",
                 "Approved by" when finalApprover is not null =>
                     $"{finalApprover.ApproverUser.FirstName} {finalApprover.ApproverUser.LastName}",
                 // The department head signs for the goods on the RIS. Printed

@@ -27,6 +27,10 @@ public class ProcurementRequest
 
     public ProcurementStatus Status { get; set; } = ProcurementStatus.Draft;
 
+    // Existing rows default to DepartmentSupply (0) — every request before
+    // replenishment PRs existed was a department request.
+    public RequestType Type { get; set; } = RequestType.DepartmentSupply;
+
     public DateTime RequestedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? ReleasedAt { get; set; }

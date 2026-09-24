@@ -15,11 +15,16 @@ import { useAuth } from '../../context/AuthContext';
 //
 // `request` given → edit mode (same form, pre-filled). `showCost` adds an
 // estimated unit cost column for staff filing on a department's behalf.
-export default function RequestFormModal({ request = null, prefill = null, showCost = false, onClose, onSaved }) {
+// `replenishment` switches to the Supply Officer's Purchase Request for
+// restocking the storeroom: low-stock items are one tap away and come
+// pre-filled with a suggested reorder quantity.
+export default function RequestFormModal({ request = null, prefill = null, showCost = false, replenishment = false, onClose, onSaved }) {
   const { user } = useAuth();
   const isAdmin = ['SuperAdmin', 'HospitalAdministrator'].includes(user?.role);
   const isSharedPc = user?.role === 'DepartmentStaff';
   const editing = !!request;
+  const isPr = replenishment || request?.type === 'Replenishment';
+  const canPickDept = isAdmin || (isPr && user?.role === 'ProcurementStaff');
 
   const [items, setItems] = useState([]);
   const [departments, setDepartments] = useState([]);
@@ -41,6 +46,7 @@ export default function RequestFormModal({ request = null, prefill = null, showC
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('');
   const [collapsed, setCollapsed] = useState({});
+  const LOW = '__low';
 
   useEffect(() => {
     Promise.all([getItems(), getDepartments()])
@@ -55,6 +61,10 @@ export default function RequestFormModal({ request = null, prefill = null, showC
   const itemMap = useMemo(() => Object.fromEntries(items.map(i => [String(i.id), i])), [items]);
   const picked = useMemo(() => new Set(lines.map(l => l.inventoryItemId)), [lines]);
 
+  const lowCount = useMemo(() => items.filter(i => i.isBelowReorder).length, [items]);
+  // Restock to roughly twice the reorder threshold (same rule as the Items page).
+  const suggestedQty = item => Math.max(Math.ceil(item.reorderThreshold * 2 - item.quantityOnHand), 1);
+
   const categories = useMemo(() => {
     const counts = {};
     items.forEach(i => { counts[i.categoryName || 'Uncategorized'] = (counts[i.categoryName || 'Uncategorized'] ?? 0) + 1; });
@@ -66,7 +76,7 @@ export default function RequestFormModal({ request = null, prefill = null, showC
     const q = query.trim().toLowerCase();
     const map = {};
     items
-      .filter(i => !category || (i.categoryName || 'Uncategorized') === category)
+      .filter(i => !category || (category === LOW ? i.isBelowReorder : (i.categoryName || 'Uncategorized') === category))
       .filter(i => !q || `${i.name} ${i.itemCode ?? ''} ${i.description ?? ''} ${i.categoryName ?? ''}`.toLowerCase().includes(q))
       .forEach(i => { (map[i.categoryName || 'Uncategorized'] ??= []).push(i); });
     return Object.entries(map)
@@ -79,7 +89,12 @@ export default function RequestFormModal({ request = null, prefill = null, showC
     const id = String(item.id);
     setLines(p => p.some(l => l.inventoryItemId === id)
       ? p.filter(l => l.inventoryItemId !== id)
-      : [...p, { inventoryItemId: id, quantityRequested: '', estimatedUnitCost: '', remarks: '' }]);
+      : [...p, {
+        inventoryItemId: id,
+        quantityRequested: isPr && item.isBelowReorder ? String(suggestedQty(item)) : '',
+        estimatedUnitCost: '',
+        remarks: '',
+      }]);
   };
   const setLine = (idx, k) => e => setLines(p => p.map((l, j) => (j === idx ? { ...l, [k]: e.target.value } : l)));
   const removeLine = idx => setLines(p => p.filter((_, j) => j !== idx));
@@ -94,6 +109,7 @@ export default function RequestFormModal({ request = null, prefill = null, showC
     const payload = {
       departmentId: +departmentId,
       requestedByName: requestedByName.trim() || null,
+      isReplenishment: isPr,
       justification: purpose.trim(),
       items: lines.map(l => ({
         inventoryItemId: +l.inventoryItemId,
@@ -107,7 +123,9 @@ export default function RequestFormModal({ request = null, prefill = null, showC
     try {
       const res = editing ? await updateRequest(request.id, payload) : await createRequest(payload);
       if (submit) await submitRequest(res.data.id);
-      toast.success(editing ? 'Request updated.' : submit ? 'Request submitted for inventory review.' : 'Request saved as draft.');
+      toast.success(editing ? 'Request updated.'
+        : submit ? (isPr ? 'Purchase Request sent to the Chief for approval.' : 'Request submitted for inventory review.')
+        : 'Request saved as draft.');
       onSaved?.(res.data);
     } catch (e) {
       toast.error(e.response?.data?.message ?? 'Failed to save request.');
@@ -121,7 +139,9 @@ export default function RequestFormModal({ request = null, prefill = null, showC
 
   return (
     <Modal
-      title={editing ? `Edit Request: ${request.requestNumber}` : 'Requisition and Issue Slip — New Request'}
+      title={editing
+        ? `Edit ${isPr ? 'Purchase Request' : 'Request'}: ${request.requestNumber}`
+        : isPr ? 'Purchase Request — Storeroom Replenishment' : 'Requisition and Issue Slip — New Request'}
       onClose={onClose}
       size="modal-xl"
       footer={
@@ -145,8 +165,8 @@ export default function RequestFormModal({ request = null, prefill = null, showC
       {/* RIS header */}
       <div className="rf-head">
         <div className="form-group">
-          <label className="form-label">Requesting Department *</label>
-          {isAdmin ? (
+          <label className="form-label">{isPr ? 'Office / Section *' : 'Requesting Department *'}</label>
+          {canPickDept ? (
             <select className="form-control" value={departmentId} onChange={e => setDepartmentId(e.target.value)}>
               <option value="">Select department…</option>
               {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
@@ -166,13 +186,13 @@ export default function RequestFormModal({ request = null, prefill = null, showC
           />
         </div>
         <div className="form-group">
-          <label className="form-label">RIS No. / Date</label>
+          <label className="form-label">{isPr ? 'PR No. / Date' : 'RIS No. / Date'}</label>
           <div className="form-control rf-readonly">{request?.requestNumber ?? 'Assigned on save'} · {today}</div>
         </div>
       </div>
       <div className="form-group" style={{ marginTop: 12 }}>
         <label className="form-label">Purpose *</label>
-        <textarea className="form-control" rows={2} value={purpose} onChange={e => setPurpose(e.target.value)} placeholder="What are these supplies for?" maxLength={1000} />
+        <textarea className="form-control" rows={2} value={purpose} onChange={e => setPurpose(e.target.value)} placeholder={isPr ? 'e.g. Replenishment of items at or below reorder level' : 'What are these supplies for?'} maxLength={1000} />
       </div>
 
       <div className="rf-body">
@@ -185,6 +205,11 @@ export default function RequestFormModal({ request = null, prefill = null, showC
           </div>
           <div className="rf-chips">
             <button className={`rf-chip ${category === '' ? 'on' : ''}`} onClick={() => setCategory('')}>All <span>{items.length}</span></button>
+            {isPr && lowCount > 0 && (
+              <button className={`rf-chip rf-chip-low ${category === LOW ? 'on' : ''}`} onClick={() => setCategory(category === LOW ? '' : LOW)} title="Items at or below their reorder level">
+                Low stock <span>{lowCount}</span>
+              </button>
+            )}
             {categories.map(([name, n]) => (
               <button key={name} className={`rf-chip ${category === name ? 'on' : ''}`} onClick={() => setCategory(category === name ? '' : name)}>
                 {name} <span>{n}</span>
@@ -238,10 +263,12 @@ export default function RequestFormModal({ request = null, prefill = null, showC
                 <thead>
                   <tr>
                     <th>Description</th>
-                    <th style={{ width: 84 }}>Qty</th>
-                    {showCost && <th style={{ width: 100 }}>Est. Unit Cost</th>}
-                    <th>Stock Avail.</th>
-                    <th style={{ width: 130 }}>Remarks</th>
+                    <th>Qty</th>
+                    {showCost && <th>Est. Unit Cost</th>}
+                    {/* A PR restocks empty shelves, so "available?" is moot there;
+                        on-hand is shown under the description instead. */}
+                    {!isPr && <th>Stock Avail.</th>}
+                    <th>Remarks</th>
                     <th />
                   </tr>
                 </thead>
@@ -257,24 +284,29 @@ export default function RequestFormModal({ request = null, prefill = null, showC
                           <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                             {it?.itemCode && <span style={{ fontFamily: 'monospace' }}>{it.itemCode} · </span>}{it?.unit}
                           </div>
+                          {isPr && it && (
+                            <div style={{ fontSize: 11, color: it.isBelowReorder ? 'var(--amber-600)' : 'var(--text-muted)' }}>
+                              {it.quantityOnHand} on hand · reorder at {it.reorderThreshold}
+                            </div>
+                          )}
                         </td>
                         <td>
-                          <input className="form-control" type="number" min="1" step="1" value={l.quantityRequested} onChange={setLine(idx, 'quantityRequested')} placeholder="0" style={{ padding: '6px 8px' }} />
+                          <input className="form-control" type="number" min="1" step="1" value={l.quantityRequested} onChange={setLine(idx, 'quantityRequested')} placeholder="0" style={{ padding: '6px 8px', minWidth: 72 }} />
                         </td>
                         {showCost && (
                           <td>
-                            <input className="form-control" type="number" min="0" step="0.01" value={l.estimatedUnitCost} onChange={setLine(idx, 'estimatedUnitCost')} placeholder="0.00" style={{ padding: '6px 8px' }} />
+                            <input className="form-control" type="number" min="0" step="0.01" value={l.estimatedUnitCost} onChange={setLine(idx, 'estimatedUnitCost')} placeholder="0.00" style={{ padding: '6px 8px', minWidth: 88 }} />
                           </td>
                         )}
-                        <td>
+                        {!isPr && <td>
                           {it && (
                             <span className={`badge ${enough ? 'badge-green' : 'badge-amber'}`} title={`${it.quantityOnHand} ${it.unit} on hand`}>
                               {enough ? 'Yes' : it.quantityOnHand > 0 ? `Only ${it.quantityOnHand}` : 'No'}
                             </span>
                           )}
-                        </td>
+                        </td>}
                         <td>
-                          <input className="form-control" value={l.remarks} onChange={setLine(idx, 'remarks')} placeholder="Optional" maxLength={300} style={{ padding: '6px 8px' }} />
+                          <input className="form-control" value={l.remarks} onChange={setLine(idx, 'remarks')} placeholder="Optional" maxLength={300} style={{ padding: '6px 8px', minWidth: 90 }} />
                         </td>
                         <td>
                           <button className="btn btn-danger btn-icon btn-sm" onClick={() => removeLine(idx)} aria-label="Remove item">×</button>
@@ -304,6 +336,8 @@ const CSS = `
 .rf-chip { border: 1px solid var(--border); background: transparent; color: var(--text-secondary); border-radius: 99px; padding: 4px 10px; font: inherit; font-size: 11px; font-weight: 600; cursor: pointer; }
 .rf-chip span { opacity: .6; margin-left: 2px; }
 .rf-chip.on { background: var(--green-600); border-color: var(--green-600); color: #fff; }
+.rf-chip-low { border-color: var(--amber-500); color: var(--amber-600); }
+.rf-chip-low.on { background: var(--amber-500); border-color: var(--amber-500); color: #fff; }
 .rf-list { max-height: 360px; overflow-y: auto; margin: 0 -4px; padding: 0 4px; }
 .rf-group { width: 100%; display: flex; align-items: center; gap: 4px; border: 0; background: none; color: var(--text-accent); font: inherit; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; padding: 8px 2px 4px; cursor: pointer; position: sticky; top: 0; backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
 .rf-group span { color: var(--text-muted); font-weight: 600; }

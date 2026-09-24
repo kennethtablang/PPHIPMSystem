@@ -62,7 +62,8 @@ function AlertRow({ label, sub, color, onClick, action }) {
 }
 
 const REPEATABLE = ['Receipt', 'Issuance'];
-const CAN_CREATE_PR = ['SuperAdmin', 'HospitalAdministrator', 'DepartmentHead'];
+// Low-stock "Create PR" raises a replenishment Purchase Request (Supply Officer).
+const CAN_CREATE_PR = ['SuperAdmin', 'HospitalAdministrator', 'ProcurementStaff'];
 
 export default function Dashboard() {
   const { user } = useAuth();

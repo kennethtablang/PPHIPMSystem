@@ -26,15 +26,36 @@ const NOTE = {
   Delivered: { tone: 'blue', text: 'Delivered against its purchase order.' },
 };
 
-export function RequestProgress({ status }) {
-  const current = STEP_OF[status];
-  const note = NOTE[status];
+// Replenishment Purchase Request: Supply Officer drafts → Chief of Hospital
+// approves → Procurement raises the PO → delivery lands in central stock.
+const PR_STEPS = ['Draft', 'Chief Approval', 'Purchase Order', 'Delivered'];
+const PR_STEP_OF = {
+  SubmittedByDepartment: 0,
+  ReturnedForRevision: 0,
+  SubmittedToProcurement: 1,
+  ApprovedByProcurement: 1,
+  FullyApproved: 2,
+  PurchaseOrderGenerated: 3,
+  Delivered: 4,
+};
+const PR_NOTE = {
+  ...NOTE,
+  FullyApproved: { tone: 'blue', text: 'Approved by the Chief — Procurement can now generate the purchase order.' },
+  PurchaseOrderGenerated: { tone: 'blue', text: 'Purchase order raised; waiting on the supplier delivery.' },
+  Delivered: { tone: 'blue', text: 'Delivered and added to central stock.' },
+};
+
+export function RequestProgress({ status, type }) {
+  const isPr = type === 'Replenishment';
+  const steps = isPr ? PR_STEPS : STEPS;
+  const current = (isPr ? PR_STEP_OF : STEP_OF)[status];
+  const note = (isPr ? PR_NOTE : NOTE)[status];
   return (
     <div style={{ margin: '12px 0' }}>
       <style>{CSS}</style>
       {current !== undefined && (
         <div className="rp">
-          {STEPS.map((label, i) => {
+          {steps.map((label, i) => {
             const state = i < current ? 'done' : i === current ? 'now' : '';
             return (
               <div key={label} className={`rp-step ${state}`}>

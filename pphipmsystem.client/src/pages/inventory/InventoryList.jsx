@@ -21,8 +21,9 @@ export default function InventoryList() {
   const canEdit = ['SuperAdmin', 'HospitalAdministrator', 'InventoryOfficer'].includes(user?.role);
   // Matches the ReportsController role guard.
   const canExport = ['SuperAdmin', 'HospitalAdministrator', 'ProcurementStaff', 'InventoryOfficer'].includes(user?.role);
-  // Roles allowed to create procurement requests (matches ProcurementList.canCreate).
-  const canRequest = ['SuperAdmin', 'HospitalAdministrator', 'DepartmentHead'].includes(user?.role);
+  // Low-stock reorders become replenishment Purchase Requests, which the
+  // Supply Officer (Procurement) raises — matches ProcurementList.canManagePr.
+  const canRequest = ['SuperAdmin', 'HospitalAdministrator', 'ProcurementStaff'].includes(user?.role);
 
   // Restock to roughly twice the reorder threshold — editable in the request form.
   const suggestedQty = item => Math.max(Math.ceil(item.reorderThreshold * 2 - item.quantityOnHand), 1);
@@ -218,9 +219,9 @@ export default function InventoryList() {
           <button
             className="btn btn-primary btn-sm"
             onClick={() => navigate('/procurement', { state: reorderPrefill(items) })}
-            title="Create one procurement request covering every low-stock item shown"
+            title="Create one Purchase Request covering every low-stock item shown"
           >
-            <MdShoppingCart size={14} /> Request Replenishment ({items.length})
+            <MdShoppingCart size={14} /> Create PR for All ({items.length})
           </button>
         )}
       </div>
@@ -233,9 +234,9 @@ export default function InventoryList() {
             <button
               className="btn btn-primary btn-sm"
               onClick={() => navigate('/procurement', { state: reorderPrefill(selectedItems) })}
-              title="Create one procurement request covering every ticked item"
+              title="Create one Purchase Request covering every ticked item"
             >
-              <MdShoppingCart size={14} /> Reorder Selected
+              <MdShoppingCart size={14} /> Create PR for Selected
             </button>
           )}
           {canEdit && (
@@ -345,7 +346,7 @@ export default function InventoryList() {
                           <button
                             className="btn btn-secondary btn-sm"
                             onClick={() => navigate('/procurement', { state: reorderPrefill([item]) })}
-                            title="Create a replenishment request for this item"
+                            title="Create a replenishment Purchase Request for this item"
                             style={{ fontSize: 11 }}
                           >
                             <MdShoppingCart size={13} /> Reorder

@@ -33,61 +33,46 @@ function StatCard({ label, value, icon: Icon, color, sub, onClick }) {
   );
 }
 
+// Compact version of RequestProgress for table rows: the department's view of
+// the cycle is Draft → Inventory Review → Admin Approval → Released.
 const STATUS_STEP = {
-  Draft:                        0,
-  SubmittedByDepartment:        1,
-  SubmittedToProcurement:       2,
-  ApprovedByInventoryOfficer:   3,
-  ApprovedByProcurement:        4,
-  FullyApproved:                5,
-  PurchaseOrderGenerated:       6,
-  Delivered:                    7,
-  Cancelled:                    -1,
-  Rejected:                     -1,
-  ReturnedForRevision:          -1,
+  SubmittedByDepartment:      0,
+  SubmittedToProcurement:     1,
+  ApprovedByProcurement:      1,
+  ApprovedByInventoryOfficer: 2,
+  FullyApproved:              3,
+  PurchaseOrderGenerated:     3,
+  Delivered:                  3,
+  Released:                   4,
 };
-
-const STEPS_LABELS = [
-  'Draft', 'Submitted', 'In Procurement', 'Inventory Approved',
-  'Procurement Approved', 'Fully Approved', 'PO Generated', 'Delivered',
-];
+const STEPS_LABELS = ['Draft', 'Inventory Review', 'Admin Approval', 'Released'];
 
 function RequestTimeline({ status }) {
-  const step = STATUS_STEP[status] ?? 0;
-  const isCancelled = status === 'Cancelled' || status === 'Rejected';
-  const isReturned = status === 'ReturnedForRevision';
-
-  if (isCancelled || isReturned) {
+  if (status === 'Cancelled' || status === 'Rejected' || status === 'ReturnedForRevision') {
+    const cancelled = status !== 'ReturnedForRevision';
     return (
-      <span
-        className={`badge ${isCancelled ? 'badge-red' : 'badge-amber'}`}
-        style={{ fontSize: 11 }}
-      >
-        {isCancelled ? '✗ Cancelled / Rejected' : '↩ Returned for Revision'}
+      <span className={`badge ${cancelled ? 'badge-red' : 'badge-amber'}`} style={{ fontSize: 11 }}>
+        {cancelled ? `✗ ${status}` : '↩ Returned for Revision'}
       </span>
     );
   }
-
+  const step = STATUS_STEP[status] ?? 0;
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }} title={step === 3 ? 'Approved — waiting for stock' : STEPS_LABELS[Math.min(step, 3)]}>
       {STEPS_LABELS.map((label, i) => (
-        <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+        <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <div style={{
             width: 20, height: 20, borderRadius: '50%', flexShrink: 0,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontSize: 9, fontWeight: 700,
-            background: i <= step ? 'var(--green-600)' : 'var(--border)',
-            color: i <= step ? '#fff' : 'var(--text-muted)',
-            transition: 'all .2s ease',
+            background: i < step ? 'var(--green-600)' : 'var(--border)',
+            color: i < step ? '#fff' : 'var(--text-muted)',
+            boxShadow: i === step ? '0 0 0 2px var(--green-500)' : 'none',
           }}>
             {i < step ? '✓' : i + 1}
           </div>
           {i < STEPS_LABELS.length - 1 && (
-            <div style={{
-              height: 2, width: 16,
-              background: i < step ? 'var(--green-400)' : 'var(--border)',
-              borderRadius: 1, transition: 'background .2s ease',
-            }} />
+            <div style={{ height: 2, width: 14, background: i < step ? 'var(--green-400)' : 'var(--border)', borderRadius: 1 }} />
           )}
         </div>
       ))}
@@ -130,9 +115,11 @@ export default function DepartmentHeadDashboard() {
     </div>
   );
 
-  const pending  = requests.filter(r => ['SubmittedByDepartment', 'SubmittedToProcurement', 'ApprovedByInventoryOfficer', 'ApprovedByProcurement'].includes(r.status)).length;
+  const DONE = ['Released', 'Delivered'];
+  const drafts   = requests.filter(r => r.status === 'SubmittedByDepartment').length;
+  const pending  = requests.filter(r => ['SubmittedToProcurement', 'ApprovedByInventoryOfficer', 'ApprovedByProcurement', 'FullyApproved', 'PurchaseOrderGenerated'].includes(r.status)).length;
   const returned = requests.filter(r => r.status === 'ReturnedForRevision').length;
-  const approved = requests.filter(r => ['FullyApproved', 'PurchaseOrderGenerated', 'Delivered'].includes(r.status)).length;
+  const approved = requests.filter(r => DONE.includes(r.status)).length;
   const rejected = requests.filter(r => ['Rejected', 'Cancelled'].includes(r.status)).length;
 
   const recentRequests = [...requests]
@@ -151,8 +138,8 @@ export default function DepartmentHeadDashboard() {
     return {
       month: label,
       total: monthReqs.length,
-      approved: monthReqs.filter(r => ['FullyApproved', 'Delivered', 'PurchaseOrderGenerated'].includes(r.status)).length,
-      pending: monthReqs.filter(r => !['FullyApproved', 'Delivered', 'PurchaseOrderGenerated', 'Rejected', 'Cancelled'].includes(r.status)).length,
+      approved: monthReqs.filter(r => DONE.includes(r.status)).length,
+      pending: monthReqs.filter(r => !DONE.includes(r.status) && !['Rejected', 'Cancelled'].includes(r.status)).length,
     };
   });
 
@@ -209,15 +196,15 @@ export default function DepartmentHeadDashboard() {
       {/* Stat Cards */}
       <div className="grid-4" style={{ marginBottom: 24 }}>
         <StatCard label="Total Requests" value={requests.length} icon={MdAssignment} color="green" sub="all time" onClick={() => navigate('/department-requests')} />
-        <StatCard label="Pending Approval" value={pending} icon={MdAccessTime} color="blue" sub="awaiting action" onClick={() => navigate('/department-requests')} />
-        <StatCard label="Approved / Delivered" value={approved} icon={MdCheckCircle} color="teal" sub="fulfilled" onClick={() => navigate('/department-requests')} />
+        <StatCard label="In Progress" value={pending} icon={MdAccessTime} color="blue" sub="inventory / admin / stock" onClick={() => navigate('/department-requests')} />
+        <StatCard label="Released" value={approved} icon={MdCheckCircle} color="teal" sub="in department stock" onClick={() => navigate('/department-requests')} />
         <StatCard label="Returned / Rejected" value={returned + rejected} icon={MdWarning} color={returned + rejected > 0 ? 'red' : 'amber'} sub="needs attention" onClick={() => navigate('/department-requests')} />
       </div>
 
       {/* Quick Actions */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 24, flexWrap: 'wrap' }}>
         <button className="btn btn-primary" onClick={() => navigate('/department-requests')}>
-          <MdAdd size={16} /> New Procurement Request
+          <MdAdd size={16} /> New Supply Request
         </button>
         <button className="btn btn-secondary" onClick={() => navigate('/notifications')}>
           <MdNotifications size={16} /> View Notifications
@@ -232,8 +219,8 @@ export default function DepartmentHeadDashboard() {
             </span>
           )}
         </button>
-        <button className="btn btn-secondary" onClick={() => navigate('/procurement')}>
-          <MdInventory size={16} /> View All Requests
+        <button className="btn btn-secondary" onClick={() => navigate('/department-stock')}>
+          <MdInventory size={16} /> Department Stock
         </button>
       </div>
 
@@ -275,10 +262,10 @@ export default function DepartmentHeadDashboard() {
           </div>
           <div style={{ padding: '12px 20px', display: 'flex', flexDirection: 'column', gap: 12 }}>
             {[
-              { label: 'Draft', count: requests.filter(r => r.status === 'Draft').length, color: 'var(--text-muted)', bg: 'var(--bg-muted)' },
-              { label: 'Pending / In Review', count: pending, color: 'var(--blue-600)', bg: 'var(--blue-50)' },
+              { label: 'Draft', count: drafts, color: 'var(--text-muted)', bg: 'var(--bg-muted)' },
+              { label: 'In Progress', count: pending, color: 'var(--blue-600)', bg: 'var(--blue-50)' },
               { label: 'Returned for Revision', count: returned, color: 'var(--amber-600)', bg: 'var(--amber-50)' },
-              { label: 'Fully Approved / Delivered', count: approved, color: 'var(--green-700)', bg: 'var(--green-50)' },
+              { label: 'Released to Department', count: approved, color: 'var(--green-700)', bg: 'var(--green-50)' },
               { label: 'Rejected / Cancelled', count: rejected, color: 'var(--red-700)', bg: 'var(--red-50)' },
             ].map(({ label, count, color, bg }) => (
               <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -320,7 +307,7 @@ export default function DepartmentHeadDashboard() {
             <div className="empty-state">
               <MdShoppingCart size={32} color="var(--text-muted)" />
               <h3>No requests found</h3>
-              <p style={{ fontSize: 12, marginTop: 4 }}>Create your first procurement request to get started.</p>
+              <p style={{ fontSize: 12, marginTop: 4 }}>Create your first supply request to get started.</p>
             </div>
           ) : (
             <table>
@@ -338,7 +325,7 @@ export default function DepartmentHeadDashboard() {
                 {recentRequests.map(r => (
                   <tr key={r.id} style={{ cursor: 'pointer' }} onClick={() => navigate('/department-requests')}>
                     <td style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: 12 }}>{r.requestNumber}</td>
-                    <td>{r.requestedByFullName}</td>
+                    <td>{r.requestedByName || r.requestedByFullName}</td>
                     <td><span className="badge badge-blue">{r.items?.length ?? 0} items</span></td>
                     <td><StatusBadge status={r.status} /></td>
                     <td style={{ maxWidth: 200 }}><RequestTimeline status={r.status} /></td>
