@@ -2,6 +2,7 @@ using AutoMapper;
 using Microsoft.EntityFrameworkCore;
 using PPHIPMSystem.Server.Data;
 using PPHIPMSystem.Server.DTOs.Procurement;
+using PPHIPMSystem.Server.DTOs.StockMovement;
 using PPHIPMSystem.Server.Interfaces;
 using PPHIPMSystem.Server.Models;
 using PPHIPMSystem.Server.Models.Enums;
@@ -15,22 +16,49 @@ public class ProcurementService : IProcurementService
     private readonly INotificationService _notifications;
     private readonly IAuditLogService _audit;
     private readonly IDepartmentBudgetService _budgets;
+    private readonly IStockMovementService _stockMovements;
+
+    // A request can be edited or cancelled by its department until inventory
+    // review signs it off; after that the allocated quantities are committed.
+    private static readonly ProcurementStatus[] EditableStatuses =
+    [
+        ProcurementStatus.SubmittedByDepartment,
+        ProcurementStatus.SubmittedToProcurement,
+        ProcurementStatus.ReturnedForRevision
+    ];
+
+    // Waiting on inventory review — the requests allocation is decided for.
+    private static readonly ProcurementStatus[] AwaitingInventoryStatuses =
+    [
+        ProcurementStatus.SubmittedToProcurement,
+        ProcurementStatus.ApprovedByProcurement // legacy rows from the old chain
+    ];
+
+    // Allocated but not yet released — that stock is spoken for.
+    private static readonly ProcurementStatus[] ReservingStatuses =
+    [
+        ProcurementStatus.ApprovedByInventoryOfficer,
+        ProcurementStatus.FullyApproved
+    ];
 
     public ProcurementService(ApplicationDbContext db, IMapper mapper, INotificationService notifications,
-        IAuditLogService audit, IDepartmentBudgetService budgets)
+        IAuditLogService audit, IDepartmentBudgetService budgets, IStockMovementService stockMovements)
     {
         _db = db;
         _mapper = mapper;
         _notifications = notifications;
         _audit = audit;
         _budgets = budgets;
+        _stockMovements = stockMovements;
     }
+
+    public static bool IsEditable(ProcurementStatus status) => EditableStatuses.Contains(status);
 
     private IQueryable<ProcurementRequest> BaseQuery() =>
         _db.ProcurementRequests
             .Include(r => r.Department)
             .Include(r => r.RequestedByUser)
-            .Include(r => r.Items).ThenInclude(i => i.InventoryItem)
+            .Include(r => r.Items).ThenInclude(i => i.InventoryItem).ThenInclude(ii => ii.Category)
             .Include(r => r.Approvals).ThenInclude(a => a.ApproverUser)
             .Include(r => r.PurchaseOrder);
 
@@ -51,16 +79,39 @@ public class ProcurementService : IProcurementService
         return item is null ? null : _mapper.Map<ProcurementRequestDto>(item);
     }
 
-    public async Task<ProcurementRequestDto> CreateAsync(CreateProcurementRequestDto dto, string userId, int departmentId)
+    // Validate department and item ids up front so a bad id is a 400, not an FK 500.
+    private async Task ValidateRequestAsync(CreateProcurementRequestDto dto, int departmentId)
     {
-        // Validate item ids up front so a bad id is a 400, not an FK 500.
+        var department = await _db.Departments.FindAsync(departmentId)
+            ?? throw new InvalidOperationException("Department not found.");
+        if (!department.IsActive)
+            throw new InvalidOperationException("That department is inactive.");
+
         var requestedIds = dto.Items.Select(i => i.InventoryItemId).Distinct().ToList();
+        if (requestedIds.Count != dto.Items.Count)
+            throw new InvalidOperationException("Each item can only appear once — combine the quantities into one line.");
         var knownIds = await _db.InventoryItems
             .Where(i => requestedIds.Contains(i.Id))
             .Select(i => i.Id)
             .ToListAsync();
         if (knownIds.Count != requestedIds.Count)
             throw new InvalidOperationException("One or more requested items do not exist.");
+    }
+
+    private static List<ProcurementRequestItem> BuildLines(CreateProcurementRequestDto dto) =>
+        dto.Items.Select(i => new ProcurementRequestItem
+        {
+            InventoryItemId = i.InventoryItemId,
+            QuantityRequested = i.QuantityRequested,
+            EstimatedUnitCost = i.EstimatedUnitCost,
+            Remarks = string.IsNullOrWhiteSpace(i.Remarks) ? null : i.Remarks.Trim()
+        }).ToList();
+
+    private static string? CleanName(string? name) => string.IsNullOrWhiteSpace(name) ? null : name.Trim();
+
+    public async Task<ProcurementRequestDto> CreateAsync(CreateProcurementRequestDto dto, string userId, int departmentId)
+    {
+        await ValidateRequestAsync(dto, departmentId);
 
         var count = await _db.ProcurementRequests.CountAsync() + 1;
         var request = new ProcurementRequest
@@ -68,15 +119,10 @@ public class ProcurementService : IProcurementService
             RequestNumber = $"PR-{DateTime.UtcNow:yyyyMM}-{count:D4}",
             DepartmentId = departmentId,
             RequestedByUserId = userId,
+            RequestedByName = CleanName(dto.RequestedByName),
             Justification = dto.Justification,
             Status = ProcurementStatus.SubmittedByDepartment,
-            Items = dto.Items.Select(i => new ProcurementRequestItem
-            {
-                InventoryItemId = i.InventoryItemId,
-                QuantityRequested = i.QuantityRequested,
-                EstimatedUnitCost = i.EstimatedUnitCost,
-                Remarks = i.Remarks
-            }).ToList()
+            Items = BuildLines(dto)
         };
         _db.ProcurementRequests.Add(request);
 
@@ -101,6 +147,64 @@ public class ProcurementService : IProcurementService
         return _mapper.Map<ProcurementRequestDto>(await BaseQuery().FirstAsync(r => r.Id == request.Id));
     }
 
+    public async Task<ProcurementRequestDto?> UpdateAsync(int id, UpdateProcurementRequestDto dto, string userId, int departmentId)
+    {
+        var request = await BaseQuery().FirstOrDefaultAsync(r => r.Id == id);
+        if (request is null) return null;
+
+        if (!IsEditable(request.Status))
+            throw new InvalidOperationException("This request has already been approved by Inventory and can no longer be edited.");
+
+        await ValidateRequestAsync(dto, departmentId);
+
+        // Replacing the lines wholesale keeps add / remove / re-quantity one
+        // operation; nothing references request lines before a PO exists.
+        _db.ProcurementRequestItems.RemoveRange(request.Items);
+        request.Items = BuildLines(dto);
+        request.DepartmentId = departmentId;
+        request.RequestedByName = CleanName(dto.RequestedByName);
+        request.Justification = dto.Justification;
+        request.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+
+        await _audit.LogAsync(userId, "ProcurementEdited", "ProcurementRequest", request.Id, request.RequestNumber);
+
+        if (request.Status == ProcurementStatus.SubmittedToProcurement)
+            await _notifications.CreateForRoleAsync(UserRole.InventoryOfficer,
+                NotificationType.ProcurementSubmitted,
+                "Department Request Updated",
+                $"Request {request.RequestNumber} was edited by the department before review.",
+                request.Id, "ProcurementRequest");
+
+        return _mapper.Map<ProcurementRequestDto>(await BaseQuery().FirstAsync(r => r.Id == id));
+    }
+
+    public async Task<ProcurementRequestDto?> CancelAsync(int id, string? reason, string userId)
+    {
+        var request = await BaseQuery().FirstOrDefaultAsync(r => r.Id == id);
+        if (request is null) return null;
+
+        if (!IsEditable(request.Status))
+            throw new InvalidOperationException("This request has already been approved by Inventory and can no longer be cancelled.");
+
+        var wasInReview = request.Status == ProcurementStatus.SubmittedToProcurement;
+        request.Status = ProcurementStatus.Cancelled;
+        request.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+
+        await _audit.LogAsync(userId, "ProcurementCancelled", "ProcurementRequest", request.Id,
+            string.IsNullOrWhiteSpace(reason) ? request.RequestNumber : $"{request.RequestNumber}: {reason.Trim()}");
+
+        if (wasInReview)
+            await _notifications.CreateForRoleAsync(UserRole.InventoryOfficer,
+                NotificationType.General,
+                "Department Request Cancelled",
+                $"Request {request.RequestNumber} was cancelled by {request.Department.Name}.",
+                request.Id, "ProcurementRequest");
+
+        return _mapper.Map<ProcurementRequestDto>(request);
+    }
+
     public async Task<ProcurementRequestDto?> SubmitAsync(int id, string userId)
     {
         var request = await BaseQuery().FirstOrDefaultAsync(r => r.Id == id);
@@ -113,18 +217,12 @@ public class ProcurementService : IProcurementService
         request.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
 
-        // Notify Procurement Staff
-        await _notifications.CreateForRoleAsync(UserRole.ProcurementStaff,
-            NotificationType.ProcurementSubmitted,
-            "New Procurement Request",
-            $"Request {request.RequestNumber} submitted for review.",
-            request.Id, "ProcurementRequest");
-
-        // Also notify Inventory Officers so they can approve if items are in stock
+        // Department requests go to Inventory first: it checks stock and
+        // allocates. Procurement only hears about it if stock runs short.
         await _notifications.CreateForRoleAsync(UserRole.InventoryOfficer,
             NotificationType.ProcurementSubmitted,
             "Department Request Needs Inventory Review",
-            $"Department request {request.RequestNumber} has been submitted. Please verify item availability.",
+            $"Department request {request.RequestNumber} has been submitted. Please check stock and allocate quantities.",
             request.Id, "ProcurementRequest");
 
         await _audit.LogAsync(userId, "ProcurementSubmitted", "ProcurementRequest", request.Id, request.RequestNumber);
@@ -158,6 +256,28 @@ public class ProcurementService : IProcurementService
         if (action != ApprovalAction.Approved && string.IsNullOrWhiteSpace(dto.Remarks))
             throw new InvalidOperationException("Remarks are required when rejecting or returning a request.");
 
+        var isAdmin = approver.Role is UserRole.HospitalAdministrator or UserRole.SuperAdmin;
+
+        // Department requests follow PPH's chain: Inventory checks stock and
+        // allocates → Administrator gives final approval → the system releases.
+        // An administrator may stand in for Inventory at the first step.
+        var newStatus = (action, request.Status) switch
+        {
+            (ApprovalAction.Rejected, _) => ProcurementStatus.Rejected,
+            (ApprovalAction.ReturnedForRevision, _) => ProcurementStatus.ReturnedForRevision,
+            (ApprovalAction.Approved, ProcurementStatus.SubmittedToProcurement or ProcurementStatus.ApprovedByProcurement)
+                when approver.Role == UserRole.InventoryOfficer || isAdmin => ProcurementStatus.ApprovedByInventoryOfficer,
+            (ApprovalAction.Approved, ProcurementStatus.ApprovedByInventoryOfficer)
+                when isAdmin => ProcurementStatus.FullyApproved,
+            _ => throw new InvalidOperationException(
+                request.Status == ProcurementStatus.ApprovedByInventoryOfficer
+                    ? "Final approval of this request belongs to the Hospital Administrator."
+                    : "Department requests are reviewed by the Inventory Officer first.")
+        };
+
+        if (newStatus == ProcurementStatus.ApprovedByInventoryOfficer)
+            ApplyAllocations(request, dto.Allocations);
+
         var level = request.Approvals.Count + 1;
         request.Approvals.Add(new ProcurementApproval
         {
@@ -169,23 +289,7 @@ public class ProcurementService : IProcurementService
             Remarks = dto.Remarks
         });
 
-        request.Status = (action, approver.Role, request.Status) switch
-        {
-            (ApprovalAction.Rejected, _, _) => ProcurementStatus.Rejected,
-            (ApprovalAction.ReturnedForRevision, _, _) => ProcurementStatus.ReturnedForRevision,
-            // Inventory Officer can approve department requests directly (items available in stock)
-            (ApprovalAction.Approved, UserRole.InventoryOfficer, ProcurementStatus.SubmittedToProcurement) => ProcurementStatus.ApprovedByInventoryOfficer,
-            (ApprovalAction.Approved, UserRole.ProcurementStaff, ProcurementStatus.SubmittedToProcurement) => ProcurementStatus.ApprovedByProcurement,
-            (ApprovalAction.Approved, UserRole.InventoryOfficer, ProcurementStatus.ApprovedByProcurement) => ProcurementStatus.ApprovedByInventoryOfficer,
-            (ApprovalAction.Approved, UserRole.HospitalAdministrator, ProcurementStatus.ApprovedByInventoryOfficer) => ProcurementStatus.FullyApproved,
-            (ApprovalAction.Approved, UserRole.SuperAdmin, ProcurementStatus.ApprovedByInventoryOfficer) => ProcurementStatus.FullyApproved,
-            // Admins can approve at earlier stages too
-            (ApprovalAction.Approved, UserRole.HospitalAdministrator, ProcurementStatus.SubmittedToProcurement) => ProcurementStatus.ApprovedByProcurement,
-            (ApprovalAction.Approved, UserRole.HospitalAdministrator, ProcurementStatus.ApprovedByProcurement) => ProcurementStatus.ApprovedByInventoryOfficer,
-            (ApprovalAction.Approved, UserRole.SuperAdmin, ProcurementStatus.SubmittedToProcurement) => ProcurementStatus.ApprovedByProcurement,
-            (ApprovalAction.Approved, UserRole.SuperAdmin, ProcurementStatus.ApprovedByProcurement) => ProcurementStatus.ApprovedByInventoryOfficer,
-            _ => throw new InvalidOperationException($"Approver with role {approver.Role} cannot approve request in {request.Status} status.")
-        };
+        request.Status = newStatus;
         request.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
 
@@ -195,14 +299,277 @@ public class ProcurementService : IProcurementService
                 ? NotificationType.ProcurementRejected
                 : NotificationType.ProcurementReturnedForRevision;
 
+        var adjusted = newStatus == ProcurementStatus.ApprovedByInventoryOfficer
+            && request.Items.Any(i => i.QuantityApproved < i.QuantityRequested);
         await _notifications.CreateAsync(request.RequestedByUserId, notifType,
-            $"Procurement {action}",
-            $"Your request {request.RequestNumber} was {action} by {approver.FirstName} {approver.LastName}.",
+            $"Request {action}",
+            $"Your request {request.RequestNumber} was {action} by {approver.FirstName} {approver.LastName}" +
+            (adjusted ? " — some quantities were adjusted to the stock available." : "."),
             id, "ProcurementRequest");
 
         await _audit.LogAsync(approverId, $"Procurement{action}", "ProcurementRequest", id, dto.Remarks);
 
+        if (newStatus == ProcurementStatus.ApprovedByInventoryOfficer)
+            await _notifications.CreateForRoleAsync(UserRole.HospitalAdministrator,
+                NotificationType.ProcurementSubmitted,
+                "Request Awaiting Final Approval",
+                $"Request {request.RequestNumber} ({request.Department.Name}) passed inventory review and needs your approval.",
+                id, "ProcurementRequest");
+
+        // Final approval: no second data entry — the approved quantities are
+        // issued straight away when the storeroom has them.
+        if (newStatus == ProcurementStatus.FullyApproved)
+            await TryReleaseAsync(request, approverId, notifyOnShortage: true);
+
         return _mapper.Map<ProcurementRequestDto>(await BaseQuery().FirstAsync(r => r.Id == id));
+    }
+
+    // Sets each line's approved quantity from the Inventory Officer's
+    // allocation. Lines not mentioned keep an allocation saved earlier from the
+    // allocation board, or default to the full requested quantity.
+    private static void ApplyAllocations(ProcurementRequest request, List<LineAllocationDto>? allocations)
+    {
+        var map = (allocations ?? [])
+            .GroupBy(a => a.ProcurementRequestItemId)
+            .ToDictionary(g => g.Key, g => g.Last().QuantityApproved);
+
+        foreach (var line in request.Items)
+        {
+            if (map.TryGetValue(line.Id, out var qty))
+            {
+                if (qty < 0 || qty > line.QuantityRequested)
+                    throw new InvalidOperationException(
+                        $"{line.InventoryItem.Name}: allocation must be between 0 and the {line.QuantityRequested} requested.");
+                line.QuantityApproved = qty;
+            }
+            else
+            {
+                line.QuantityApproved ??= line.QuantityRequested;
+            }
+        }
+
+        if (request.Items.All(i => i.QuantityApproved <= 0))
+            throw new InvalidOperationException("Nothing was allocated. Reject or return the request instead.");
+    }
+
+    // Manual retry for a fully approved request that was waiting on stock.
+    public async Task<ProcurementRequestDto?> ReleaseAsync(int id, string userId)
+    {
+        var request = await BaseQuery().FirstOrDefaultAsync(r => r.Id == id);
+        if (request is null) return null;
+        if (request.Status != ProcurementStatus.FullyApproved)
+            throw new InvalidOperationException("Only fully approved requests that have not been released can be released.");
+
+        var shortages = await TryReleaseAsync(request, userId, notifyOnShortage: false);
+        if (shortages.Count > 0)
+            throw new InvalidOperationException("Not enough stock to release yet: " + string.Join("; ", shortages) + ".");
+
+        return _mapper.Map<ProcurementRequestDto>(await BaseQuery().FirstAsync(r => r.Id == id));
+    }
+
+    // Checks central stock for every approved line and, only if all of it is
+    // there, issues it to the requesting department in one transaction:
+    // central stock down, department stock up, request → Released. Returns
+    // the shortages (empty on success). A request is released whole or not at
+    // all, so the department never receives half an order silently.
+    private async Task<List<string>> TryReleaseAsync(ProcurementRequest request, string userId, bool notifyOnShortage)
+    {
+        var lines = request.Items
+            .Select(i => (Line: i, Qty: i.QuantityApproved ?? i.QuantityRequested))
+            .Where(x => x.Qty > 0)
+            .ToList();
+
+        var shortages = lines
+            .Where(x => x.Line.InventoryItem.QuantityOnHand < x.Qty)
+            .Select(x => $"{x.Line.InventoryItem.Name} needs {x.Qty:0.##} {x.Line.InventoryItem.Unit}, " +
+                         $"{x.Line.InventoryItem.QuantityOnHand:0.##} on hand")
+            .ToList();
+        if (!request.Department.IsActive)
+            shortages.Add($"{request.Department.Name} is inactive");
+
+        if (shortages.Count == 0)
+        {
+            await using var tx = await _db.Database.BeginTransactionAsync();
+            try
+            {
+                foreach (var (line, qty) in lines)
+                {
+                    // Reuses the ordinary issuance path so FEFO batch draw-down,
+                    // the department ledger, consumption records and low-stock
+                    // alerts all behave exactly like a manual issuance.
+                    await _stockMovements.CreateAsync(new CreateStockMovementDto
+                    {
+                        InventoryItemId = line.InventoryItemId,
+                        MovementType = StockMovementType.Issuance,
+                        Quantity = qty,
+                        DepartmentId = request.DepartmentId,
+                        Remarks = $"Released for request {request.RequestNumber}"
+                    }, userId);
+                    line.QuantityReleased = qty;
+                }
+
+                request.Status = ProcurementStatus.Released;
+                request.ReleasedAt = DateTime.UtcNow;
+                request.UpdatedAt = DateTime.UtcNow;
+                await _db.SaveChangesAsync();
+                await tx.CommitAsync();
+            }
+            catch (InvalidOperationException ex)
+            {
+                // Drop the half-applied entity changes so nothing later in this
+                // request flushes them; the request stays FullyApproved.
+                await tx.RollbackAsync();
+                _db.ChangeTracker.Clear();
+                shortages.Add(ex.Message);
+            }
+        }
+
+        if (shortages.Count == 0)
+        {
+            await _audit.LogAsync(userId, "ProcurementReleased", "ProcurementRequest", request.Id, request.RequestNumber);
+            await _notifications.CreateAsync(request.RequestedByUserId, NotificationType.ProcurementApproved,
+                "Supplies Released",
+                $"The items on {request.RequestNumber} were released and added to {request.Department.Name}'s stock.",
+                request.Id, "ProcurementRequest");
+        }
+        else if (notifyOnShortage)
+        {
+            // Insufficient stock: this is where the cycle hands over to
+            // Procurement to replenish, and Inventory releases once it lands.
+            var detail = string.Join("; ", shortages);
+            await _notifications.CreateForRoleAsync(UserRole.ProcurementStaff, NotificationType.LowStock,
+                "Replenishment Needed",
+                $"Approved request {request.RequestNumber} ({request.Department.Name}) cannot be released: {detail}.",
+                request.Id, "ProcurementRequest");
+            await _notifications.CreateForRoleAsync(UserRole.InventoryOfficer, NotificationType.LowStock,
+                "Approved Request Awaiting Stock",
+                $"{request.RequestNumber} is fully approved but short: {detail}. Release it once stock arrives.",
+                request.Id, "ProcurementRequest");
+        }
+
+        return shortages;
+    }
+
+    // ── Fair-share allocation ───────────────────────────────────────────────
+
+    public async Task<IEnumerable<ItemAllocationDto>> GetAllocationOverviewAsync()
+    {
+        // Lists, not the static arrays: C# 14 binds array.Contains to the span
+        // overload inside expression trees, which EF Core cannot translate.
+        var awaiting = AwaitingInventoryStatuses.ToList();
+        var reserving = ReservingStatuses.ToList();
+        var pending = await _db.ProcurementRequestItems
+            .Include(i => i.ProcurementRequest).ThenInclude(r => r.Department)
+            .Include(i => i.InventoryItem).ThenInclude(ii => ii.Category)
+            .Where(i => awaiting.Contains(i.ProcurementRequest.Status))
+            .AsNoTracking()
+            .ToListAsync();
+
+        var itemIds = pending.Select(p => p.InventoryItemId).Distinct().ToList();
+        var reserved = await _db.ProcurementRequestItems
+            .Where(i => itemIds.Contains(i.InventoryItemId) && reserving.Contains(i.ProcurementRequest.Status))
+            .GroupBy(i => i.InventoryItemId)
+            .Select(g => new { g.Key, Qty = g.Sum(i => i.QuantityApproved ?? i.QuantityRequested) })
+            .ToDictionaryAsync(x => x.Key, x => x.Qty);
+
+        return pending
+            .GroupBy(p => p.InventoryItemId)
+            .Select(g =>
+            {
+                var item = g.First().InventoryItem;
+                var held = reserved.GetValueOrDefault(g.Key);
+                var available = Math.Max(0, item.QuantityOnHand - held);
+                // First come, first listed; also the tie-breaker for spare units.
+                var lines = g.OrderBy(l => l.ProcurementRequest.RequestedAt).ToList();
+                var shares = FairShare(available, lines.Select(l => l.QuantityRequested).ToList());
+                return new ItemAllocationDto
+                {
+                    InventoryItemId = item.Id,
+                    ItemName = item.Name,
+                    ItemCode = item.ItemCode,
+                    CategoryName = item.Category?.Name,
+                    Unit = item.Unit,
+                    QuantityOnHand = item.QuantityOnHand,
+                    Reserved = held,
+                    Available = available,
+                    TotalRequested = lines.Sum(l => l.QuantityRequested),
+                    Lines = lines.Select((l, idx) => new AllocationLineDto
+                    {
+                        ProcurementRequestItemId = l.Id,
+                        ProcurementRequestId = l.ProcurementRequestId,
+                        RequestNumber = l.ProcurementRequest.RequestNumber,
+                        DepartmentName = l.ProcurementRequest.Department.Name,
+                        RequestedAt = l.ProcurementRequest.RequestedAt,
+                        QuantityRequested = l.QuantityRequested,
+                        QuantityApproved = l.QuantityApproved,
+                        FairShare = shares[idx]
+                    }).ToList()
+                };
+            })
+            .OrderByDescending(a => a.IsShort)
+            .ThenBy(a => a.ItemName)
+            .ToList();
+    }
+
+    // Proportional split of the available stock across competing requests.
+    // With whole-unit quantities it uses largest-remainder rounding so the
+    // shares add up exactly to what is available (e.g. 80 gloves against
+    // 30/20/40 → 27/18/35). Nobody is ever given more than they asked for.
+    public static List<decimal> FairShare(decimal available, List<decimal> requested)
+    {
+        var total = requested.Sum();
+        if (total <= available) return requested.ToList();
+        if (available <= 0 || total <= 0) return requested.Select(_ => 0m).ToList();
+
+        var wholeUnits = requested.All(q => q == Math.Floor(q));
+        if (!wholeUnits)
+            return requested.Select(q => Math.Round(available * q / total, 2, MidpointRounding.ToZero)).ToList();
+
+        var pool = Math.Floor(available);
+        var exact = requested.Select(q => pool * q / total).ToList();
+        var shares = exact.Select(Math.Floor).ToList();
+        var spare = pool - shares.Sum();
+        foreach (var idx in Enumerable.Range(0, requested.Count)
+                     .OrderByDescending(i => exact[i] - shares[i])
+                     .ThenBy(i => i))
+        {
+            if (spare <= 0) break;
+            if (shares[idx] >= requested[idx]) continue;
+            shares[idx] += 1;
+            spare -= 1;
+        }
+        return shares;
+    }
+
+    // Saves the Inventory Officer's allocation across many requests at once
+    // (the allocation board) without approving them; the review of each
+    // request then starts from these figures.
+    public async Task SaveAllocationsAsync(SaveAllocationsDto dto, string userId)
+    {
+        var ids = dto.Lines.Select(l => l.ProcurementRequestItemId).Distinct().ToList();
+        var lines = await _db.ProcurementRequestItems
+            .Include(i => i.ProcurementRequest)
+            .Include(i => i.InventoryItem)
+            .Where(i => ids.Contains(i.Id))
+            .ToListAsync();
+        if (lines.Count != ids.Count)
+            throw new InvalidOperationException("One or more request lines no longer exist.");
+
+        foreach (var input in dto.Lines)
+        {
+            var line = lines.First(l => l.Id == input.ProcurementRequestItemId);
+            if (!AwaitingInventoryStatuses.Contains(line.ProcurementRequest.Status))
+                throw new InvalidOperationException(
+                    $"{line.ProcurementRequest.RequestNumber} is no longer awaiting inventory review.");
+            if (input.QuantityApproved > line.QuantityRequested)
+                throw new InvalidOperationException(
+                    $"{line.InventoryItem.Name} on {line.ProcurementRequest.RequestNumber}: allocation exceeds the {line.QuantityRequested} requested.");
+            line.QuantityApproved = input.QuantityApproved;
+        }
+
+        await _db.SaveChangesAsync();
+        await _audit.LogAsync(userId, "AllocationSaved", "ProcurementRequest", null,
+            $"{dto.Lines.Count} line(s) across {lines.Select(l => l.ProcurementRequestId).Distinct().Count()} request(s)");
     }
 
     public async Task<PurchaseOrderDto> GeneratePurchaseOrderAsync(int requestId, GeneratePurchaseOrderDto dto, string userId)
@@ -408,6 +775,19 @@ public class ProcurementService : IProcurementService
         await _db.SaveChangesAsync();
         await _audit.LogAsync(userId, "DeliveryConfirmed", "PurchaseOrder", purchaseOrderId,
             $"{po.PONumber} ({(fullyDelivered ? "fully delivered" : "partial delivery")})");
+
+        // The replenishment the department was waiting on has landed: close
+        // the cycle by releasing its approved quantities. Saved above first, so
+        // a failed release can never roll the delivery back. Only requests that
+        // went through inventory allocation qualify — older requests may have
+        // been issued by hand already.
+        if (fullyDelivered)
+        {
+            var request = await BaseQuery().FirstOrDefaultAsync(r => r.Id == po.ProcurementRequestId);
+            if (request is not null && request.Items.Any(i => i.QuantityApproved != null))
+                await TryReleaseAsync(request, userId, notifyOnShortage: false);
+        }
+
         await _notifications.BroadcastStockChangedAsync();
         return true;
     }

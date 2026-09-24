@@ -90,6 +90,8 @@ public class MappingProfile : Profile
 
         CreateMap<ProcurementRequestItem, ProcurementRequestItemDto>()
             .ForMember(d => d.ItemName, o => o.MapFrom(s => s.InventoryItem.Name))
+            .ForMember(d => d.ItemCode, o => o.MapFrom(s => s.InventoryItem.ItemCode))
+            .ForMember(d => d.CategoryName, o => o.MapFrom(s => s.InventoryItem.Category != null ? s.InventoryItem.Category.Name : null))
             .ForMember(d => d.Unit, o => o.MapFrom(s => s.InventoryItem.Unit));
 
         CreateMap<ProcurementApproval, ProcurementApprovalDto>()

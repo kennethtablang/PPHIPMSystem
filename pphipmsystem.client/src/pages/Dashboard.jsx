@@ -69,7 +69,8 @@ export default function Dashboard() {
   const navigate = useNavigate();
   // Hooks must all run before any conditional return; the Department Head
   // branch is rendered at the bottom and the effects no-op for that role.
-  const isDeptHead = user?.role === 'DepartmentHead';
+  // Shared department PCs get the same department-scoped dashboard.
+  const isDeptHead = ['DepartmentHead', 'DepartmentStaff'].includes(user?.role);
 
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);

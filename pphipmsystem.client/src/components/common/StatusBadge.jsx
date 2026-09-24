@@ -11,6 +11,7 @@ const STATUS_MAP = {
   Cancelled: 'gray',
   SubmittedByDepartment: 'gray',
   ApprovedByInventoryOfficer: 'purple',
+  Released: 'green',
   // Adjustments
   Pending: 'amber',
   Approved: 'green',
@@ -27,11 +28,12 @@ const STATUS_MAP = {
 
 const LABEL_MAP = {
   SubmittedByDepartment: 'Draft / Dept. Request',
-  SubmittedToProcurement: 'Submitted',
-  ApprovedByProcurement: 'Proc. Approved',
-  ApprovedByInventoryOfficer: 'Inv. Approved',
+  SubmittedToProcurement: 'Inventory Review',
+  ApprovedByProcurement: 'Inventory Review',
+  ApprovedByInventoryOfficer: 'Admin Approval',
   ReturnedForRevision: 'Returned',
-  FullyApproved: 'Approved',
+  FullyApproved: 'Awaiting Stock',
+  Released: 'Released',
   PurchaseOrderGenerated: 'PO Generated',
 };
 

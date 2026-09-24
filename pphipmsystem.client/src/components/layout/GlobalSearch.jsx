@@ -7,7 +7,7 @@ import { useAuth } from '../../context/AuthContext';
 const GROUPS = [
   { key: 'items', label: 'Inventory Items', Icon: MdInventory, to: r => ({ path: '/inventory', state: { search: r.title } }) },
   // Department heads work from their own requests page (the server already limits their results).
-  { key: 'requests', label: 'Procurement Requests', Icon: MdShoppingCart, to: (r, role) => ({ path: role === 'DepartmentHead' ? '/department-requests' : '/procurement' }) },
+  { key: 'requests', label: 'Procurement Requests', Icon: MdShoppingCart, to: (r, role) => ({ path: ['DepartmentHead', 'DepartmentStaff'].includes(role) ? '/department-requests' : '/procurement' }) },
   { key: 'purchaseOrders', label: 'Purchase Orders', Icon: MdLocalShipping, to: () => ({ path: '/purchase-orders' }) },
   { key: 'users', label: 'Users', Icon: MdPerson, to: r => ({ path: '/users', state: { search: r.title } }) },
 ];

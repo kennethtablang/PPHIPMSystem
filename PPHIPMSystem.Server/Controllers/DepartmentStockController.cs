@@ -27,7 +27,7 @@ public class DepartmentStockController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> Get([FromQuery] int? departmentId)
     {
-        if (User.IsInRole("DepartmentHead"))
+        if (User.IsInRole("DepartmentHead") || User.IsInRole("DepartmentStaff"))
         {
             var deptClaim = User.FindFirstValue("departmentId");
             if (!int.TryParse(deptClaim, out var ownDeptId)) return Forbid();

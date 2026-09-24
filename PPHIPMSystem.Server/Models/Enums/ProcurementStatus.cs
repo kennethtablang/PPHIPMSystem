@@ -12,6 +12,11 @@ public enum ProcurementStatus
     Delivered,
     Cancelled,
     SubmittedByDepartment,
-    ApprovedByInventoryOfficer
+    ApprovedByInventoryOfficer,
+
+    // Final approval found enough central stock, so the approved quantities
+    // were issued straight into the requesting department's stock. Appended
+    // last: values are stored as ints, so existing rows keep their meaning.
+    Released
 }
 

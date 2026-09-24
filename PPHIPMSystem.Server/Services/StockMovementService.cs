@@ -167,12 +167,15 @@ public class StockMovementService : IStockMovementService
 
         if (after <= item.ReorderThreshold)
         {
-            await _notifications.CreateForRoleAsync(
-                UserRole.InventoryOfficer,
-                NotificationType.LowStock,
-                "Low Stock Alert",
-                $"{item.Name} is at {after} {item.Unit}, below reorder threshold of {item.ReorderThreshold}.",
-                item.Id, "InventoryItem");
+            // Inventory watches the shelf; Procurement is who replenishes it —
+            // the alert is the hand-off between the two halves of the cycle.
+            foreach (var role in new[] { UserRole.InventoryOfficer, UserRole.ProcurementStaff })
+                await _notifications.CreateForRoleAsync(
+                    role,
+                    NotificationType.LowStock,
+                    "Low Stock Alert",
+                    $"{item.Name} is at {after} {item.Unit}, below reorder threshold of {item.ReorderThreshold}.",
+                    item.Id, "InventoryItem");
         }
 
         await _audit.LogAsync(userId, $"StockMovement_{dto.MovementType}", "StockMovement", movement.Id,

@@ -14,7 +14,8 @@ import { useAuth } from '../../context/AuthContext';
 // can browse any (or all) departments.
 export default function DepartmentStockPage() {
   const { user } = useAuth();
-  const isDeptHead = user?.role === 'DepartmentHead';
+  // Department accounts (head or shared PC) are pinned to their own ward.
+  const isDeptHead = ['DepartmentHead', 'DepartmentStaff'].includes(user?.role);
   // Matches the DepartmentStockController.Consume role list. Department heads
   // are scoped to their own ward by the server regardless of what is sent.
   const canConsume = ['SuperAdmin', 'HospitalAdministrator', 'InventoryOfficer', 'DepartmentHead']

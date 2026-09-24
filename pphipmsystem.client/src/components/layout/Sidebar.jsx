@@ -19,6 +19,7 @@ const ROLE = {
   Inventory:   'InventoryOfficer',
   Procurement: 'ProcurementStaff',
   DeptHead:    'DepartmentHead',
+  DeptStaff:   'DepartmentStaff',
 };
 
 const roleLabel = r => ({
@@ -27,6 +28,7 @@ const roleLabel = r => ({
   InventoryOfficer:      'Inventory Officer',
   ProcurementStaff:      'Procurement Staff',
   DepartmentHead:        'Department Head',
+  DepartmentStaff:       'Department (Shared PC)',
 }[r] ?? r);
 
 export default function Sidebar() {
@@ -99,11 +101,16 @@ export default function Sidebar() {
             <Item to="/notifications" Icon={MdNotifications} label="Notifications" collapsed={collapsed} />
           </Group>
 
-          {is(ROLE.SuperAdmin, ROLE.Admin, ROLE.Inventory, ROLE.Procurement, ROLE.DeptHead) && (
+          {is(ROLE.SuperAdmin, ROLE.Admin, ROLE.Inventory, ROLE.Procurement, ROLE.DeptHead, ROLE.DeptStaff) && (
             <Group label="Inventory" collapsed={collapsed}>
-              <Item to="/inventory"         Icon={MdInventory} label="Items"            collapsed={collapsed} />
-              <Item to="/materials"         Icon={MdInventory} label="Materials List"   collapsed={collapsed} />
-              <Item to="/batches"           Icon={MdGridView}  label="Batches & Expiry" collapsed={collapsed} />
+              {/* A shared department PC only sees its own ward's stock. */}
+              {!is(ROLE.DeptStaff) && (
+                <>
+                  <Item to="/inventory"         Icon={MdInventory} label="Items"            collapsed={collapsed} />
+                  <Item to="/materials"         Icon={MdInventory} label="Materials List"   collapsed={collapsed} />
+                  <Item to="/batches"           Icon={MdGridView}  label="Batches & Expiry" collapsed={collapsed} />
+                </>
+              )}
               {is(ROLE.SuperAdmin, ROLE.Admin, ROLE.Inventory) && (
                 <>
                   <Item to="/stock-movements"   Icon={MdSwapVert} label="Stock Movements"  collapsed={collapsed} />
@@ -114,12 +121,12 @@ export default function Sidebar() {
             </Group>
           )}
 
-          {is(ROLE.SuperAdmin, ROLE.Admin, ROLE.Procurement, ROLE.Inventory, ROLE.DeptHead) && (
+          {is(ROLE.SuperAdmin, ROLE.Admin, ROLE.Procurement, ROLE.Inventory, ROLE.DeptHead, ROLE.DeptStaff) && (
             <Group label="Procurement" collapsed={collapsed}>
               {is(ROLE.SuperAdmin, ROLE.Admin, ROLE.Procurement, ROLE.Inventory) && (
                 <Item to="/procurement" Icon={MdShoppingCart} label="Requests" collapsed={collapsed} />
               )}
-              {is(ROLE.SuperAdmin, ROLE.Admin, ROLE.DeptHead) && (
+              {is(ROLE.SuperAdmin, ROLE.Admin, ROLE.DeptHead, ROLE.DeptStaff) && (
                 <Item to="/department-requests" Icon={MdShoppingCart} label="Dept. Requests" collapsed={collapsed} />
               )}
               {/* Inventory officers confirm deliveries on the Purchase Orders page. */}

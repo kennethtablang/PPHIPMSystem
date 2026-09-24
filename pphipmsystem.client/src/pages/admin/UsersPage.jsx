@@ -10,7 +10,7 @@ import { validatePassword, passwordHint, usePasswordPolicy } from '../../utils/p
 import { fmtDateTime } from '../../utils/format';
 import { useAuth } from '../../context/AuthContext';
 
-const ROLES = ['SuperAdmin', 'HospitalAdministrator', 'InventoryOfficer', 'ProcurementStaff', 'DepartmentHead'];
+const ROLES = ['SuperAdmin', 'HospitalAdministrator', 'InventoryOfficer', 'ProcurementStaff', 'DepartmentHead', 'DepartmentStaff'];
 // Only a Super Admin may create, edit, or reset administrator accounts (enforced by the server).
 const PRIVILEGED_ROLES = ['SuperAdmin', 'HospitalAdministrator'];
 const BLANK = { username: '', password: '', firstName: '', middleName: '', lastName: '', employeeId: '', role: 'InventoryOfficer', departmentId: '', email: '', isActive: true };
@@ -80,6 +80,8 @@ export default function UsersPage() {
       if (!form.password) e.password = 'Password is required.';
       else { const pwErr = validatePassword(form.password, pwPolicy); if (pwErr) e.password = pwErr; }
     }
+    // Department accounts are scoped by their department — without one they can't see or request anything.
+    if (['DepartmentHead', 'DepartmentStaff'].includes(form.role) && form.departmentId === '') e.departmentId = 'A department is required for this role.';
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -114,8 +116,8 @@ export default function UsersPage() {
     finally { setSaving(false); }
   };
 
-  const roleColor = r => ({ SuperAdmin: 'badge-red', HospitalAdministrator: 'badge-purple', InventoryOfficer: 'badge-green', ProcurementStaff: 'badge-blue', DepartmentHead: 'badge-teal' }[r] ?? 'badge-gray');
-  const roleLabel = r => ({ SuperAdmin: 'Super Admin', HospitalAdministrator: 'Admin', InventoryOfficer: 'Inv. Officer', ProcurementStaff: 'Procurement', DepartmentHead: 'Dept Head' }[r] ?? r);
+  const roleColor = r => ({ SuperAdmin: 'badge-red', HospitalAdministrator: 'badge-purple', InventoryOfficer: 'badge-green', ProcurementStaff: 'badge-blue', DepartmentStaff: 'badge-teal', DepartmentHead: 'badge-teal' }[r] ?? 'badge-gray');
+  const roleLabel = r => ({ SuperAdmin: 'Super Admin', HospitalAdministrator: 'Admin', InventoryOfficer: 'Inv. Officer', ProcurementStaff: 'Procurement', DepartmentStaff: 'Dept. Shared PC', DepartmentHead: 'Dept Head' }[r] ?? r);
 
   return (
     <div>
@@ -232,8 +234,8 @@ export default function UsersPage() {
               </select>
             </div>
             <div className="form-group">
-              <label className="form-label">Department</label>
-              <select className="form-control" value={form.departmentId} onChange={set('departmentId')}>
+              <label className="form-label">Department{['DepartmentHead', 'DepartmentStaff'].includes(form.role) && ' *'}</label>
+              <select className="form-control" value={form.departmentId} onChange={set('departmentId')} style={errStyle('departmentId')}>
                 <option value="">No Department</option>
                 {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                 {/* Keep a since-deleted department selectable so saving doesn't silently clear it. */}
@@ -241,6 +243,13 @@ export default function UsersPage() {
                   <option value={modal.departmentId}>{modal.departmentName ?? 'Inactive department'}</option>
                 )}
               </select>
+              {errors.departmentId
+                ? errText('departmentId')
+                : form.role === 'DepartmentStaff' && (
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+                    Shared account for the department's designated PC: staff can view department stock and file requests (typing their own name); approvals stay with named users.
+                  </span>
+                )}
             </div>
             <div className="form-group">
               <label className="form-label">Email *</label>

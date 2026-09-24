@@ -26,7 +26,8 @@ function StatCard({ label, value, icon: Icon, color, onClick }) {
 export default function PurchaseOrders() {
   const { user } = useAuth();
   const canGenerate = ['SuperAdmin', 'HospitalAdministrator', 'ProcurementStaff'].includes(user?.role);
-  const canDeliver = ['SuperAdmin', 'HospitalAdministrator', 'InventoryOfficer'].includes(user?.role);
+  // Procurement receives deliveries: actual quantity, lot/batch no., expiry.
+  const canDeliver = ['SuperAdmin', 'ProcurementStaff'].includes(user?.role);
 
   const [orders, setOrders] = useState([]);
   const [approvedReqs, setApprovedReqs] = useState([]);

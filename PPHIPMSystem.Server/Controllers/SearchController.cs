@@ -33,7 +33,7 @@ public class SearchController : ControllerBase
 
         // Department heads only see their own department's requests and have no
         // access to purchase orders (same scoping as ProcurementController).
-        var isDeptHead = User.IsInRole("DepartmentHead");
+        var isDeptHead = User.IsInRole("DepartmentHead") || User.IsInRole("DepartmentStaff");
         int? ownDeptId = int.TryParse(User.FindFirstValue("departmentId"), out var d) ? d : null;
 
         var requests = await _db.ProcurementRequests.AsNoTracking()

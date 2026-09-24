@@ -20,10 +20,25 @@ public class ProcurementController : ControllerBase
         _attachments = attachments;
     }
 
+    // Department heads and shared department PCs only ever see and act on
+    // their own department's requests.
+    private bool IsDepartmentScoped => User.IsInRole("DepartmentHead") || User.IsInRole("DepartmentStaff");
+    private bool IsAdmin => User.IsInRole("SuperAdmin") || User.IsInRole("HospitalAdministrator");
+
+    // Which department a new request is filed under: department accounts are
+    // pinned to their own; administrators pick one on the form (falling back
+    // to their own department when they have one).
+    private int? ResolveRequestDepartment(int? requested)
+    {
+        int? own = int.TryParse(User.FindFirstValue("departmentId"), out var d) ? d : null;
+        if (IsAdmin && requested.HasValue) return requested;
+        return own;
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] string? status, [FromQuery] int? departmentId)
     {
-        if (User.IsInRole("DepartmentHead"))
+        if (IsDepartmentScoped)
         {
             var deptClaim = User.FindFirstValue("departmentId");
             if (int.TryParse(deptClaim, out var userDeptId))
@@ -40,7 +55,7 @@ public class ProcurementController : ControllerBase
         var result = await _procurement.GetByIdAsync(id);
         if (result is null) return NotFound();
         
-        if (User.IsInRole("DepartmentHead"))
+        if (IsDepartmentScoped)
         {
             var deptClaim = User.FindFirstValue("departmentId");
             if (!int.TryParse(deptClaim, out var userDeptId) || result.DepartmentId != userDeptId)
@@ -51,13 +66,15 @@ public class ProcurementController : ControllerBase
     }
 
     [HttpPost]
-    [Authorize(Roles = "SuperAdmin,HospitalAdministrator,DepartmentHead")]
+    [Authorize(Roles = "SuperAdmin,HospitalAdministrator,DepartmentHead,DepartmentStaff")]
     public async Task<IActionResult> Create([FromBody] CreateProcurementRequestDto dto)
     {
         var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
-        var deptClaim = User.FindFirstValue("departmentId");
-        if (!int.TryParse(deptClaim, out var deptId))
-            return BadRequest(new { message = "User has no department assigned." });
+        if (ResolveRequestDepartment(dto.DepartmentId) is not { } deptId)
+            return BadRequest(new { message = "Choose the requesting department." });
+        // A shared department PC is logged in as the ward, not a person.
+        if (User.IsInRole("DepartmentStaff") && string.IsNullOrWhiteSpace(dto.RequestedByName))
+            return BadRequest(new { message = "Enter the name of the person making the request." });
 
         try
         {
@@ -70,8 +87,50 @@ public class ProcurementController : ControllerBase
         }
     }
 
+    // Edit quantities / add or remove lines while nobody has approved it yet.
+    [HttpPut("{id}")]
+    [Authorize(Roles = "SuperAdmin,HospitalAdministrator,DepartmentHead,DepartmentStaff")]
+    public async Task<IActionResult> Update(int id, [FromBody] UpdateProcurementRequestDto dto)
+    {
+        if (!await CanAccessRequestAsync(id)) return Forbid();
+        var existing = await _procurement.GetByIdAsync(id);
+        if (existing is null) return NotFound();
+        if (User.IsInRole("DepartmentStaff") && string.IsNullOrWhiteSpace(dto.RequestedByName))
+            return BadRequest(new { message = "Enter the name of the person making the request." });
+
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        // Department accounts can't move a request to another department.
+        var deptId = IsAdmin ? dto.DepartmentId ?? existing.DepartmentId : existing.DepartmentId;
+        try
+        {
+            var result = await _procurement.UpdateAsync(id, dto, userId, deptId);
+            return result is null ? NotFound() : Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpPatch("{id}/cancel")]
+    [Authorize(Roles = "SuperAdmin,HospitalAdministrator,DepartmentHead,DepartmentStaff")]
+    public async Task<IActionResult> Cancel(int id, [FromBody] CancelProcurementRequestDto? dto)
+    {
+        if (!await CanAccessRequestAsync(id)) return Forbid();
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        try
+        {
+            var result = await _procurement.CancelAsync(id, dto?.Reason, userId);
+            return result is null ? NotFound() : Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     [HttpPatch("{id}/submit")]
-    [Authorize(Roles = "SuperAdmin,HospitalAdministrator,DepartmentHead")]
+    [Authorize(Roles = "SuperAdmin,HospitalAdministrator,DepartmentHead,DepartmentStaff")]
     public async Task<IActionResult> Submit(int id)
     {
         // Department heads may only push their own department's requests forward.
@@ -90,7 +149,7 @@ public class ProcurementController : ControllerBase
     }
 
     [HttpPatch("{id}/approve")]
-    [Authorize(Roles = "SuperAdmin,HospitalAdministrator,ProcurementStaff,InventoryOfficer")]
+    [Authorize(Roles = "SuperAdmin,HospitalAdministrator,InventoryOfficer")]
     public async Task<IActionResult> Approve(int id, [FromBody] ApproveProcurementDto dto)
     {
         var approverId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
@@ -98,6 +157,47 @@ public class ProcurementController : ControllerBase
         {
             var result = await _procurement.ProcessApprovalAsync(id, dto, approverId);
             return result is null ? NotFound() : Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    // Retry the automatic release of a fully approved request once the
+    // missing stock has been received.
+    [HttpPatch("{id}/release")]
+    [Authorize(Roles = "SuperAdmin,HospitalAdministrator,InventoryOfficer")]
+    public async Task<IActionResult> Release(int id)
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        try
+        {
+            var result = await _procurement.ReleaseAsync(id, userId);
+            return result is null ? NotFound() : Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    // Items that pending department requests compete for, with the stock
+    // actually free to hand out and a proportional fair-share suggestion.
+    [HttpGet("allocation")]
+    [Authorize(Roles = "SuperAdmin,HospitalAdministrator,InventoryOfficer")]
+    public async Task<IActionResult> GetAllocation()
+        => Ok(await _procurement.GetAllocationOverviewAsync());
+
+    [HttpPut("allocation")]
+    [Authorize(Roles = "SuperAdmin,HospitalAdministrator,InventoryOfficer")]
+    public async Task<IActionResult> SaveAllocation([FromBody] SaveAllocationsDto dto)
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        try
+        {
+            await _procurement.SaveAllocationsAsync(dto, userId);
+            return NoContent();
         }
         catch (InvalidOperationException ex)
         {
@@ -127,7 +227,7 @@ public class ProcurementController : ControllerBase
     // the GetAll scoping; every other role sees the full procurement pipeline.
     private async Task<bool> CanAccessRequestAsync(int requestId)
     {
-        if (!User.IsInRole("DepartmentHead")) return true;
+        if (!IsDepartmentScoped) return true;
         var deptClaim = User.FindFirstValue("departmentId");
         return int.TryParse(deptClaim, out var deptId)
             && await _attachments.RequestBelongsToDepartmentAsync(requestId, deptId);
@@ -204,8 +304,10 @@ public class ProcurementController : ControllerBase
         return result is null ? NotFound() : Ok(result);
     }
 
+    // Receiving is Procurement's job: they count what actually arrived and
+    // record its lot/batch number and expiry against the PO.
     [HttpPatch("purchase-orders/{id}/confirm-delivery")]
-    [Authorize(Roles = "SuperAdmin,HospitalAdministrator,InventoryOfficer")]
+    [Authorize(Roles = "SuperAdmin,ProcurementStaff")]
     public async Task<IActionResult> ConfirmDelivery(int id, [FromBody] ConfirmDeliveryDto? dto)
     {
         var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;

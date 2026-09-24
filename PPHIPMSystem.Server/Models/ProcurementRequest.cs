@@ -16,6 +16,12 @@ public class ProcurementRequest
     public string RequestedByUserId { get; set; } = string.Empty;
     public ApplicationUser RequestedByUser { get; set; } = null!;
 
+    // Name of the person actually asking, as typed on the request form. On a
+    // shared department PC the logged-in account is the ward's, not a person's,
+    // so this is the only record of who needed the supplies.
+    [MaxLength(150)]
+    public string? RequestedByName { get; set; }
+
     [Required, MaxLength(1000)]
     public string Justification { get; set; } = string.Empty;
 
@@ -23,6 +29,7 @@ public class ProcurementRequest
 
     public DateTime RequestedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime? ReleasedAt { get; set; }
 
     public ICollection<ProcurementRequestItem> Items { get; set; } = [];
     public ICollection<ProcurementApproval> Approvals { get; set; } = [];

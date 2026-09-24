@@ -80,7 +80,7 @@ export default function App() {
 
           {/* Department heads land here from "reorder" shortcuts; the server scopes them to their own department. */}
           <Route path="procurement" element={<PrivateRoute roles={[...STAFF_ROLES, 'DepartmentHead']}><ProcurementList /></PrivateRoute>} />
-          <Route path="department-requests" element={<PrivateRoute roles={['SuperAdmin', 'HospitalAdministrator', 'DepartmentHead']}><DepartmentRequestsPage /></PrivateRoute>} />
+          <Route path="department-requests" element={<PrivateRoute roles={['SuperAdmin', 'HospitalAdministrator', 'DepartmentHead', 'DepartmentStaff']}><DepartmentRequestsPage /></PrivateRoute>} />
           <Route path="purchase-orders" element={<PrivateRoute roles={STAFF_ROLES}><PurchaseOrders /></PrivateRoute>} />
           {/* Admins set the figures; procurement staff and department heads read
               them (the server scopes heads to their own department). */}
