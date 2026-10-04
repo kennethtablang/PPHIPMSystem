@@ -21,3 +21,8 @@ export const downloadImportTemplate = async () => {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 };
+
+// Duplicate items: review groups, live "similar items" check, and merge.
+export const getDuplicateGroups = () => api.get('/inventory/duplicates');
+export const getSimilarItems = p => api.get('/inventory/similar', { params: p });
+export const mergeItems = d => api.post('/inventory/merge', d);

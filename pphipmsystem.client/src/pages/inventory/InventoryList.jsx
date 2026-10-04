@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { MdAdd, MdEdit, MdDelete, MdSearch, MdWarning, MdFileDownload, MdShoppingCart, MdUploadFile, MdQrCode2, MdInventory2, MdClose } from 'react-icons/md';
-import { getItems, createItem, updateItem, deleteItem, importPreview, importItems, downloadImportTemplate } from '../../api/inventory';
+import { MdAdd, MdEdit, MdDelete, MdSearch, MdWarning, MdFileDownload, MdShoppingCart, MdUploadFile, MdQrCode2, MdInventory2, MdClose, MdContentCopy } from 'react-icons/md';
+import { getItems, createItem, updateItem, deleteItem, importPreview, importItems, downloadImportTemplate, getSimilarItems } from '../../api/inventory';
+import DuplicateReviewModal from './DuplicateReviewModal';
 import { getCategories } from '../../api/categories';
 import { getSystemSettings } from '../../api/systemSettings';
 import { exportInventorySnapshot } from '../../api/reports';
@@ -12,7 +13,7 @@ import { toast } from '../../components/common/Toast';
 import Pagination, { usePagination } from '../../components/common/Pagination';
 import { useAuth } from '../../context/AuthContext';
 
-const BLANK = { name: '', itemCode: '', description: '', unit: '', categoryId: '', reorderThreshold: 0, expirationWarningDays: 30, preferredForecastMethod: 'MovingAverage', movingAverageWindow: 3, smoothingConstant: 0.3 };
+const BLANK = { name: '', brand: '', itemCode: '', description: '', unit: '', categoryId: '', reorderThreshold: 0, expirationWarningDays: 30, preferredForecastMethod: 'MovingAverage', movingAverageWindow: 3, smoothingConstant: 0.3 };
 
 export default function InventoryList() {
   const { user } = useAuth();
@@ -24,6 +25,8 @@ export default function InventoryList() {
   // Low-stock reorders become replenishment Purchase Requests, which the
   // Supply Officer (Procurement) raises — matches ProcurementList.canManagePr.
   const canRequest = ['SuperAdmin', 'HospitalAdministrator', 'ProcurementStaff'].includes(user?.role);
+  // Deleting and merging items are admin-only (matches the server role guards).
+  const isAdmin = ['SuperAdmin', 'HospitalAdministrator'].includes(user?.role);
 
   // Restock to roughly twice the reorder threshold — editable in the request form.
   const suggestedQty = item => Math.max(Math.ceil(item.reorderThreshold * 2 - item.quantityOnHand), 1);
@@ -55,6 +58,9 @@ export default function InventoryList() {
   const [importFile, setImportFile] = useState(null);
   const [importRows, setImportRows] = useState(null);
   const [importing, setImporting] = useState(false);
+  const [dupModal, setDupModal] = useState(false);
+  // Existing items that look like the one being added/edited (warned, not blocked).
+  const [similar, setSimilar] = useState([]);
 
   const load = () => {
     setLoading(true);
@@ -77,6 +83,22 @@ export default function InventoryList() {
   }, [canEdit]);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: reload only when these inputs change
   useEffect(() => { load(); }, [search, catFilter, lowStockOnly]);
+
+  // While the Add/Edit form is open, look up items matching what's typed so
+  // the user reuses the existing record instead of creating a duplicate.
+  useEffect(() => {
+    if (!modal || form.name.trim().length < 3) { setSimilar([]); return; }
+    const t = setTimeout(() => {
+      getSimilarItems({
+        name: form.name.trim(),
+        brand: form.brand.trim() || undefined,
+        unit: form.unit.trim() || undefined,
+        categoryId: form.categoryId || undefined,
+        excludeId: modal === 'create' ? undefined : modal.id,
+      }).then(r => setSimilar(r.data)).catch(() => setSimilar([]));
+    }, 400);
+    return () => clearTimeout(t);
+  }, [modal, form.name, form.brand, form.unit, form.categoryId]);
 
   // Drop ticks for rows that are no longer listed (filter change, delete, reload)
   // so the bulk action count can never include an item the user cannot see.
@@ -123,7 +145,8 @@ export default function InventoryList() {
     setImporting(true);
     try {
       const { data } = await importItems(importFile);
-      toast.success(`Imported ${data.imported} item(s)${data.skipped ? `, skipped ${data.skipped}` : ''}.`);
+      const created = data.categoriesCreated?.length ? ` New categories: ${data.categoriesCreated.join(', ')}.` : '';
+      toast.success(`Imported ${data.imported} item(s)${data.skipped ? `, skipped ${data.skipped}` : ''}.${created}`);
       setImportModal(false);
       load();
     } catch (e) {
@@ -132,7 +155,7 @@ export default function InventoryList() {
   };
   const openEdit = item => {
     setForm({
-      name: item.name, itemCode: item.itemCode ?? '', description: item.description ?? '',
+      name: item.name, brand: item.brand ?? '', itemCode: item.itemCode ?? '', description: item.description ?? '',
       unit: item.unit, categoryId: item.categoryId,
       reorderThreshold: item.reorderThreshold, expirationWarningDays: item.expirationWarningDays,
       preferredForecastMethod: item.preferredForecastMethod, movingAverageWindow: item.movingAverageWindow,
@@ -148,10 +171,10 @@ export default function InventoryList() {
     setSaving(true);
     try {
       if (modal === 'create') {
-        await createItem({ ...form, categoryId: +form.categoryId, reorderThreshold: +form.reorderThreshold, expirationWarningDays: +form.expirationWarningDays, movingAverageWindow: +form.movingAverageWindow, smoothingConstant: +form.smoothingConstant });
+        await createItem({ ...form, brand: form.brand.trim() || null, categoryId: +form.categoryId, reorderThreshold: +form.reorderThreshold, expirationWarningDays: +form.expirationWarningDays, movingAverageWindow: +form.movingAverageWindow, smoothingConstant: +form.smoothingConstant });
         toast.success('Item created.');
       } else {
-        await updateItem(modal.id, { ...form, categoryId: +form.categoryId, reorderThreshold: +form.reorderThreshold, expirationWarningDays: +form.expirationWarningDays, movingAverageWindow: +form.movingAverageWindow, smoothingConstant: +form.smoothingConstant, isActive: form.isActive ?? true });
+        await updateItem(modal.id, { ...form, brand: form.brand.trim() || null, categoryId: +form.categoryId, reorderThreshold: +form.reorderThreshold, expirationWarningDays: +form.expirationWarningDays, movingAverageWindow: +form.movingAverageWindow, smoothingConstant: +form.smoothingConstant, isActive: form.isActive ?? true });
         toast.success('Item updated.');
       }
       setModal(null);
@@ -166,7 +189,7 @@ export default function InventoryList() {
   const remove = async id => {
     if (!confirm('Delete this item?')) return;
     try { await deleteItem(id); toast.success('Item deleted.'); load(); }
-    catch { toast.error('Cannot delete item with transactions.'); }
+    catch (e) { toast.error(e.response?.data?.message ?? 'Failed to delete item.'); }
   };
 
   return (
@@ -193,6 +216,9 @@ export default function InventoryList() {
               <button className="btn btn-secondary" onClick={openImport}>
                 <MdUploadFile size={16} /> Import
               </button>
+              <button className="btn btn-secondary" onClick={() => setDupModal(true)} title="Find items recorded more than once">
+                <MdContentCopy size={16} /> Duplicates
+              </button>
               <button className="btn btn-primary" onClick={openCreate}>
                 <MdAdd size={16} /> Add Item
               </button>
@@ -205,7 +231,7 @@ export default function InventoryList() {
       <div className="filter-bar">
         <div style={{ position: 'relative', flex: 1, minWidth: 200 }}>
           <MdSearch size={15} style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-          <input className="form-control" placeholder="Search by name or code…" value={search} onChange={e => setSearch(e.target.value)} style={{ paddingLeft: 30 }} />
+          <input className="form-control" placeholder="Search by description, brand or code…" value={search} onChange={e => setSearch(e.target.value)} style={{ paddingLeft: 30 }} />
         </div>
         <select className="form-control" value={catFilter} onChange={e => setCatFilter(e.target.value)} style={{ minWidth: 180 }}>
           <option value="">All Categories</option>
@@ -285,8 +311,9 @@ export default function InventoryList() {
                     />
                   </th>
                 )}
-                <th>Code</th>
-                <th>Item Name</th>
+                <th>Item Code</th>
+                <th>Description / Generic Name</th>
+                <th>Brand</th>
                 <th>Category</th>
                 <th>Unit</th>
                 <th>Supplies Available</th>
@@ -298,7 +325,7 @@ export default function InventoryList() {
             </thead>
             <tbody>
               {items.length === 0 ? (
-                <tr><td colSpan={canSelect ? 10 : 9} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>No items found.</td></tr>
+                <tr><td colSpan={canSelect ? 11 : 10} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>No items found.</td></tr>
               ) : pager.pageItems.map(item => (
                 <tr key={item.id} className={selectedIds.has(item.id) ? 'row-selected' : undefined}>
                   {canSelect && (
@@ -316,6 +343,7 @@ export default function InventoryList() {
                     <div style={{ fontWeight: 500 }}>{item.name}</div>
                     {item.description && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{item.description}</div>}
                   </td>
+                  <td>{item.brand || <span style={{ color: 'var(--text-muted)' }}>—</span>}</td>
                   <td>{item.categoryName}</td>
                   <td>{item.unit}</td>
                   <td>
@@ -363,7 +391,7 @@ export default function InventoryList() {
                               <MdInventory2 size={13} /> Replenish
                             </button>
                             <button className="btn btn-ghost btn-icon btn-sm" onClick={() => openEdit(item)} title="Edit"><MdEdit size={15} /></button>
-                            <button className="btn btn-danger btn-icon btn-sm" onClick={() => remove(item.id)} title="Delete"><MdDelete size={15} /></button>
+                            {isAdmin && <button className="btn btn-danger btn-icon btn-sm" onClick={() => remove(item.id)} title="Delete"><MdDelete size={15} /></button>}
                           </>
                         )}
                       </div>
@@ -424,8 +452,9 @@ export default function InventoryList() {
           }
         >
           <div className="alert alert-info" style={{ fontSize: 12 }}>
-            Upload an .xlsx file with columns <strong>Name, Item Code, Description, Unit, Category,
-            Reorder Threshold, Expiration Warning Days</strong>. Categories must already exist.
+            Upload an .xlsx file with columns <strong>Name, Brand, Item Code, Description, Unit, Category,
+            Reorder Threshold, Expiration Warning Days</strong>. Categories that don't exist yet are created
+            on import, and unit spellings (pcs, bxs, bots…) are standardized.
             {' '}
             <button
               type="button"
@@ -450,18 +479,26 @@ export default function InventoryList() {
               <div className="table-wrap" style={{ maxHeight: 300, overflowY: 'auto' }}>
                 <table>
                   <thead>
-                    <tr><th>Row</th><th>Name</th><th>Unit</th><th>Category</th><th>Status</th></tr>
+                    <tr><th>Row</th><th>Name</th><th>Brand</th><th>Unit</th><th>Category</th><th>Status</th></tr>
                   </thead>
                   <tbody>
                     {importRows.map(r => (
                       <tr key={r.row}>
                         <td style={{ color: 'var(--text-muted)', fontSize: 12 }}>{r.row}</td>
                         <td style={{ fontWeight: 500 }}>{r.name || <span style={{ color: 'var(--text-muted)' }}>—</span>}</td>
+                        <td>{r.brand || '—'}</td>
                         <td>{r.unit || '—'}</td>
                         <td>{r.category || '—'}</td>
                         <td>
                           {r.isValid
-                            ? <span className="badge badge-green">Ready</span>
+                            ? <div>
+                                <span className="badge badge-green">Ready</span>
+                                {r.warnings?.length > 0 && (
+                                  <div style={{ fontSize: 11, color: '#b45309', marginTop: 3, lineHeight: 1.4 }}>
+                                    {r.warnings.join(' ')}
+                                  </div>
+                                )}
+                              </div>
                             : <div>
                                 <span className="badge badge-red">Error</span>
                                 <div style={{ fontSize: 11, color: '#dc2626', marginTop: 3, lineHeight: 1.4 }}>
@@ -479,6 +516,10 @@ export default function InventoryList() {
         </Modal>
       )}
 
+      {dupModal && (
+        <DuplicateReviewModal canMerge={isAdmin} onClose={() => setDupModal(false)} onChanged={load} />
+      )}
+
       {modal && (
         <Modal
           title={modal === 'create' ? 'Add Inventory Item' : `Edit: ${modal.name}`}
@@ -493,10 +534,31 @@ export default function InventoryList() {
             </>
           }
         >
+          {similar.length > 0 && (
+            <div className={`alert ${similar.some(s => s.isExactMatch) ? 'alert-danger' : 'alert-warning'}`} style={{ fontSize: 12 }}>
+              <strong>
+                {similar.some(s => s.isExactMatch)
+                  ? 'This item already exists — saving will be refused. Use the existing item instead:'
+                  : 'Similar item(s) already exist. Make sure this is not a duplicate:'}
+              </strong>
+              <ul style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+                {similar.map(s => (
+                  <li key={s.id}>
+                    {s.itemCode ? <code>{s.itemCode}</code> : '(no code)'} — {s.name}
+                    {s.brand ? ` [${s.brand}]` : ''}, {s.unit} · {s.categoryName}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div className="grid-2">
             <div className="form-group">
-              <label className="form-label">Item Name *</label>
+              <label className="form-label">Description / Generic Name *</label>
               <input className="form-control" value={form.name} onChange={set('name')} required />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Brand</label>
+              <input className="form-control" value={form.brand} onChange={set('brand')} placeholder="e.g. Terumo" />
             </div>
             <div className="form-group">
               <label className="form-label">Item Code</label>
@@ -541,7 +603,7 @@ export default function InventoryList() {
             )}
           </div>
           <div className="form-group">
-            <label className="form-label">Description</label>
+            <label className="form-label">Additional Details</label>
             <textarea className="form-control" value={form.description} onChange={set('description')} rows={2} />
           </div>
         </Modal>

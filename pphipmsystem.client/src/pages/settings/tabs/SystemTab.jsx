@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { MdDns, MdSave, MdInventory2, MdLock, MdCampaign, MdStorage, MdAccountBalanceWallet } from 'react-icons/md';
+import { MdDns, MdSave, MdInventory2, MdLock, MdCampaign, MdStorage, MdAccountBalanceWallet, MdDescription } from 'react-icons/md';
 import { getSystemSettings, updateSystemSettings } from '../../../api/systemSettings';
 import { toast } from '../../../components/common/Toast';
 
@@ -121,6 +121,67 @@ export default function SystemTab() {
             </p>
           </div>
           <Toggle on={settings.enforceDepartmentBudget} onClick={toggle('enforceDepartmentBudget')} />
+        </div>
+
+        <Section Icon={MdDescription} title="Purchase Request form" desc="Printed on every Purchase Request (Appendix 47). Leave a name blank to print an empty line to sign over." />
+
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+          <Field label="LGU" desc="Top line of the form.">
+            <input className="form-control" style={{ width: 340 }} value={settings.prLgu} onChange={set('prLgu')} maxLength={150} />
+          </Field>
+          <Field label="Department" desc="As written on the form.">
+            <input className="form-control" style={{ width: 160 }} value={settings.prDepartment} onChange={set('prDepartment')} maxLength={100} />
+          </Field>
+        </div>
+
+        {[
+          ['Requested by', 'prRequestedByName', 'prRequestedByDesignation', 'e.g. Chief of Hospital II'],
+          ['Cash Availability', 'prCashAvailabilityName', 'prCashAvailabilityDesignation', 'e.g. Provincial Treasurer'],
+          ['For & By Authority of the Governor', 'prApproverName', 'prApproverDesignation', 'e.g. PHMSO Head'],
+        ].map(([label, nameKey, desigKey, hint]) => (
+          <div key={nameKey} style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+            <Field label={`${label} — printed name`} desc="Include titles/post-nominals as they should appear.">
+              <input className="form-control" style={{ width: 260 }} value={settings[nameKey]} onChange={set(nameKey)} maxLength={150} />
+            </Field>
+            <Field label="Designation" desc={hint}>
+              <input className="form-control" style={{ width: 240 }} value={settings[desigKey]} onChange={set(desigKey)} maxLength={150} />
+            </Field>
+          </div>
+        ))}
+
+        <Section Icon={MdDescription} title="Requisition and Issue Slip" desc="Letterhead, approvers and document control printed on every RIS. Update the revision fields when the form is revised." />
+
+        <Field label="Letterhead address" desc="Printed under the organization name.">
+          <input className="form-control" value={settings.letterheadAddress} onChange={set('letterheadAddress')} maxLength={200} />
+        </Field>
+        <Field label="Certification line" desc="e.g. ISO 9001 and certificate number.">
+          <input className="form-control" value={settings.letterheadCertification} onChange={set('letterheadCertification')} maxLength={150} />
+        </Field>
+
+        {[
+          ['First approver', 'risApprover1Name', 'risApprover1Designation', 'e.g. OIC - Chief of Ancillary Service'],
+          ['Second approver', 'risApprover2Name', 'risApprover2Designation', 'e.g. Chief Nurse'],
+        ].map(([label, nameKey, desigKey, hint]) => (
+          <div key={nameKey} style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+            <Field label={`${label} — printed name`} desc="Leave blank to print an empty line.">
+              <input className="form-control" style={{ width: 260 }} value={settings[nameKey]} onChange={set(nameKey)} maxLength={150} />
+            </Field>
+            <Field label="Designation" desc={hint}>
+              <input className="form-control" style={{ width: 240 }} value={settings[desigKey]} onChange={set(desigKey)} maxLength={150} />
+            </Field>
+          </div>
+        ))}
+
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+          <Field label="Form code" desc="Document control number.">
+            <input className="form-control" style={{ width: 180 }} value={settings.risFormCode} onChange={set('risFormCode')} maxLength={50} />
+          </Field>
+          <Field label="Revision No." desc="e.g. 04">
+            <input className="form-control" style={{ width: 100 }} value={settings.risRevisionNo} onChange={set('risRevisionNo')} maxLength={20} />
+          </Field>
+          <Field label="Revision date" desc="As printed, e.g. 02-01-2026">
+            <input className="form-control" style={{ width: 140 }} value={settings.risRevisionDate} onChange={set('risRevisionDate')} maxLength={20} />
+          </Field>
         </div>
 
         <Section Icon={MdCampaign} title="Announcement" desc="Shown as a banner to every user until they dismiss it. Leave empty for no banner." />

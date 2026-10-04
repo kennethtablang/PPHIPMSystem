@@ -29,7 +29,7 @@ public class InventoryService : IInventoryService
             .AsQueryable();
 
         if (!string.IsNullOrWhiteSpace(search))
-            query = query.Where(i => i.Name.Contains(search) || (i.ItemCode != null && i.ItemCode.Contains(search)));
+            query = query.Where(i => i.Name.Contains(search) || (i.ItemCode != null && i.ItemCode.Contains(search)) || (i.Brand != null && i.Brand.Contains(search)));
 
         if (categoryId.HasValue)
             query = query.Where(i => i.CategoryId == categoryId.Value);
@@ -56,6 +56,8 @@ public class InventoryService : IInventoryService
         if (category is null || !category.IsActive)
             throw new InvalidOperationException("Category not found.");
 
+        await EnsureNotDuplicateAsync(dto.Name, dto.Brand, dto.Unit, dto.CategoryId, dto.ItemCode, excludeId: null);
+
         var entity = _mapper.Map<InventoryItem>(dto);
         _db.InventoryItems.Add(entity);
         await _db.SaveChangesAsync();
@@ -70,6 +72,12 @@ public class InventoryService : IInventoryService
 
         _ = await _db.Categories.FindAsync(dto.CategoryId)
             ?? throw new InvalidOperationException("Category not found.");
+
+        // Only re-check identity when this edit changes it, so pre-existing
+        // duplicates can still be edited until someone merges them.
+        var identityChanged = ItemIdentity.ExactKey(entity.Name, entity.Brand, entity.Unit, entity.CategoryId)
+                              != ItemIdentity.ExactKey(dto.Name, dto.Brand, dto.Unit, dto.CategoryId);
+        await EnsureNotDuplicateAsync(dto.Name, dto.Brand, dto.Unit, dto.CategoryId, dto.ItemCode, excludeId: id, checkIdentity: identityChanged);
 
         _mapper.Map(dto, entity);
         entity.UpdatedAt = DateTime.UtcNow;
@@ -91,6 +99,37 @@ public class InventoryService : IInventoryService
         await _db.Entry(entity).Reference(e => e.Category).LoadAsync();
         await _db.Entry(entity).Collection(e => e.Batches).LoadAsync();
         return _mapper.Map<InventoryItemDto>(entity);
+    }
+
+    // An item is identified by Category + Description/Generic Name + Brand +
+    // Unit (see ItemIdentity); refuse a second record of the same item, and a
+    // reused item code, instead of letting duplicates into the list.
+    private async Task EnsureNotDuplicateAsync(string name, string? brand, string unit, int categoryId, string? itemCode, int? excludeId, bool checkIdentity = true)
+    {
+        if (!string.IsNullOrWhiteSpace(itemCode))
+        {
+            var code = itemCode.Trim();
+            var clash = await _db.InventoryItems.AsNoTracking()
+                .Where(i => i.ItemCode == code && i.Id != excludeId)
+                .Select(i => new { i.Name, i.IsActive })
+                .FirstOrDefaultAsync();
+            if (clash is not null)
+                throw new InvalidOperationException(
+                    $"Item code \"{code}\" is already used by \"{clash.Name}\"{(clash.IsActive ? "" : " (inactive)")}.");
+        }
+
+        if (!checkIdentity) return;
+        var key = ItemIdentity.ExactKey(name, brand, unit, categoryId);
+        var sameCategory = await _db.InventoryItems.AsNoTracking()
+            .Where(i => i.IsActive && i.CategoryId == categoryId && i.Id != excludeId)
+            .Select(i => new { i.Name, i.Brand, i.Unit, i.ItemCode })
+            .ToListAsync();
+        var existing = sameCategory.FirstOrDefault(i => ItemIdentity.ExactKey(i.Name, i.Brand, i.Unit, categoryId) == key);
+        if (existing is not null)
+            throw new InvalidOperationException(
+                $"This item already exists: {existing.ItemCode ?? "(no code)"} — {existing.Name}" +
+                $"{(string.IsNullOrWhiteSpace(existing.Brand) ? "" : $" [{existing.Brand}]")}, {existing.Unit}. " +
+                "Items with the same category, description, brand and unit are the same item — use the existing one.");
     }
 
     public async Task<bool> DeleteAsync(int id)

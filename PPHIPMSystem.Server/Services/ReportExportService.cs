@@ -19,10 +19,12 @@ public class ReportExportService : IReportExportService
     private readonly ISystemSettingsService _settings;
     private readonly ApplicationDbContext _db;
     private readonly IDepartmentBudgetService _budgets;
+    private readonly IWebHostEnvironment _env;
 
     public ReportExportService(IReportService reports, ISystemSettingsService settings,
-        ApplicationDbContext db, IDepartmentBudgetService budgets)
+        ApplicationDbContext db, IDepartmentBudgetService budgets, IWebHostEnvironment env)
     {
+        _env = env;
         _reports = reports;
         _settings = settings;
         _db = db;
@@ -391,107 +393,514 @@ public class ReportExportService : IReportExportService
 
     // ── LGU forms ────────────────────────────────────────────────────────────
 
-    // Requisition and Issue Slip (patterned on Appendix 63). Quantities issued
-    // and stock numbers are left for manual completion where the system has no data.
+    // Requisition and Issue Slip on the hospital's controlled form
+    // FRM-ADM-SUP-011: letterhead with both seals, 25 ruled lines per page
+    // split into the Requisition side (what the ward asked for) and the
+    // Issuance side (what the storeroom gave), then the signatories and the
+    // document-control strip. Every page is a complete slip.
+    //
+    // Eight columns: A Qty | B Unit | C:E Articles/Description |
+    // F Issued Qty | G:H Remarks. The header and signature rows reuse the same
+    // grid with different merges.
+    private const int RisLinesPerPage = 25;
+    private const string RisFont = "Arial";
+
     public async Task<byte[]?> ExportRequisitionSlipAsync(int requestId)
     {
         var request = await LoadRequestAsync(requestId);
         if (request is null) return null;
-        var org = (await _settings.GetAsync()).OrganizationName;
+        var s = await _settings.GetAsync();
 
         using var wb = new XLWorkbook();
         var ws = wb.AddWorksheet("RIS");
-        var row = WriteDocumentHeader(ws, org, "REQUISITION AND ISSUE SLIP (RIS)", lastCol: 7);
+        ws.Style.Font.SetFontName(RisFont).Font.SetFontSize(10);
 
-        row = WriteKeyValueBlock(ws, row, "Details", new (string, object)[]
+        double[] widths = [10, 10, 16, 16, 16, 13, 9, 15];
+        for (var c = 0; c < widths.Length; c++) ws.Column(c + 1).Width = widths[c];
+
+        var lines = request.Items.OrderBy(i => i.InventoryItem.Name).ToList();
+        var pages = Math.Max(1, (int)Math.Ceiling(lines.Count / (double)RisLinesPerPage));
+        var seals = LoadFormSeals();
+
+        var row = 1;
+        for (var page = 0; page < pages; page++)
         {
-            ("Division / Department", request.Department.Name),
-            ("RIS No.", request.RequestNumber),
-            ("Date", request.RequestedAt.ToString("yyyy-MM-dd")),
-            ("Fund Cluster", "____________"),
-        });
+            var pageLines = lines.Skip(page * RisLinesPerPage).Take(RisLinesPerPage).ToList();
+            row = WriteRequisitionSlipPage(ws, row, request, s, seals, pageLines, page + 1, pages);
+            if (page < pages - 1) ws.PageSetup.AddHorizontalPageBreak(row - 1);
+        }
 
-        // Issue side of the slip. Once the system has released the request the
-        // issued quantities are known; before that "Stock Available" reflects
-        // the storeroom right now and the issued column is left for ink.
-        var released = request.Status == Models.Enums.ProcurementStatus.Released;
-        row = WriteTable(ws, row, "Requisition",
-            ["Stock No.", "Unit", "Description", "Quantity Requested", "Stock Available", "Quantity Issued", "Remarks"],
-            request.Items.Select(i => new object[]
-            {
-                i.InventoryItem.ItemCode ?? "—",
-                i.InventoryItem.Unit,
-                i.InventoryItem.Name,
-                i.QuantityRequested,
-                released || i.InventoryItem.QuantityOnHand >= (i.QuantityApproved ?? i.QuantityRequested) ? "Yes" : "No",
-                i.QuantityReleased is decimal q ? q : "",
-                // An allocation below the request is explained on the slip.
-                string.Join("; ", new[]
-                {
-                    i.QuantityApproved is decimal a && a < i.QuantityRequested ? $"Allocated {a:0.##} (limited stock)" : null,
-                    i.Remarks,
-                }.Where(x => !string.IsNullOrWhiteSpace(x))),
-            }));
+        var setup = ws.PageSetup;
+        setup.PaperSize = XLPaperSize.LetterPaper; // short bond, like the printed pad
+        setup.PageOrientation = XLPageOrientation.Portrait;
+        setup.Margins.SetTop(0.4).SetBottom(0.4).SetLeft(0.4).SetRight(0.4).SetHeader(0).SetFooter(0);
+        setup.CenterHorizontally = true;
+        setup.FitToPages(1, 0);
+        setup.PrintAreas.Add(1, 1, row - 1, widths.Length);
+        ws.ShowGridLines = false;
 
-        ws.Cell(row, 1).Value = $"Purpose: {request.Justification}";
-        ws.Cell(row, 1).Style.Alignment.SetWrapText();
-        row += 2;
-
-        row = WriteSignatureBlock(ws, row, request,
-            ["Requested by", "Approved by", "Issued by", "Received by"]);
-
-        ws.Columns().AdjustToContents();
-        ws.Column(3).Width = Math.Max(ws.Column(3).Width, 40);
         return ToBytes(wb);
     }
 
-    // Purchase Request (patterned on Appendix 60), with estimated costs.
+    private static int WriteRequisitionSlipPage(IXLWorksheet ws, int top, Models.ProcurementRequest request,
+        DTOs.System.SystemSettingsDto s, (byte[]? Left, byte[]? Right) seals,
+        List<Models.ProcurementRequestItem> pageLines, int pageNo, int pageCount)
+    {
+        const int last = 8;
+        var row = top;
+
+        IXLRange Text(int r, int c1, int c2, string text, double size = 10, bool bold = true,
+            XLAlignmentHorizontalValues align = XLAlignmentHorizontalValues.Left)
+        {
+            var range = c1 == c2 ? ws.Range(r, c1, r, c2) : ws.Range(r, c1, r, c2).Merge();
+            range.Value = text;
+            range.Style.Font.SetFontSize(size).Font.SetBold(bold)
+                .Alignment.SetHorizontal(align).Alignment.SetVertical(XLAlignmentVerticalValues.Bottom);
+            return range;
+        }
+        // A value written on a signing/fill-in line.
+        IXLRange Line(int r, int c1, int c2, string? value, bool bold = true)
+        {
+            var range = Text(r, c1, c2, value ?? "", bold: bold, align: XLAlignmentHorizontalValues.Center);
+            range.Style.Alignment.SetShrinkToFit().Border.SetBottomBorder(XLBorderStyleValues.Thin);
+            return range;
+        }
+        void Caption(int r, int c1, int c2, string text) =>
+            Text(r, c1, c2, text, size: 10, bold: true, align: XLAlignmentHorizontalValues.Center)
+                .Style.Font.SetItalic().Alignment.SetVertical(XLAlignmentVerticalValues.Top);
+
+        // ── Letterhead: seals either side of the hospital name.
+        var headTop = row;
+        Text(row, 2, 7, s.OrganizationName, size: 18, align: XLAlignmentHorizontalValues.Center)
+            .Style.Border.SetBottomBorder(XLBorderStyleValues.Medium);
+        ws.Row(row).Height = 28;
+        row++;
+        Text(row, 2, 7, s.LetterheadAddress, size: 10, align: XLAlignmentHorizontalValues.Center);
+        row++;
+        Text(row, 2, 7, s.LetterheadCertification, size: 10, align: XLAlignmentHorizontalValues.Center);
+        row++;
+        ws.Row(row).Height = 8;
+        row++;
+        AddSeal(ws, seals.Left, headTop, 1, "SealLeft" + top);
+        AddSeal(ws, seals.Right, headTop, last, "SealRight" + top);
+
+        Text(row, 1, last, "REQUISITION AND ISSUE SLIP", size: 14, align: XLAlignmentHorizontalValues.Center);
+        ws.Row(row).Height = 26;
+        row++;
+
+        Text(row, 1, 2, "Department / Office :", bold: false);
+        Line(row, 3, 4, request.Department.Name);
+        Text(row, 5, 5, "Date :", bold: false, align: XLAlignmentHorizontalValues.Right);
+        Line(row, 6, 6, request.RequestedAt.ToLocalTime().ToString("MM-dd-yyyy"));
+        Text(row, 7, 7, "RIS No.", bold: false, align: XLAlignmentHorizontalValues.Right);
+        Line(row, 8, 8, request.RequestNumber);
+        ws.Row(row).Height = 18;
+        row++;
+
+        // ── Table header: Qty and Unit span both header rows; REQUISITION
+        // heads the description, ISSUANCE heads quantity + remarks.
+        var tableTop = row;
+        ws.Range(row, 1, row + 1, 1).Merge().Value = "Qty.";
+        ws.Range(row, 2, row + 1, 2).Merge().Value = "Unit";
+        ws.Range(row, 3, row, 5).Merge().Value = "REQUISITION";
+        ws.Range(row, 6, row, last).Merge().Value = "ISSUANCE";
+        ws.Range(row + 1, 3, row + 1, 5).Merge().Value = "Articles/Description";
+        ws.Cell(row + 1, 6).Value = "Quantity";
+        ws.Range(row + 1, 7, row + 1, last).Merge().Value = "Remarks";
+        var head = ws.Range(row, 1, row + 1, last);
+        head.Style.Font.SetFontSize(11).Alignment.SetHorizontal(XLAlignmentHorizontalValues.Center)
+            .Alignment.SetVertical(XLAlignmentVerticalValues.Center);
+        ws.Range(row, 3, row, last).Style.Font.SetBold().Font.SetItalic();
+        ws.Row(row).Height = 17;
+        ws.Row(row + 1).Height = 17;
+        row += 2;
+
+        var released = request.Status == Models.Enums.ProcurementStatus.Released;
+        for (var i = 0; i < RisLinesPerPage; i++)
+        {
+            ws.Range(row, 3, row, 5).Merge();
+            ws.Range(row, 7, row, last).Merge();
+            if (i < pageLines.Count)
+            {
+                var line = pageLines[i];
+                ws.Cell(row, 1).Value = line.QuantityRequested;
+                ws.Cell(row, 1).Style.NumberFormat.SetFormat(WholeOrDecimal(line.QuantityRequested));
+                ws.Cell(row, 2).Value = line.InventoryItem.Unit;
+                ws.Cell(row, 3).Value = string.IsNullOrWhiteSpace(line.InventoryItem.Brand)
+                    ? line.InventoryItem.Name
+                    : $"{line.InventoryItem.Name} ({line.InventoryItem.Brand})";
+                // Issued quantities are known once the system has released the
+                // request; before that the column is left for the storeroom's ink.
+                if (released && line.QuantityReleased is decimal issued)
+                {
+                    ws.Cell(row, 6).Value = issued;
+                    ws.Cell(row, 6).Style.NumberFormat.SetFormat(WholeOrDecimal(issued));
+                }
+                ws.Cell(row, 7).Value = string.Join("; ", new[]
+                {
+                    line.QuantityApproved is decimal a && a < line.QuantityRequested ? $"Allocated {a:0.##} (limited stock)" : null,
+                    line.Remarks,
+                }.Where(x => !string.IsNullOrWhiteSpace(x)));
+            }
+            ws.Row(row).Height = 20;
+            row++;
+        }
+        var body = ws.Range(tableTop + 2, 1, row - 1, last);
+        body.Style.Alignment.SetVertical(XLAlignmentVerticalValues.Bottom).Alignment.SetShrinkToFit();
+        ws.Range(tableTop + 2, 1, row - 1, 2).Style.Alignment.SetHorizontal(XLAlignmentHorizontalValues.Center);
+        ws.Range(tableTop + 2, 6, row - 1, 6).Style.Alignment.SetHorizontal(XLAlignmentHorizontalValues.Center);
+        ws.Range(tableTop, 1, row - 1, last).Style.Border.SetInsideBorder(XLBorderStyleValues.Thin)
+            .Border.SetOutsideBorder(XLBorderStyleValues.Medium);
+        // The heavier rule between the requisition and issuance halves.
+        ws.Range(tableTop, 6, row - 1, 6).Style.Border.SetLeftBorder(XLBorderStyleValues.Medium);
+        row++;
+
+        // ── Signatories.
+        // Requested by is the person who typed their name on the request (on
+        // a shared ward PC the account is the ward's, not theirs); Noted by
+        // is the department's section head.
+        var requester = request.RequestedByName
+                        ?? $"{request.RequestedByUser.FirstName} {request.RequestedByUser.LastName}";
+        Text(row, 1, 2, "Requested by:");
+        Line(row, 3, 4, requester.ToUpperInvariant());
+        Text(row, 5, 5, "Noted by:", align: XLAlignmentHorizontalValues.Right);
+        Line(row, 6, last, request.Department.HeadOfDepartment?.ToUpperInvariant());
+        ws.Row(row).Height = 24;
+        row++;
+        Caption(row, 3, 4, "(End User)");
+        Caption(row, 6, last, "(Section Head)");
+        row += 2;
+
+        Text(row, 1, 2, "Approved by:");
+        row++;
+        ws.Row(row).Height = 24;
+        Line(row, 3, 5, s.RisApprover1Name.ToUpperInvariant());
+        Line(row, 6, last, s.RisApprover2Name.ToUpperInvariant());
+        row++;
+        Caption(row, 3, 5, s.RisApprover1Designation);
+        Caption(row, 6, last, s.RisApprover2Designation);
+        row += 2;
+
+        // Issued by: whoever released the stock — the Inventory Officer who
+        // allocated it — once the system has done the release.
+        var issuer = released
+            ? request.Approvals
+                .Where(a => a.Action == Models.Enums.ApprovalAction.Approved && a.ApproverRole == Models.Enums.UserRole.InventoryOfficer)
+                .OrderByDescending(a => a.ApprovalLevel)
+                .Select(a => $"{a.ApproverUser.FirstName} {a.ApproverUser.LastName}")
+                .FirstOrDefault()
+            : null;
+        Text(row, 1, 2, "Issued by:");
+        Line(row, 3, 4, issuer?.ToUpperInvariant());
+        Text(row, 5, 5, "Received by:", align: XLAlignmentHorizontalValues.Right);
+        Line(row, 6, last, null);
+        ws.Row(row).Height = 24;
+        row += 2;
+
+        // ── Document control strip.
+        Text(row, 1, 2, s.RisFormCode, bold: false, align: XLAlignmentHorizontalValues.Center);
+        Text(row, 3, 4, $"Revision No. {s.RisRevisionNo}", bold: false, align: XLAlignmentHorizontalValues.Center);
+        Text(row, 5, 5, s.RisRevisionDate, bold: false, align: XLAlignmentHorizontalValues.Center);
+        Text(row, 6, last, $"Page {pageNo} of {pageCount}", bold: false, align: XLAlignmentHorizontalValues.Center);
+        var strip = ws.Range(row, 1, row, last);
+        strip.Style.Font.SetFontSize(11).Alignment.SetVertical(XLAlignmentVerticalValues.Center)
+            .Border.SetOutsideBorder(XLBorderStyleValues.Thin).Border.SetInsideBorder(XLBorderStyleValues.Thin);
+        ws.Row(row).Height = 20;
+        row++;
+        ws.Row(row).Height = 10; // breathing room before the next page's letterhead
+        row++;
+
+        return row;
+    }
+
+    private static string WholeOrDecimal(decimal value) =>
+        value == decimal.Truncate(value) ? "#,##0" : "#,##0.##";
+
+    // The province and hospital seals for printed forms. Drop clean PNGs at
+    // Assets/Forms/province-seal.png and Assets/Forms/hospital-seal.png in the
+    // server's content root; without them the letterhead prints text only.
+    private (byte[]? Left, byte[]? Right) LoadFormSeals()
+    {
+        byte[]? Read(string name)
+        {
+            var path = Path.Combine(_env.ContentRootPath, "Assets", "Forms", name);
+            return File.Exists(path) ? File.ReadAllBytes(path) : null;
+        }
+        return (Read("province-seal.png"), Read("hospital-seal.png"));
+    }
+
+    private static void AddSeal(IXLWorksheet ws, byte[]? png, int row, int col, string name)
+    {
+        if (png is null) return;
+        using var ms = new MemoryStream(png);
+        var pic = ws.AddPicture(ms, name).MoveTo(ws.Cell(row, col));
+        // Scale to ~60pt tall: the three letterhead rows.
+        var scale = 80.0 / pic.OriginalHeight;
+        pic.WithSize((int)(pic.OriginalWidth * scale), (int)(pic.OriginalHeight * scale));
+    }
+
+    // Purchase Request on the Provincial Government's Appendix 47 form, laid
+    // out to print like the paper original: 30 item lines per page on long
+    // bond (8.5" x 13"), every page a complete form with its own header,
+    // purpose and signatory block so each sheet can be signed and filed.
+    //
+    // Columns: A Item No. | B Unit | C:D Item Description | E Quantity |
+    // F Unit Cost | G Total Cost. The description is split over C and D only
+    // so the three signatory boxes below can be of equal width (B-label is
+    // A:B, then C, D:E and F:G).
+    private const int PrLinesPerPage = 30;
+    private const string FormFont = "Times New Roman";
+    private const string EntryFont = "Calibri";
+
     public async Task<byte[]?> ExportPurchaseRequestAsync(int requestId)
     {
         var request = await LoadRequestAsync(requestId);
         if (request is null) return null;
-        var org = (await _settings.GetAsync()).OrganizationName;
+        var s = await _settings.GetAsync();
 
         using var wb = new XLWorkbook();
         var ws = wb.AddWorksheet("Purchase Request");
-        var row = WriteDocumentHeader(ws, org, "PURCHASE REQUEST (PR)", lastCol: 6);
+        ws.Style.Font.SetFontName(EntryFont).Font.SetFontSize(10);
 
-        row = WriteKeyValueBlock(ws, row, "Details", new (string, object)[]
+        double[] widths = [7, 9, 30, 20, 10, 11, 17];
+        for (var c = 0; c < widths.Length; c++) ws.Column(c + 1).Width = widths[c];
+
+        var lines = request.Items.OrderBy(i => i.InventoryItem.Name).ToList();
+        var pages = Math.Max(1, (int)Math.Ceiling(lines.Count / (double)PrLinesPerPage));
+        var hasCosts = lines.Any(i => i.EstimatedUnitCost.HasValue);
+
+        var row = 1;
+        for (var page = 0; page < pages; page++)
         {
-            ("Office / Section", request.Department.Name),
-            ("PR No.", request.RequestNumber),
-            ("Date", request.RequestedAt.ToString("yyyy-MM-dd")),
-            ("Fund Cluster", "____________"),
-        });
+            var pageLines = lines.Skip(page * PrLinesPerPage).Take(PrLinesPerPage).ToList();
+            var isLast = page == pages - 1;
+            row = WritePurchaseRequestPage(ws, row, request, s, pageLines,
+                firstItemNo: page * PrLinesPerPage + 1,
+                grandTotal: isLast && hasCosts
+                    ? lines.Where(i => i.EstimatedUnitCost.HasValue).Sum(i => i.QuantityRequested * i.EstimatedUnitCost!.Value)
+                    : null,
+                pageNo: page + 1, pageCount: pages);
+            if (!isLast) ws.PageSetup.AddHorizontalPageBreak(row - 1);
+        }
 
-        row = WriteTable(ws, row, "Items",
-            ["Stock No.", "Unit", "Item Description", "Quantity", "Est. Unit Cost (PHP)", "Est. Total (PHP)"],
-            request.Items.Select(i => new object[]
-            {
-                i.InventoryItem.ItemCode ?? "—",
-                i.InventoryItem.Unit,
-                i.InventoryItem.Name,
-                i.QuantityRequested,
-                i.EstimatedUnitCost is decimal c ? c : "—",
-                i.EstimatedUnitCost is decimal c2 ? Math.Round(i.QuantityRequested * c2, 2) : "—",
-            }));
+        var setup = ws.PageSetup;
+        // Long bond is what the office uses, but row heights are chosen so a
+        // form still fits on one Letter page when the printer lacks 8.5" x 13".
+        setup.PaperSize = XLPaperSize.FolioPaper; // 8.5" x 13" long bond
+        setup.PageOrientation = XLPageOrientation.Portrait;
+        setup.Margins.SetTop(0.4).SetBottom(0.4).SetLeft(0.4).SetRight(0.4).SetHeader(0).SetFooter(0);
+        setup.CenterHorizontally = true;
+        setup.FitToPages(1, 0); // fit the width; page breaks above set the height
+        setup.PrintAreas.Add(1, 1, row - 1, widths.Length);
+        ws.ShowGridLines = false;
 
-        var total = request.Items.Where(i => i.EstimatedUnitCost.HasValue)
-            .Sum(i => i.QuantityRequested * i.EstimatedUnitCost!.Value);
-        ws.Cell(row, 1).Value = $"Estimated total: PHP {total:N2}";
-        ws.Cell(row, 1).Style.Font.SetBold();
-        row += 2;
-
-        ws.Cell(row, 1).Value = $"Purpose: {request.Justification}";
-        ws.Cell(row, 1).Style.Alignment.SetWrapText();
-        row += 2;
-
-        row = WriteSignatureBlock(ws, row, request, ["Requested by", "Approved by"]);
-
-        ws.Columns().AdjustToContents();
-        ws.Column(3).Width = Math.Max(ws.Column(3).Width, 40);
         return ToBytes(wb);
     }
+
+    private static int WritePurchaseRequestPage(IXLWorksheet ws, int top, Models.ProcurementRequest request,
+        DTOs.System.SystemSettingsDto s, List<Models.ProcurementRequestItem> pageLines,
+        int firstItemNo, decimal? grandTotal, int pageNo, int pageCount)
+    {
+        const int last = 7;
+        var row = top;
+
+        void Label(int r, int c1, int c2, string text, XLAlignmentHorizontalValues align = XLAlignmentHorizontalValues.Left)
+        {
+            var range = ws.Range(r, c1, r, c2).Merge();
+            range.Value = text;
+            range.Style.Font.SetFontName(FormFont).Font.SetBold().Font.SetFontSize(11)
+                .Alignment.SetHorizontal(align).Alignment.SetVertical(XLAlignmentVerticalValues.Bottom);
+        }
+        // A filled-in value sits on an underline, like the blanks on the paper form.
+        void Blank(int r, int c1, int c2, string? value)
+        {
+            var range = ws.Range(r, c1, r, c2).Merge();
+            range.Value = value ?? "";
+            range.Style.Font.SetBold()
+                .Alignment.SetVertical(XLAlignmentVerticalValues.Bottom)
+                .Border.SetBottomBorder(XLBorderStyleValues.Thin);
+        }
+
+        // "Appendix 47" sits above the box, right-aligned and italic.
+        var appendix = ws.Range(row, 1, row, last).Merge();
+        appendix.Value = "Appendix 47";
+        appendix.Style.Font.SetFontName(FormFont).Font.SetItalic().Font.SetBold().Font.SetFontSize(10)
+            .Alignment.SetHorizontal(XLAlignmentHorizontalValues.Right);
+        row++;
+
+        var boxTop = row;
+        var title = ws.Range(row, 1, row, last).Merge();
+        title.Value = "PURCHASE REQUEST";
+        title.Style.Font.SetFontName(FormFont).Font.SetBold().Font.SetFontSize(15)
+            .Alignment.SetHorizontal(XLAlignmentHorizontalValues.Center);
+        ws.Row(row).Height = 24;
+        row++;
+
+        Label(row, 1, 1, "LGU:");
+        Blank(row, 2, 4, s.PrLgu.ToUpperInvariant());
+        Label(row, 5, 5, "Fund:", XLAlignmentHorizontalValues.Right);
+        Blank(row, 6, 7, request.Fund);
+        ws.Row(row).Height = 20;
+        ws.Range(row, 1, row, last).Style.Border.SetBottomBorder(XLBorderStyleValues.Medium);
+        row++;
+
+        Label(row, 1, 2, "Department:");
+        Blank(row, 3, 3, s.PrDepartment);
+        Label(row, 4, 4, "PR No.:", XLAlignmentHorizontalValues.Right);
+        Blank(row, 5, 5, null);
+        Label(row, 6, 6, "Date:", XLAlignmentHorizontalValues.Right);
+        Blank(row, 7, 7, null);
+        ws.Row(row).Height = 20;
+        row++;
+
+        Label(row, 1, 2, "Section:");
+        Blank(row, 3, 3, request.Section);
+        Label(row, 4, 4, "FPP:", XLAlignmentHorizontalValues.Right);
+        Blank(row, 5, 5, request.Fpp);
+        ws.Row(row).Height = 20;
+        // The date line spans the two rows on the paper form; keep the right
+        // column visually one block.
+        ws.Range(row - 1, 6, row, last).Style.Border.SetLeftBorder(XLBorderStyleValues.Thin);
+        row++;
+        ws.Range(boxTop, 1, row - 1, last).Style.Border.SetOutsideBorder(XLBorderStyleValues.Medium);
+
+        // Item table header.
+        var headerRow = row;
+        string[] headers = ["Item\nNo.", "Unit", "Item Description", "", "Quan-\ntity", "Unit\nCost", "Total Cost"];
+        for (var c = 0; c < headers.Length; c++)
+        {
+            if (c == 3) continue;
+            ws.Cell(row, c + 1).Value = headers[c];
+        }
+        ws.Range(row, 3, row, 4).Merge();
+        var hdr = ws.Range(row, 1, row, last);
+        hdr.Style.Font.SetFontName(FormFont).Font.SetBold().Font.SetFontSize(11)
+            .Alignment.SetHorizontal(XLAlignmentHorizontalValues.Center)
+            .Alignment.SetVertical(XLAlignmentVerticalValues.Center)
+            .Alignment.SetWrapText();
+        ws.Row(row).Height = 30;
+        row++;
+
+        // Always 30 ruled lines, filled from the top, so every page looks
+        // like the printed form even when the PR is short.
+        for (var i = 0; i < PrLinesPerPage; i++)
+        {
+            ws.Range(row, 3, row, 4).Merge();
+            if (i < pageLines.Count)
+            {
+                var line = pageLines[i];
+                ws.Cell(row, 1).Value = firstItemNo + i;
+                ws.Cell(row, 2).Value = FormUnit(line.InventoryItem.Unit);
+                // No brand on a PR: government procurement specifies the
+                // item, never the make.
+                ws.Cell(row, 3).Value = line.InventoryItem.Name.ToUpperInvariant();
+                ws.Cell(row, 5).Value = line.QuantityRequested;
+                // Whole quantities print without a decimal point ("10", not "10.").
+                ws.Cell(row, 5).Style.NumberFormat.SetFormat(
+                    line.QuantityRequested == decimal.Truncate(line.QuantityRequested) ? "#,##0" : "#,##0.##");
+                if (line.EstimatedUnitCost is decimal cost)
+                {
+                    ws.Cell(row, 6).Value = cost;
+                    ws.Cell(row, 7).Value = Math.Round(line.QuantityRequested * cost, 2);
+                }
+            }
+            ws.Row(row).Height = 18;
+            row++;
+        }
+        var body = ws.Range(headerRow + 1, 1, row - 1, last);
+        body.Style.Alignment.SetVertical(XLAlignmentVerticalValues.Bottom).Alignment.SetShrinkToFit();
+        ws.Range(headerRow + 1, 1, row - 1, 1).Style.Alignment.SetHorizontal(XLAlignmentHorizontalValues.Center);
+        ws.Range(headerRow + 1, 5, row - 1, 5).Style.Alignment.SetHorizontal(XLAlignmentHorizontalValues.Center);
+        ws.Range(headerRow + 1, 6, row - 1, last).Style.NumberFormat.SetFormat("#,##0.00");
+
+        if (grandTotal is decimal total)
+        {
+            ws.Range(row, 1, row, 6).Merge().Value = "TOTAL";
+            ws.Cell(row, 1).Style.Font.SetBold().Alignment.SetHorizontal(XLAlignmentHorizontalValues.Right);
+            ws.Cell(row, 7).Value = total;
+            ws.Cell(row, 7).Style.Font.SetBold().NumberFormat.SetFormat("#,##0.00");
+            ws.Row(row).Height = 17;
+            row++;
+        }
+        var table = ws.Range(headerRow, 1, row - 1, last);
+        table.Style.Border.SetInsideBorder(XLBorderStyleValues.Thin).Border.SetOutsideBorder(XLBorderStyleValues.Medium);
+
+        // Purpose: label on the left, the text on ruled lines to the right.
+        var purposeTop = row;
+        Label(row, 1, 2, "Purpose:");
+        ws.Cell(row, 1).Style.Alignment.SetVertical(XLAlignmentVerticalValues.Top);
+        var purpose = ws.Range(row, 3, row + 2, last).Merge();
+        purpose.Value = request.Justification.ToUpperInvariant();
+        purpose.Style.Font.SetBold().Alignment.SetWrapText()
+            .Alignment.SetVertical(XLAlignmentVerticalValues.Top);
+        for (var r = row; r <= row + 2; r++) ws.Row(r).Height = 16;
+        ws.Range(row, 1, row + 2, 2).Merge();
+        row += 3;
+        ws.Range(purposeTop, 1, row - 1, last).Style.Border.SetOutsideBorder(XLBorderStyleValues.Medium);
+
+        // Signatories: three equal boxes beside a label column.
+        var sigTop = row;
+        (int From, int To, string Heading, string Name, string Designation)[] boxes =
+        [
+            (3, 3, "Requested by:", s.PrRequestedByName, s.PrRequestedByDesignation),
+            (4, 5, "Cash Availability:", s.PrCashAvailabilityName, s.PrCashAvailabilityDesignation),
+            (6, 7, "For & By\nAuthority of the Governor:", s.PrApproverName, s.PrApproverDesignation),
+        ];
+        foreach (var b in boxes)
+        {
+            var heading = ws.Range(row, b.From, row, b.To).Merge();
+            heading.Value = b.Heading;
+            heading.Style.Font.SetFontName(FormFont).Font.SetBold().Font.SetFontSize(11)
+                .Alignment.SetHorizontal(XLAlignmentHorizontalValues.Center)
+                .Alignment.SetVertical(XLAlignmentVerticalValues.Top).Alignment.SetWrapText();
+        }
+        ws.Row(row).Height = 32;
+        row++;
+        ws.Row(row).Height = 22; // room to sign
+        string[] rowLabels = ["Signature:", "Printed Name:", "Designation:"];
+        for (var k = 0; k < rowLabels.Length; k++)
+        {
+            Label(row, 1, 2, rowLabels[k]);
+            foreach (var b in boxes)
+            {
+                var cell = ws.Range(row, b.From, row, b.To).Merge();
+                cell.Value = k switch { 1 => b.Name.ToUpperInvariant(), 2 => b.Designation, _ => "" };
+                cell.Style.Alignment.SetHorizontal(XLAlignmentHorizontalValues.Center)
+                    .Alignment.SetVertical(XLAlignmentVerticalValues.Bottom)
+                    .Alignment.SetShrinkToFit()
+                    .Font.SetBold(k == 1)
+                    .Border.SetBottomBorder(XLBorderStyleValues.Thin);
+            }
+            if (k > 0) ws.Row(row).Height = 18;
+            row++;
+        }
+        ws.Range(sigTop, 1, row - 1, last).Style.Border.SetOutsideBorder(XLBorderStyleValues.Medium);
+        foreach (var b in boxes)
+            ws.Range(sigTop, b.From, row - 1, b.To).Style.Border.SetLeftBorder(XLBorderStyleValues.Thin);
+
+        // Control reference under the box, where the office writes theirs.
+        var reference = ws.Range(row, 1, row, last).Merge();
+        reference.Value = $"{request.RequestedAt.ToLocalTime():M/d/yyyy} · {request.RequestNumber}" +
+                          (pageCount > 1 ? $" · Page {pageNo} of {pageCount}" : "");
+        reference.Style.Font.SetFontSize(9).Font.SetBold()
+            .Alignment.SetHorizontal(XLAlignmentHorizontalValues.Left).Alignment.SetIndent(3);
+        row++;
+
+        return row;
+    }
+
+    // Units print the way the supply office writes them: upper case, with
+    // the plural PCS for pieces.
+    private static string FormUnit(string unit) =>
+        unit.Trim().ToLowerInvariant() switch
+        {
+            "pc" => "PCS",
+            "ream" => "REAMS",
+            "kg" => "KGS",
+            "bottle" => "BOT",
+            "gallon" => "GAL",
+            var u => u.ToUpperInvariant(),
+        };
 
     private Task<Models.ProcurementRequest?> LoadRequestAsync(int requestId) =>
         _db.ProcurementRequests.AsNoTracking()
@@ -500,45 +909,6 @@ public class ReportExportService : IReportExportService
             .Include(r => r.Items).ThenInclude(i => i.InventoryItem)
             .Include(r => r.Approvals).ThenInclude(a => a.ApproverUser)
             .FirstOrDefaultAsync(r => r.Id == requestId);
-
-    // Names the system knows are pre-printed; the rest stay blank for ink.
-    private static int WriteSignatureBlock(IXLWorksheet ws, int row, Models.ProcurementRequest request, string[] roles)
-    {
-        var finalApprover = request.Approvals
-            .Where(a => a.Action == Models.Enums.ApprovalAction.Approved)
-            .OrderByDescending(a => a.ApprovalLevel)
-            .FirstOrDefault();
-        var inventoryApprover = request.Approvals
-            .Where(a => a.Action == Models.Enums.ApprovalAction.Approved && a.ApproverRole == Models.Enums.UserRole.InventoryOfficer)
-            .OrderByDescending(a => a.ApprovalLevel)
-            .FirstOrDefault();
-
-        foreach (var role in roles)
-        {
-            var name = role switch
-            {
-                // The typed name wins: on a shared department PC the account
-                // is the ward's, not the person who needed the supplies.
-                "Requested by" => request.RequestedByName ?? $"{request.RequestedByUser.FirstName} {request.RequestedByUser.LastName}",
-                "Issued by" when request.Status == Models.Enums.ProcurementStatus.Released && inventoryApprover is not null =>
-                    $"{inventoryApprover.ApproverUser.FirstName} {inventoryApprover.ApproverUser.LastName}",
-                "Approved by" when finalApprover is not null =>
-                    $"{finalApprover.ApproverUser.FirstName} {finalApprover.ApproverUser.LastName}",
-                // The department head signs for the goods on the RIS. Printed
-                // when one is on record; otherwise a rule to sign over.
-                "Received by" when !string.IsNullOrWhiteSpace(request.Department?.HeadOfDepartment) =>
-                    request.Department!.HeadOfDepartment!,
-                _ => "_________________________",
-            };
-            ws.Cell(row, 1).Value = $"{role}:";
-            ws.Cell(row, 1).Style.Font.SetBold();
-            ws.Cell(row, 2).Value = name;
-            ws.Cell(row, 4).Value = "Signature: _______________";
-            ws.Cell(row, 5).Value = "Date: _______________";
-            row += 2;
-        }
-        return row;
-    }
 
     // ── workbook building blocks ─────────────────────────────────────────────
 

@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using PPHIPMSystem.Server.Data;
 
@@ -11,9 +12,11 @@ using PPHIPMSystem.Server.Data;
 namespace PPHIPMSystem.Server.Data.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    partial class ApplicationDbContextModelSnapshot : ModelSnapshot
+    [Migration("20261001075143_AddPurchaseRequestFormFields")]
+    partial class AddPurchaseRequestFormFields
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -911,47 +914,6 @@ namespace PPHIPMSystem.Server.Data.Migrations
                     b.ToTable("PurchaseOrders");
                 });
 
-            modelBuilder.Entity("PPHIPMSystem.Server.Models.PurchaseOrderDelivery", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<DateTime>("DeliveredOn")
-                        .HasColumnType("date");
-
-                    b.Property<int?>("ItemBatchId")
-                        .HasColumnType("int");
-
-                    b.Property<int>("PurchaseOrderItemId")
-                        .HasColumnType("int");
-
-                    b.Property<decimal>("Quantity")
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<string>("ReceivedByUserId")
-                        .HasColumnType("nvarchar(450)");
-
-                    b.Property<DateTime>("RecordedAt")
-                        .HasColumnType("datetime2");
-
-                    b.Property<string>("ReferenceNo")
-                        .HasMaxLength(100)
-                        .HasColumnType("nvarchar(100)");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("ItemBatchId");
-
-                    b.HasIndex("PurchaseOrderItemId");
-
-                    b.HasIndex("ReceivedByUserId");
-
-                    b.ToTable("PurchaseOrderDeliveries");
-                });
-
             modelBuilder.Entity("PPHIPMSystem.Server.Models.PurchaseOrderItem", b =>
                 {
                     b.Property<int>("Id")
@@ -1459,30 +1421,6 @@ namespace PPHIPMSystem.Server.Data.Migrations
                     b.Navigation("ProcurementRequest");
                 });
 
-            modelBuilder.Entity("PPHIPMSystem.Server.Models.PurchaseOrderDelivery", b =>
-                {
-                    b.HasOne("PPHIPMSystem.Server.Models.ItemBatch", "ItemBatch")
-                        .WithMany()
-                        .HasForeignKey("ItemBatchId");
-
-                    b.HasOne("PPHIPMSystem.Server.Models.PurchaseOrderItem", "PurchaseOrderItem")
-                        .WithMany("Deliveries")
-                        .HasForeignKey("PurchaseOrderItemId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("PPHIPMSystem.Server.Models.ApplicationUser", "ReceivedByUser")
-                        .WithMany()
-                        .HasForeignKey("ReceivedByUserId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
-                    b.Navigation("ItemBatch");
-
-                    b.Navigation("PurchaseOrderItem");
-
-                    b.Navigation("ReceivedByUser");
-                });
-
             modelBuilder.Entity("PPHIPMSystem.Server.Models.PurchaseOrderItem", b =>
                 {
                     b.HasOne("PPHIPMSystem.Server.Models.InventoryItem", "InventoryItem")
@@ -1676,11 +1614,6 @@ namespace PPHIPMSystem.Server.Data.Migrations
                     b.Navigation("ReceivedBatches");
 
                     b.Navigation("StockMovements");
-                });
-
-            modelBuilder.Entity("PPHIPMSystem.Server.Models.PurchaseOrderItem", b =>
-                {
-                    b.Navigation("Deliveries");
                 });
 #pragma warning restore 612, 618
         }

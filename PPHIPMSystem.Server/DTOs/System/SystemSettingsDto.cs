@@ -49,4 +49,59 @@ public class SystemSettingsDto
     // budget is rejected. Off: it is allowed and merely flagged. Departments
     // with no budget set are never checked either way.
     public bool EnforceDepartmentBudget { get; set; } = true;
+
+    // Purchase Request form (Appendix 47) header and signatories. Names may be
+    // left empty — the form then prints a blank line to sign over.
+    [MaxLength(150)]
+    public string PrLgu { get; set; } = string.Empty;
+
+    [MaxLength(100)]
+    public string PrDepartment { get; set; } = string.Empty;
+
+    [MaxLength(150)]
+    public string PrRequestedByName { get; set; } = string.Empty;
+
+    [MaxLength(150)]
+    public string PrRequestedByDesignation { get; set; } = string.Empty;
+
+    [MaxLength(150)]
+    public string PrCashAvailabilityName { get; set; } = string.Empty;
+
+    [MaxLength(150)]
+    public string PrCashAvailabilityDesignation { get; set; } = string.Empty;
+
+    [MaxLength(150)]
+    public string PrApproverName { get; set; } = string.Empty;
+
+    [MaxLength(150)]
+    public string PrApproverDesignation { get; set; } = string.Empty;
+
+    // Letterhead printed on hospital forms (under the organization name), and
+    // the Requisition and Issue Slip's approvers and document control code.
+    [MaxLength(200)]
+    public string LetterheadAddress { get; set; } = string.Empty;
+
+    [MaxLength(150)]
+    public string LetterheadCertification { get; set; } = string.Empty;
+
+    [MaxLength(150)]
+    public string RisApprover1Name { get; set; } = string.Empty;
+
+    [MaxLength(150)]
+    public string RisApprover1Designation { get; set; } = string.Empty;
+
+    [MaxLength(150)]
+    public string RisApprover2Name { get; set; } = string.Empty;
+
+    [MaxLength(150)]
+    public string RisApprover2Designation { get; set; } = string.Empty;
+
+    [MaxLength(50)]
+    public string RisFormCode { get; set; } = string.Empty;
+
+    [MaxLength(20)]
+    public string RisRevisionNo { get; set; } = string.Empty;
+
+    [MaxLength(20)]
+    public string RisRevisionDate { get; set; } = string.Empty;
 }

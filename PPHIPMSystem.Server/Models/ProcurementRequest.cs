@@ -25,6 +25,18 @@ public class ProcurementRequest
     [Required, MaxLength(1000)]
     public string Justification { get; set; } = string.Empty;
 
+    // Purchase Request form (Appendix 47) fields. Usually assigned by the
+    // Provincial budget/treasury offices, so all optional — the printed form
+    // leaves a blank line when they are not known yet.
+    [MaxLength(100)]
+    public string? Fund { get; set; }
+
+    [MaxLength(150)]
+    public string? Section { get; set; }
+
+    [MaxLength(100)]
+    public string? Fpp { get; set; }
+
     public ProcurementStatus Status { get; set; } = ProcurementStatus.Draft;
 
     // Existing rows default to DepartmentSupply (0) — every request before

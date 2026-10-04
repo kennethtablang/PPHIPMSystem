@@ -35,6 +35,10 @@ export default function RequestFormModal({ request = null, prefill = null, showC
   // A shared PC logs in as the ward, so the person's name must be typed.
   const [requestedByName, setRequestedByName] = useState(request?.requestedByName ?? (isSharedPc ? '' : user?.fullName ?? ''));
   const [purpose, setPurpose] = useState(request?.justification ?? prefill?.justification ?? '');
+  // Appendix 47 header fields — usually assigned later by the Provincial
+  // offices, so optional; the printed form leaves a line to write on.
+  const [prFields, setPrFields] = useState({ fund: request?.fund ?? '', section: request?.section ?? '', fpp: request?.fpp ?? '' });
+  const setPrField = k => e => setPrFields(p => ({ ...p, [k]: e.target.value }));
   const [lines, setLines] = useState(() =>
     (request?.items ?? prefill?.items ?? []).map(i => ({
       inventoryItemId: String(i.inventoryItemId),
@@ -77,7 +81,7 @@ export default function RequestFormModal({ request = null, prefill = null, showC
     const map = {};
     items
       .filter(i => !category || (category === LOW ? i.isBelowReorder : (i.categoryName || 'Uncategorized') === category))
-      .filter(i => !q || `${i.name} ${i.itemCode ?? ''} ${i.description ?? ''} ${i.categoryName ?? ''}`.toLowerCase().includes(q))
+      .filter(i => !q || `${i.name} ${i.brand ?? ''} ${i.itemCode ?? ''} ${i.description ?? ''} ${i.categoryName ?? ''}`.toLowerCase().includes(q))
       .forEach(i => { (map[i.categoryName || 'Uncategorized'] ??= []).push(i); });
     return Object.entries(map)
       .sort(([a], [b]) => a.localeCompare(b))
@@ -111,6 +115,11 @@ export default function RequestFormModal({ request = null, prefill = null, showC
       requestedByName: requestedByName.trim() || null,
       isReplenishment: isPr,
       justification: purpose.trim(),
+      ...(isPr && {
+        fund: prFields.fund.trim() || null,
+        section: prFields.section.trim() || null,
+        fpp: prFields.fpp.trim() || null,
+      }),
       items: lines.map(l => ({
         inventoryItemId: +l.inventoryItemId,
         quantityRequested: +l.quantityRequested,
@@ -190,9 +199,25 @@ export default function RequestFormModal({ request = null, prefill = null, showC
           <div className="form-control rf-readonly">{request?.requestNumber ?? 'Assigned on save'} · {today}</div>
         </div>
       </div>
+      {isPr && (
+        <div className="rf-head" style={{ marginTop: 12 }}>
+          <div className="form-group">
+            <label className="form-label">Fund</label>
+            <input className="form-control" value={prFields.fund} onChange={setPrField('fund')} placeholder="Leave blank to fill in by hand" maxLength={100} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Section</label>
+            <input className="form-control" value={prFields.section} onChange={setPrField('section')} placeholder="Optional" maxLength={150} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">FPP</label>
+            <input className="form-control" value={prFields.fpp} onChange={setPrField('fpp')} placeholder="Leave blank to fill in by hand" maxLength={100} />
+          </div>
+        </div>
+      )}
       <div className="form-group" style={{ marginTop: 12 }}>
         <label className="form-label">Purpose *</label>
-        <textarea className="form-control" rows={2} value={purpose} onChange={e => setPurpose(e.target.value)} placeholder={isPr ? 'e.g. Replenishment of items at or below reorder level' : 'What are these supplies for?'} maxLength={1000} />
+        <textarea className="form-control" rows={2} value={purpose} onChange={e => setPurpose(e.target.value)} placeholder={isPr ? 'e.g. Medical supplies for use of Pangasinan Provincial Hospital July – December CY 2026' : 'What are these supplies for?'} maxLength={1000} />
       </div>
 
       <div className="rf-body">

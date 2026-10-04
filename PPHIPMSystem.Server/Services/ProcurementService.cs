@@ -123,6 +123,9 @@ public class ProcurementService : IProcurementService
             RequestedByUserId = userId,
             RequestedByName = CleanName(dto.RequestedByName),
             Justification = dto.Justification,
+            Fund = CleanName(dto.Fund),
+            Section = CleanName(dto.Section),
+            Fpp = CleanName(dto.Fpp),
             Status = ProcurementStatus.SubmittedByDepartment,
             Type = dto.IsReplenishment ? RequestType.Replenishment : RequestType.DepartmentSupply,
             Items = BuildLines(dto)
@@ -167,6 +170,9 @@ public class ProcurementService : IProcurementService
         request.DepartmentId = departmentId;
         request.RequestedByName = CleanName(dto.RequestedByName);
         request.Justification = dto.Justification;
+        request.Fund = CleanName(dto.Fund);
+        request.Section = CleanName(dto.Section);
+        request.Fpp = CleanName(dto.Fpp);
         request.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
 
@@ -749,29 +755,27 @@ public class ProcurementService : IProcurementService
             }
         }
 
-        return _mapper.Map<PurchaseOrderDto>(await _db.PurchaseOrders
-            .Include(p => p.ProcurementRequest)
-            .Include(p => p.GeneratedByUser)
-            .Include(p => p.Items).ThenInclude(i => i.InventoryItem)
-            .FirstAsync(p => p.Id == po.Id));
+        return _mapper.Map<PurchaseOrderDto>(await PurchaseOrderQuery().FirstAsync(p => p.Id == po.Id));
     }
+
+    // Everything a PO view shows, including each line's dated deliveries.
+    private IQueryable<PurchaseOrder> PurchaseOrderQuery() => _db.PurchaseOrders
+        .AsSplitQuery()
+        .Include(p => p.ProcurementRequest)
+        .Include(p => p.GeneratedByUser)
+        .Include(p => p.Items).ThenInclude(i => i.InventoryItem)
+        .Include(p => p.Items).ThenInclude(i => i.Deliveries).ThenInclude(d => d.ReceivedByUser)
+        .Include(p => p.Items).ThenInclude(i => i.Deliveries).ThenInclude(d => d.ItemBatch);
 
     public async Task<PurchaseOrderDto?> GetPurchaseOrderAsync(int id)
     {
-        var po = await _db.PurchaseOrders
-            .Include(p => p.ProcurementRequest)
-            .Include(p => p.GeneratedByUser)
-            .Include(p => p.Items).ThenInclude(i => i.InventoryItem)
-            .FirstOrDefaultAsync(p => p.Id == id);
+        var po = await PurchaseOrderQuery().FirstOrDefaultAsync(p => p.Id == id);
         return po is null ? null : _mapper.Map<PurchaseOrderDto>(po);
     }
 
     public async Task<IEnumerable<PurchaseOrderDto>> GetAllPurchaseOrdersAsync()
     {
-        var pos = await _db.PurchaseOrders
-            .Include(p => p.ProcurementRequest)
-            .Include(p => p.GeneratedByUser)
-            .Include(p => p.Items).ThenInclude(i => i.InventoryItem)
+        var pos = await PurchaseOrderQuery()
             .OrderByDescending(p => p.GeneratedAt)
             .ToListAsync();
         return _mapper.Map<IEnumerable<PurchaseOrderDto>>(pos);
@@ -783,6 +787,17 @@ public class ProcurementService : IProcurementService
             .Include(p => p.Items).ThenInclude(i => i.InventoryItem)
             .FirstOrDefaultAsync(p => p.Id == purchaseOrderId);
         if (po is null || po.IsDelivered) return false;
+
+        // The day the goods arrived (keyed in later is common), never in the
+        // future and never before the order existed.
+        var today = DateOnly.FromDateTime(DateTime.Now);
+        var deliveredOn = dto?.DeliveredOn ?? today;
+        if (deliveredOn > today)
+            throw new InvalidOperationException("The delivery date cannot be in the future.");
+        if (deliveredOn < DateOnly.FromDateTime(po.GeneratedAt.ToLocalTime()))
+            throw new InvalidOperationException("The delivery date cannot be before the purchase order was generated.");
+        var deliveredAt = deliveredOn.ToDateTime(TimeOnly.MinValue);
+        var referenceNo = string.IsNullOrWhiteSpace(dto?.ReferenceNo) ? null : dto!.ReferenceNo!.Trim();
 
         // Per-line details the receiver typed in (qty received, lot, expiry).
         var lineDetails = (dto?.Lines ?? [])
@@ -821,9 +836,18 @@ public class ProcurementService : IProcurementService
                 ExpirationDate = details?.ExpirationDate,
                 UnitCost = item.UnitCost, // carries acquisition cost for valuation
                 PurchaseOrderId = purchaseOrderId,
-                ReceivedDate = DateTime.UtcNow
+                ReceivedDate = deliveredAt
             };
             _db.ItemBatches.Add(batch);
+
+            item.Deliveries.Add(new PurchaseOrderDelivery
+            {
+                Quantity = received,
+                DeliveredOn = deliveredAt,
+                ReferenceNo = referenceNo,
+                ReceivedByUserId = userId,
+                ItemBatch = batch,
+            });
 
             _db.StockMovements.Add(new StockMovement
             {
@@ -832,7 +856,8 @@ public class ProcurementService : IProcurementService
                 Quantity = received,
                 QuantityBeforeMovement = invItem.QuantityOnHand - received,
                 QuantityAfterMovement = invItem.QuantityOnHand,
-                Remarks = $"Received via PO {po.PONumber}",
+                Remarks = $"Received via PO {po.PONumber}, delivered {deliveredOn:MM/dd/yyyy}" +
+                          (referenceNo is null ? "" : $" (ref. {referenceNo})"),
                 PerformedByUserId = userId,
                 PurchaseOrderId = purchaseOrderId,
                 ItemBatch = batch
@@ -847,14 +872,15 @@ public class ProcurementService : IProcurementService
         if (fullyDelivered)
         {
             po.IsDelivered = true;
-            po.DeliveredAt = DateTime.UtcNow;
+            po.DeliveredAt = deliveredAt;
             var request = await _db.ProcurementRequests.FindAsync(po.ProcurementRequestId);
             if (request is not null) request.Status = ProcurementStatus.Delivered;
         }
 
         await _db.SaveChangesAsync();
         await _audit.LogAsync(userId, "DeliveryConfirmed", "PurchaseOrder", purchaseOrderId,
-            $"{po.PONumber} ({(fullyDelivered ? "fully delivered" : "partial delivery")})");
+            $"{po.PONumber} ({(fullyDelivered ? "fully delivered" : "partial delivery")}, delivered {deliveredOn:yyyy-MM-dd}" +
+            (referenceNo is null ? ")" : $", ref. {referenceNo})"));
 
         // The replenishment the department was waiting on has landed: close
         // the cycle by releasing its approved quantities. Saved above first, so

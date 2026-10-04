@@ -14,6 +14,9 @@ public class UpdateInventoryItemDto
     [MaxLength(500)]
     public string? Description { get; set; }
 
+    [MaxLength(150)]
+    public string? Brand { get; set; }
+
     [Required, MaxLength(50)]
     public string Unit { get; set; } = string.Empty;
 

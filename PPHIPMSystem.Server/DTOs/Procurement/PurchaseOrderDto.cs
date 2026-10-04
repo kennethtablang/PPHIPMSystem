@@ -7,6 +7,14 @@ namespace PPHIPMSystem.Server.DTOs.Procurement;
 public class ConfirmDeliveryDto
 {
     public List<DeliveryLineDto> Lines { get; set; } = [];
+
+    // When the shipment actually arrived; defaults to today. May be in the
+    // past (receipts are often keyed in later) but never in the future.
+    public DateOnly? DeliveredOn { get; set; }
+
+    // Supplier's delivery receipt / invoice number.
+    [MaxLength(100)]
+    public string? ReferenceNo { get; set; }
 }
 
 public class DeliveryLineDto
@@ -47,6 +55,20 @@ public class PurchaseOrderItemDto
     public string Unit { get; set; } = string.Empty;
     public decimal QuantityOrdered { get; set; }
     public decimal? QuantityDelivered { get; set; }
+    public decimal QuantityOutstanding => Math.Max(QuantityOrdered - (QuantityDelivered ?? 0), 0);
+    public bool IsFullyDelivered => QuantityOutstanding == 0;
     public decimal UnitCost { get; set; }
     public decimal TotalCost { get; set; }
+    public IEnumerable<PurchaseOrderDeliveryDto> Deliveries { get; set; } = [];
+}
+
+public class PurchaseOrderDeliveryDto
+{
+    public int Id { get; set; }
+    public decimal Quantity { get; set; }
+    public DateOnly DeliveredOn { get; set; }
+    public string? ReferenceNo { get; set; }
+    public string? ReceivedByFullName { get; set; }
+    public string? LotNumber { get; set; }
+    public DateTime? ExpirationDate { get; set; }
 }

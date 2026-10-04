@@ -12,6 +12,9 @@ public class ProcurementRequestDto
     public string RequestedByFullName { get; set; } = string.Empty;
     public string? RequestedByName { get; set; }
     public string Justification { get; set; } = string.Empty;
+    public string? Fund { get; set; }
+    public string? Section { get; set; }
+    public string? Fpp { get; set; }
     public ProcurementStatus Status { get; set; }
     public string StatusName => Status.ToString();
     public RequestType Type { get; set; }

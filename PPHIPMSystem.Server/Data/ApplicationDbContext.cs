@@ -20,6 +20,7 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<ProcurementApproval> ProcurementApprovals => Set<ProcurementApproval>();
     public DbSet<PurchaseOrder> PurchaseOrders => Set<PurchaseOrder>();
     public DbSet<PurchaseOrderItem> PurchaseOrderItems => Set<PurchaseOrderItem>();
+    public DbSet<PurchaseOrderDelivery> PurchaseOrderDeliveries => Set<PurchaseOrderDelivery>();
     public DbSet<DemandForecast> DemandForecasts => Set<DemandForecast>();
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
@@ -138,6 +139,25 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
         builder.Entity<PurchaseOrderItem>(e =>
         {
             e.Ignore(p => p.TotalCost);
+        });
+
+        builder.Entity<PurchaseOrderDelivery>(e =>
+        {
+            e.HasOne(d => d.PurchaseOrderItem)
+             .WithMany(i => i.Deliveries)
+             .HasForeignKey(d => d.PurchaseOrderItemId)
+             .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(d => d.ReceivedByUser)
+             .WithMany()
+             .HasForeignKey(d => d.ReceivedByUserId)
+             .OnDelete(DeleteBehavior.Restrict);
+            // NO ACTION in the database: SQL Server rejects a second cascade
+            // path from PurchaseOrders (via items and via batches). Batches are
+            // never deleted in practice; EF still nulls the link if one is.
+            e.HasOne(d => d.ItemBatch)
+             .WithMany()
+             .HasForeignKey(d => d.ItemBatchId)
+             .OnDelete(DeleteBehavior.ClientSetNull);
         });
 
         builder.Entity<ItemBatch>(e =>

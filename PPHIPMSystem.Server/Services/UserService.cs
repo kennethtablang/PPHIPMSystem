@@ -43,9 +43,17 @@ public class UserService : IUserService
 
     public async Task<UserDto> CreateAsync(CreateUserDto dto, string actorId)
     {
+        // Identity enforces unique usernames and emails, but not employee IDs.
+        var employeeId = dto.EmployeeId.Trim();
+        if (await _db.Users.AnyAsync(u => u.EmployeeId == employeeId))
+            throw new InvalidOperationException($"Employee ID \"{employeeId}\" is already assigned to another account.");
+
+        if (dto.DepartmentId.HasValue && !await _db.Departments.AnyAsync(d => d.Id == dto.DepartmentId.Value && d.IsActive))
+            throw new InvalidOperationException("The selected department was not found or is inactive.");
+
         var user = new ApplicationUser
         {
-            EmployeeId = dto.EmployeeId,
+            EmployeeId = employeeId,
             FirstName = dto.FirstName,
             MiddleName = dto.MiddleName,
             LastName = dto.LastName,

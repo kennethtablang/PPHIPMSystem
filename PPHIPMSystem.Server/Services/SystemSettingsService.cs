@@ -24,6 +24,25 @@ public class SystemSettingsService : ISystemSettingsService
     public const string AuditLogRetentionKey = "AuditLogRetentionDays";
     public const string MonthlyReportEmailsKey = "MonthlyReportEmails";
     public const string EnforceDepartmentBudgetKey = "EnforceDepartmentBudget";
+    // Purchase Request (Appendix 47) header and signatories.
+    public const string PrLguKey = "PrLgu";
+    public const string PrDepartmentKey = "PrDepartment";
+    public const string PrRequestedByNameKey = "PrRequestedByName";
+    public const string PrRequestedByDesignationKey = "PrRequestedByDesignation";
+    public const string PrCashAvailabilityNameKey = "PrCashAvailabilityName";
+    public const string PrCashAvailabilityDesignationKey = "PrCashAvailabilityDesignation";
+    public const string PrApproverNameKey = "PrApproverName";
+    public const string PrApproverDesignationKey = "PrApproverDesignation";
+    // Letterhead and Requisition and Issue Slip (FRM-ADM-SUP-011).
+    public const string LetterheadAddressKey = "LetterheadAddress";
+    public const string LetterheadCertificationKey = "LetterheadCertification";
+    public const string RisApprover1NameKey = "RisApprover1Name";
+    public const string RisApprover1DesignationKey = "RisApprover1Designation";
+    public const string RisApprover2NameKey = "RisApprover2Name";
+    public const string RisApprover2DesignationKey = "RisApprover2Designation";
+    public const string RisFormCodeKey = "RisFormCode";
+    public const string RisRevisionNoKey = "RisRevisionNo";
+    public const string RisRevisionDateKey = "RisRevisionDate";
     // Bookkeeping (not exposed in the settings UI): last month a report email went out.
     public const string MonthlyReportLastSentKey = "MonthlyReportLastSent";
 
@@ -33,6 +52,29 @@ public class SystemSettingsService : ISystemSettingsService
     private const int DefaultExpWarnDays = 30;
     private const int DefaultReorderThreshold = 0;
     private const int DefaultPasswordMinLength = 8;
+
+    // Defaults match the hospital's current paper forms; signatory names are
+    // left blank so a fresh install never prints someone's name by mistake.
+    private static readonly Dictionary<string, string> FormDefaults = new()
+    {
+        [PrLguKey] = "PROVINCIAL GOVERNMENT OF PANGASINAN",
+        [PrDepartmentKey] = "PPH",
+        [PrRequestedByNameKey] = "",
+        [PrRequestedByDesignationKey] = "Chief of Hospital II",
+        [PrCashAvailabilityNameKey] = "",
+        [PrCashAvailabilityDesignationKey] = "Provincial Treasurer",
+        [PrApproverNameKey] = "",
+        [PrApproverDesignationKey] = "PHMSO Head",
+        [LetterheadAddressKey] = "Bolingit, San Carlos City, Pangasinan, Philippines 2420",
+        [LetterheadCertificationKey] = "ISO 9001        CIP/4773/14/02/875",
+        [RisApprover1NameKey] = "",
+        [RisApprover1DesignationKey] = "OIC - Chief of Ancillary Service",
+        [RisApprover2NameKey] = "",
+        [RisApprover2DesignationKey] = "Chief Nurse",
+        [RisFormCodeKey] = "FRM-ADM-SUP-011",
+        [RisRevisionNoKey] = "04",
+        [RisRevisionDateKey] = "02-01-2026",
+    };
 
     private readonly ApplicationDbContext _db;
 
@@ -58,6 +100,23 @@ public class SystemSettingsService : ISystemSettingsService
             MonthlyReportEmails = bool.TryParse(all.GetValueOrDefault(MonthlyReportEmailsKey), out var mr) && mr,
             // Unset means on: a budget an admin bothered to enter should bite.
             EnforceDepartmentBudget = !bool.TryParse(all.GetValueOrDefault(EnforceDepartmentBudgetKey), out var eb) || eb,
+            PrLgu = all.GetValueOrDefault(PrLguKey, FormDefaults[PrLguKey]),
+            PrDepartment = all.GetValueOrDefault(PrDepartmentKey, FormDefaults[PrDepartmentKey]),
+            PrRequestedByName = all.GetValueOrDefault(PrRequestedByNameKey, FormDefaults[PrRequestedByNameKey]),
+            PrRequestedByDesignation = all.GetValueOrDefault(PrRequestedByDesignationKey, FormDefaults[PrRequestedByDesignationKey]),
+            PrCashAvailabilityName = all.GetValueOrDefault(PrCashAvailabilityNameKey, FormDefaults[PrCashAvailabilityNameKey]),
+            PrCashAvailabilityDesignation = all.GetValueOrDefault(PrCashAvailabilityDesignationKey, FormDefaults[PrCashAvailabilityDesignationKey]),
+            PrApproverName = all.GetValueOrDefault(PrApproverNameKey, FormDefaults[PrApproverNameKey]),
+            PrApproverDesignation = all.GetValueOrDefault(PrApproverDesignationKey, FormDefaults[PrApproverDesignationKey]),
+            LetterheadAddress = all.GetValueOrDefault(LetterheadAddressKey, FormDefaults[LetterheadAddressKey]),
+            LetterheadCertification = all.GetValueOrDefault(LetterheadCertificationKey, FormDefaults[LetterheadCertificationKey]),
+            RisApprover1Name = all.GetValueOrDefault(RisApprover1NameKey, FormDefaults[RisApprover1NameKey]),
+            RisApprover1Designation = all.GetValueOrDefault(RisApprover1DesignationKey, FormDefaults[RisApprover1DesignationKey]),
+            RisApprover2Name = all.GetValueOrDefault(RisApprover2NameKey, FormDefaults[RisApprover2NameKey]),
+            RisApprover2Designation = all.GetValueOrDefault(RisApprover2DesignationKey, FormDefaults[RisApprover2DesignationKey]),
+            RisFormCode = all.GetValueOrDefault(RisFormCodeKey, FormDefaults[RisFormCodeKey]),
+            RisRevisionNo = all.GetValueOrDefault(RisRevisionNoKey, FormDefaults[RisRevisionNoKey]),
+            RisRevisionDate = all.GetValueOrDefault(RisRevisionDateKey, FormDefaults[RisRevisionDateKey]),
         };
     }
 
@@ -77,6 +136,23 @@ public class SystemSettingsService : ISystemSettingsService
         await SetAsync(AuditLogRetentionKey, dto.AuditLogRetentionDays.ToString());
         await SetAsync(MonthlyReportEmailsKey, dto.MonthlyReportEmails.ToString());
         await SetAsync(EnforceDepartmentBudgetKey, dto.EnforceDepartmentBudget.ToString());
+        await SetAsync(PrLguKey, dto.PrLgu?.Trim() ?? string.Empty);
+        await SetAsync(PrDepartmentKey, dto.PrDepartment?.Trim() ?? string.Empty);
+        await SetAsync(PrRequestedByNameKey, dto.PrRequestedByName?.Trim() ?? string.Empty);
+        await SetAsync(PrRequestedByDesignationKey, dto.PrRequestedByDesignation?.Trim() ?? string.Empty);
+        await SetAsync(PrCashAvailabilityNameKey, dto.PrCashAvailabilityName?.Trim() ?? string.Empty);
+        await SetAsync(PrCashAvailabilityDesignationKey, dto.PrCashAvailabilityDesignation?.Trim() ?? string.Empty);
+        await SetAsync(PrApproverNameKey, dto.PrApproverName?.Trim() ?? string.Empty);
+        await SetAsync(PrApproverDesignationKey, dto.PrApproverDesignation?.Trim() ?? string.Empty);
+        await SetAsync(LetterheadAddressKey, dto.LetterheadAddress?.Trim() ?? string.Empty);
+        await SetAsync(LetterheadCertificationKey, dto.LetterheadCertification?.Trim() ?? string.Empty);
+        await SetAsync(RisApprover1NameKey, dto.RisApprover1Name?.Trim() ?? string.Empty);
+        await SetAsync(RisApprover1DesignationKey, dto.RisApprover1Designation?.Trim() ?? string.Empty);
+        await SetAsync(RisApprover2NameKey, dto.RisApprover2Name?.Trim() ?? string.Empty);
+        await SetAsync(RisApprover2DesignationKey, dto.RisApprover2Designation?.Trim() ?? string.Empty);
+        await SetAsync(RisFormCodeKey, dto.RisFormCode?.Trim() ?? string.Empty);
+        await SetAsync(RisRevisionNoKey, dto.RisRevisionNo?.Trim() ?? string.Empty);
+        await SetAsync(RisRevisionDateKey, dto.RisRevisionDate?.Trim() ?? string.Empty);
         await _db.SaveChangesAsync();
         return await GetAsync();
     }

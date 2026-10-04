@@ -17,6 +17,12 @@ public class InventoryItem
     [MaxLength(500)]
     public string? Description { get; set; }
 
+    // Manufacturer/brand. The catalog lists the same generic item under
+    // several brands (e.g. 50CC SYRINGE — Terumo / Indoplas), so an item is
+    // identified by Name + Brand, not Name alone.
+    [MaxLength(150)]
+    public string? Brand { get; set; }
+
     [MaxLength(50)]
     public string Unit { get; set; } = string.Empty;
 

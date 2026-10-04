@@ -28,7 +28,7 @@ first time; afterwards use it as a reference — each feature is its own section
 13. [Procurement — Department Requests](#13-procurement--department-requests)
 14. [Procurement — Purchase Orders & Deliveries](#14-procurement--purchase-orders--deliveries)
 15. [Procurement — Department Budgets](#15-procurement--department-budgets)
-16. [Procurement — Suppliers](#16-procurement--suppliers)
+16. [Procurement — Purchase Requests (storeroom replenishment)](#16-procurement--purchase-requests-storeroom-replenishment)
 17. [Analytics — Demand Forecasting](#17-analytics--demand-forecasting)
 18. [Analytics — Reports](#18-analytics--reports)
 19. [Notifications](#19-notifications)
@@ -49,9 +49,12 @@ PPH IPMS is a single platform that replaces spreadsheets for three jobs:
 - **Inventory** — track every supply and pharmaceutical item, its stock level, its batches, and their
   expiration dates. Every increase or decrease in stock is recorded as a movement, and stock issued to
   wards is tracked per department.
-- **Procurement** — raise supply requests (with supporting documents attached), route them through a
-  multi-level approval workflow, turn approved requests into purchase orders, and receive deliveries —
-  including partial shipments — against them.
+- **Procurement** — two flows. **Wards** request supplies from the storeroom: Inventory checks stock
+  and allocates it fairly, the Administrator approves, and the system releases the stock to the ward
+  automatically. **The storeroom** restocks itself with **Purchase Requests**: the Chief of Hospital
+  approves, Procurement raises the purchase order, and deliveries — including partial shipments — are
+  received against it. The hospital's paper forms (RIS and Appendix 47 PR) print straight from the
+  system.
 - **Analytics** — forecast future demand from consumption history, and explore consumption, procurement,
   and forecast-accuracy data as charts before generating the report as Excel or PDF.
 
@@ -63,15 +66,16 @@ readable Excel export and as a restorable SQL backup.
 
 ## 2. Roles at a glance
 
-Your **role** decides which menus and buttons you see. There are five:
+Your **role** decides which menus and buttons you see. There are six:
 
 | Role | What they mainly do |
 |------|--------------------|
 | **Super Admin** | Full access to everything, including administration. |
-| **Hospital Administrator** | Full operational access — inventory, procurement, approvals, reports, and administration. |
-| **Inventory Officer** | Manages items, batches, stock movements, adjustments; approves at the inventory step of procurement; runs forecasts. |
-| **Procurement Staff** | Manages suppliers and purchase orders; approves at the procurement step; sees reports and every department's budget. |
+| **Hospital Administrator** | Full operational access — inventory, procurement, reports, and administration. Gives **final approval** on ward requests and approves storeroom **Purchase Requests** as Chief of Hospital. Can stand in for the Inventory Officer at the stock-check step. |
+| **Inventory Officer** | Manages items, batches, stock movements, adjustments; **checks stock and allocates** quantities on ward requests (including splitting short stock fairly between wards) and **releases** requests that were waiting on stock; runs forecasts. |
+| **Procurement Staff** | The Supply Officer: drafts storeroom **Purchase Requests**, generates **purchase orders** from approved ones, and **receives deliveries**; sees reports and every department's budget. |
 | **Department Head** | Raises supply requests for their department, tracks them, monitors *and records usage against* their department's held stock, transfers it to another ward, and sees their own department's budget. |
+| **Department (Shared PC)** | A ward's shared account on its designated PC. Staff can see the ward's stock and file supply requests without waiting for the head — typing their own name on each request. Approvals and every other restricted function stay with named users. |
 
 Throughout this guide, the "🔒 Who can do this" note names the roles allowed to perform each action.
 
@@ -137,11 +141,11 @@ it to start collapsed under [Settings → Appearance](#24-settings).
 
 ### Global search (Ctrl + K)
 1. Press **Ctrl + K** (or **⌘ + K** on Mac) anywhere to jump into the search box.
-2. Type at least 2 characters. It searches **inventory items, suppliers, procurement requests,
-   purchase orders, and (for administrators) users**.
+2. Type at least 2 characters. It searches **inventory items (by name, brand, or code), procurement
+   requests, purchase orders, and (for administrators) users**.
 3. Use **↑ / ↓** arrow keys to move through results and **Enter** to open the highlighted one, or click
    any result. **Esc** closes it.
-4. Picking an item, supplier, or user takes you to that page with its search box already filled in.
+4. Picking an item or user takes you to that page with its search box already filled in.
 
 ### Notification pop-ups & sound
 New notifications arrive live (no refresh needed). Whether they show as pop-up "toasts" and whether they
@@ -184,13 +188,14 @@ anywhere in the hospital, your numbers refresh without a reload.
 The master list of everything you stock. **Sidebar → Inventory → Items.**
 
 ### Finding items
-- **Search** by name or code.
+- **Search** by name, brand, or code.
 - Filter by **Category**.
 - Tick **Low Stock Only** to see just the items at or below their reorder threshold.
 
 ### Reading a row
-Code, name, category, unit, **Supplies Available** (turns red with a ⚠ when below reorder), reorder
-point, forecast method, and status (**Available / Not Available / Inactive**).
+**Item Code**, **Description / Generic Name** (with any additional details underneath), **Brand**,
+category, unit, **Supplies Available** (turns red with a ⚠ when below reorder), reorder point, forecast
+method, and status (**Available / Not Available / Inactive**).
 
 ### Selecting items with the tick boxes
 🔒 *Super Admin, Hospital Administrator, Inventory Officer, Department Head*
@@ -210,8 +215,22 @@ below. **Clear** on the right unticks everything.
 ### Adding an item
 🔒 *Hospital Administrator, Inventory Officer*
 1. Click **Add Item**.
-2. Fill in **Item Name**, **Category**, and **Unit of Measure** (required), plus optional **Item Code**
-   and **Description**.
+2. Fill in **Description / Generic Name**, **Category**, and **Unit of Measure** (required), plus
+   optional **Brand**, **Item Code** and **Additional Details**.
+
+   > **What counts as the same item.** An item is identified by its **Category + Description/Generic
+   > Name + Brand + Unit**. Capitalization, punctuation, spacing and unit spelling are ignored, so
+   > *3CC SYRINGE* / box and *3cc, Syringe* / BOXES are the same item, and saving the second one is
+   > refused with a message naming the existing record. **Item Codes** must also be unique.
+   >
+   > **Same item, different brands.** The hospital stocks many generics under more than one make
+   > (e.g. *50CC SYRINGE* from Terumo and from Indoplas). Enter each make as its own item with a
+   > different **Brand** — that's allowed, because the brand makes them different items.
+
+   As you type, the form checks the list for you:
+   - A **red** box means the item already exists — use the existing record instead.
+   - An **amber** box lists *similar* items (same words and unit, e.g. one has no brand, or the wording
+     differs slightly). Saving is still allowed — just make sure you aren't creating a duplicate.
 3. Set the **Reorder Threshold** (the low-stock trigger) and **Expiration Warning (days)**. New items
    are pre-filled with the hospital-wide defaults from Settings → System — override them freely.
 4. Choose the **Forecast Method**:
@@ -221,31 +240,90 @@ below. **Clear** on the right unticks everything.
 
 ### Editing an item
 🔒 *Hospital Administrator, Inventory Officer* — click the ✏️ pencil, change fields, **Save Changes**.
-You can also flip an item between **Active** and **Inactive** here.
+You can also flip an item between **Active** and **Inactive** here. The same duplicate checks as
+*Adding an item* apply when you change the description, brand, unit or category; items that were
+already duplicates can still be edited until someone merges them.
 
 > If someone else saved the same item while you were editing, your save is refused with a
 > *"changed by someone else"* message — reload the list and re-apply your change. This is deliberate:
 > nobody's edit gets silently overwritten.
 
 ### Deleting an item
-🔒 *Hospital Administrator, Inventory Officer* — click the 🗑 trash icon and confirm. Items that already
-have transactions can't be deleted (deactivate them instead).
+🔒 *Super Admin, Hospital Administrator* — click the 🗑 trash icon and confirm. Deleting doesn't erase the
+item: it is **deactivated** and disappears from the item list, while its batches, movements and request
+history are kept for reports and the audit trail. If the item is a duplicate of another, **merge** it
+instead (see *Finding and merging duplicate items*), so its stock and history move to the remaining record.
+
+### Finding and merging duplicate items
+🔒 *Hospital Administrator, Inventory Officer* (merging: *Hospital Administrator* only)
+
+Over time the same item can end up in the list more than once — typed differently, imported twice, or
+filed under the wrong category. Duplicates split stock and request history across two records, so
+clean them up:
+
+1. Click **Duplicates** on the Items page. The system groups items that look like the same item:
+   - **Exact** — same category, description, brand and unit once spelling is ignored. This is the same
+     item recorded twice.
+   - **Similar** — same words and unit, but a detail differs: one copy has no brand, the wording or
+     word order differs, the category differs, or a stray number was left at the end by the old system
+     (*Adrenalin 1mg/ml* vs *Adrenalin 1mg/ml 2*). Each group says what differs. **Check these
+     carefully** — some are genuinely different items (e.g. suture sizes *Vicryl 2-0 plus 3* vs *plus 4*).
+
+   Items with **different brands are never grouped**, and a trailing number that is clearly a size
+   (*GLOVES 7*, *Size 6*) is not treated as a stray counter.
+2. Use the **All / Exact / Similar** buttons to filter the groups.
+3. In a group, tick the **Keep** radio on the record to keep — usually the one with the correct code,
+   category and brand. It defaults to the oldest record.
+4. Click **Merge into Kept** and confirm. For the other records in the group:
+   - their **stock on hand, batches, department stock, monthly consumption, adjustments, requests and
+     purchase orders** move to the kept item (amounts for the same department or month are added
+     together);
+   - if the kept item has no brand, code or details, it takes them from a merged record;
+   - the merged records are **deactivated** and their item codes released. Their old forecasts are
+     dropped — the kept item's forecast is regenerated from the combined history.
+
+> **Merging cannot be undone**, which is why only an administrator can do it. Items counted in
+> different units (e.g. *box* vs *pc*) can't be merged, because their quantities can't simply be added.
+> Every merge is recorded in the **Audit Log** with the codes, names and quantities of the merged records.
+
+If a **Similar** group is really two different items, edit one of them so they differ more clearly
+(e.g. add the missing brand, or correct the unit or category) and it will drop off the list.
 
 ### Bulk import from Excel
 🔒 *Hospital Administrator, Inventory Officer*
 
 The fastest way to load a large catalogue (e.g. migrating from a spreadsheet):
 1. Click **Import**.
-2. **Download the template** link gives you the correct columns: *Name, Item Code, Description, Unit,
-   Category, Reorder Threshold, Expiration Warning Days*. Column order doesn't matter, but the
-   categories you reference must already exist.
+2. **Download the template** link gives you the correct columns: *Name, Brand, Item Code, Description,
+   Unit, Category, Reorder Threshold, Expiration Warning Days*. Column order doesn't matter. A column
+   headed *Description/Generic Name* (as in the hospital's catalog export) is accepted as the name.
 3. Choose your `.xlsx` file and click **Preview**.
-4. The preview table marks each row **Ready** or **Error** with the exact reason — unknown category,
-   duplicate name or code (within the file *or* against existing items), missing required fields, or
-   values out of range. Fix errors in the file if you want those rows included.
-5. Click **Import N Valid Item(s)**. Invalid rows are skipped and reported; nothing bad slips through.
+4. The preview table marks each row **Ready** or **Error** with the exact reason — an item with the same
+   category, description, brand and unit, or a duplicate code (within the file *or* against existing
+   items), missing required fields, or values out of range. Fix errors in the file if you want those
+   rows included.
+
+   **Ready** rows may also carry an amber note — these don't block the import:
+   - *Unit "PCS" recorded as "pc"* — unit spellings are standardized so stock and forms group
+     consistently (pcs/PCS → **pc**, bxs/boxes → **box**, bot/bots → **bottle**, tabs → **tablet**, and
+     so on). Units the system doesn't recognize are kept as typed.
+   - *New category "Medical Supplies" will be created* — categories that don't exist yet are created
+     on import instead of rejecting the row. Check the spelling here: a typo would create a stray
+     category.
+   - *Possible duplicate of existing item … — check before importing* — the row has the same words and
+     unit as an existing item (or an earlier row) with a compatible brand, but isn't an exact match.
+     Remove the row if it's the same item; otherwise it's fine to import.
+5. Click **Import N Valid Item(s)**. Invalid rows are skipped and reported; the confirmation lists any
+   categories that were created.
 
 Blank *Expiration Warning Days* cells inherit the system default. Up to 1,000 rows per file.
+
+> **Loading the hospital catalog.** Use *Medical Catalog - Import Ready.xlsx* (in the revisions
+> folder), not the raw *Medical Catalog.xlsx*. The import-ready copy has duplicates removed, units
+> fixed, drugs and supplies sorted into **Drugs and Medicines / Medical Supplies / Laboratory
+> Supplies**, and the old system's number suffixes stripped (*Cefotaxime 1g 999* → *Cefotaxime 1g*).
+> Its **Review** sheet lists every change against the original row — read the rows marked
+> *"please check"* before importing, since some trailing numbers are real sizes (*GLOVES 7*).
 
 ### Export a snapshot
 🔒 *Super Admin, Hospital Administrator, Procurement Staff, Inventory Officer* — **Export Snapshot**
@@ -575,31 +653,49 @@ the void is refused rather than driving its balance negative — record the usag
 
 Where supply requests are raised and routed for approval. **Sidebar → Procurement → Requests.**
 
+The page has two tabs, one per flow:
+- **Department Requests** — wards asking the storeroom for supplies (this section).
+- **Purchase Requests** — the storeroom asking the Provincial Government to buy stock. See
+  [Purchase Requests](#16-procurement--purchase-requests-storeroom-replenishment).
+
 ### The approval workflow
-A request moves through these stages (shown as status badges):
+A ward's request moves through four steps, shown as a progress bar in the request's **View** window:
 
-1. **Draft** (`Submitted by Department`) — created but not yet sent.
-2. **Submit** → **Pending Procurement** (`Submitted to Procurement`).
-3. **Procurement review** → **Procurement Approved**.
-4. **Inventory review** → **Inventory Approved**.
-5. **Final approval** (admin) → **Fully Approved** — now eligible to become a Purchase Order.
-6. From there: **PO Generated** → **Delivered**.
+1. **Draft** (`Draft / Dept. Request`) — created but not yet sent. Submit it when ready.
+2. **Inventory Review** — the Inventory Officer checks central stock and **allocates** how much of each
+   line the ward gets. When several wards want the same item and there isn't enough, the stock is
+   split between them (see [Stock allocation](#stock-allocation-when-wards-compete)).
+3. **Admin Approval** — the Hospital Administrator gives final approval.
+4. **Released** — on final approval the system **issues the allocated quantities straight into the
+   ward's department stock**. Nobody re-enters anything: central stock goes down, department stock goes
+   up, batches are drawn first-expiry-first, and consumption is recorded — exactly as if the storeroom
+   had issued it by hand.
 
-At any review step an approver can **Approve**, **Reject**, or **Return for revision** (sends it back to
-the requester to fix and resubmit).
+At either review step the reviewer can **Approve**, **Reject**, or **Return for revision** (sends it back
+to the requester to fix and resubmit; remarks are required for reject and return).
+
+> **Awaiting Stock.** If central stock has run short by the time of final approval, the request is
+> approved but not released — its badge reads **Awaiting Stock**. Procurement and Inventory are
+> notified. Once the stock arrives (usually via a [Purchase Request](#16-procurement--purchase-requests-storeroom-replenishment)),
+> the Inventory Officer clicks **Release**. A request is released whole or not at all, so a ward never
+> silently receives half an order.
 
 ### Aging indicator
 Requests waiting more than **7 days** without action are flagged ("waiting Nd" — amber at 7 days, red at
 14), and a banner above the table summarizes how many are stalled — so nothing silently sits.
 
 ### Creating a request
-🔒 *Super Admin, Hospital Administrator, Department Head*
-1. Click **New Request**.
-2. Enter a **Justification**.
-3. Add one or more **item lines**: pick the item with the searchable picker (item code and live
-   availability are shown), enter **Qty**, an optional **Estimated Unit Cost** (non–Department-Head
-   roles), and optional **Remarks**. **Add Item** for more lines; the × removes a line.
-4. **Submit Request**.
+🔒 *Super Admin, Hospital Administrator, Department Head* — and *Department (Shared PC)* accounts from
+[Dept. Requests](#13-procurement--department-requests).
+1. Click **New Request**. The form is laid out like the paper **Requisition and Issue Slip**.
+2. Choose the **Requesting Department** (administrators only — everyone else is fixed to their own) and
+   check **Requested By**. On a shared PC this is required: type the name of the person who needs the
+   supplies.
+3. Enter the **Purpose**.
+4. Add items from the catalogue on the left: search by name, brand, or code, or narrow it by category
+   chip (the **Low stock** chip shows items at or below reorder). Click an item to add it; enter **Qty**
+   and optional **Remarks** for each line.
+5. **Save Draft** to finish later, or **Save & Submit** to send it for inventory review.
 
 > Coming from a Dashboard/Inventory "reorder" button pre-fills the form for you — including suggested
 > quantities on bulk replenishment.
@@ -615,33 +711,110 @@ Open a request with **View** — the **Attachments** panel sits below the item l
 - Department Heads can only reach attachments on their own department's requests.
 
 ### Official forms (RIS / PR)
-In the request's **View** window, the footer offers two Excel exports patterned on the LGU forms:
-- **RIS** — Requisition and Issue Slip: stock numbers, units, quantities requested (the *Quantity
-  Issued* column is left blank for the issuing officer's pen), purpose, and
-  Requested / Approved / Issued / Received-by signature rows.
-- **PR Form** — Purchase Request: the same header details plus estimated unit/total costs and a grand
-  estimated total.
+In the request's **View** window, the footer offers the hospital's paper forms as Excel files, laid out
+to print like the originals. Open the file and print — each page is a complete form that can be signed
+on its own.
 
-Names the system knows (requester, final approver) are pre-printed; fund cluster and signatures stay
-blank for ink.
+**RIS — Requisition and Issue Slip** *(FRM-ADM-SUP-011; department requests only)*
+
+What a ward uses to draw supplies from the storeroom.
+- **Letterhead:** hospital name with the province and hospital seals, address, and ISO / CIP line.
+- **Header:** Department / Office, Date, and RIS No. (the request number).
+- **Table:** 25 lines per page — **Qty**, **Unit**, and **Articles/Description** on the *Requisition*
+  side; **Quantity** and **Remarks** on the *Issuance* side. Descriptions include the brand, since the
+  slip records exactly which stock went out.
+- **Before release**, the Issuance Quantity column and *Issued by* are left blank for the storeroom's
+  pen. **After the system releases the request**, the quantities actually issued and the Inventory
+  Officer's name are printed in. A line that got less than asked shows *"Allocated N (limited stock)"*.
+- **Signatures:** *Requested by* (End User — the name typed on the request), *Noted by* (Section Head —
+  the department head on record), *Approved by* (OIC - Chief of Ancillary Service and Chief Nurse),
+  *Issued by*, and *Received by*.
+- **Footer strip:** form code, revision number, revision date, and **Page X of Y**.
+- Printed on Letter (short bond). Longer requests continue on the next page with the full form repeated.
+
+**PR Form — Purchase Request** *(Appendix 47)*
+
+What Procurement sends to the Provincial Government to buy stock.
+- **Header:** LGU, Fund, Department (*PPH*), Section, FPP, PR No. and Date.
+  - **PR No.** and **Date** are left blank on purpose — the provincial office assigns them. The
+    system's own request number and date print in small type under the form, where the office writes
+    its control number.
+  - **Fund, Section and FPP** come from the request if you filled them in (see below); otherwise they
+    print as blank lines.
+- **Table:** 30 lines per page — **Item No.** (continuing across pages), **Unit** (PCS, BOT, GAL…),
+  **Item Description** in capitals, **Quantity**, **Unit Cost** and **Total Cost**. Costs appear only
+  where an estimated cost was entered; a **TOTAL** row closes the last page.
+- **No brands** on a PR — government procurement specifies the item, never the make.
+- **Purpose** (the request's justification) and the three signatory boxes: *Requested by* (Chief of
+  Hospital), *Cash Availability* (Provincial Treasurer), and *For & By Authority of the Governor*
+  (PHMSO Head).
+- Set to 8.5 × 13 long bond; if your printer doesn't offer that size, each form still fits on one
+  Letter page.
+
+> **One PR per category per semester.** The supply office raises separate PRs for medical, office,
+> and janitorial supplies, each for a half-year (e.g. *"Medical supplies for use of Pangasinan
+> Provincial Hospital July – December CY 2026"*). Build each one as its own Purchase Request so each
+> prints as its own form.
+
+**Filling in Fund, Section and FPP.** On a new or edited **Purchase Request** (replenishment), three
+optional fields appear under the header: **Fund**, **Section**, and **FPP**. These are usually
+assigned later by the provincial budget and treasury offices — leave them blank and write them on the
+printout, or type them in once known and re-export the form.
+
+> **Before your first print:** an administrator should fill in the signatory names, approvers, and
+> form revision under [Settings → System](#system-administrators-only), and put the seal images on the
+> server (see the same section). Until then, names print as blank signing lines and the letterhead
+> prints without seals.
 
 ### Submitting a draft
-🔒 *Super Admin, Hospital Administrator, Department Head* — on a **Draft** or **Returned** request, click
-**Submit** to push it into the procurement workflow.
+🔒 *Super Admin, Hospital Administrator, Department Head, Department (Shared PC)* — on a **Draft** or
+**Returned** request, click **Submit** to send it for inventory review. Until Inventory approves it, the
+requester can still **Edit** or **Cancel** the request from [Dept. Requests](#13-procurement--department-requests)
+(a cancel reason is optional); after that it is locked.
 
-### Reviewing a request
-🔒 depends on the stage — *Procurement Staff* review the procurement step, *Inventory Officers* the
-inventory step, *Administrators* give final approval. Click the stage's review button, pick
-**Approve / Reject / Return**, add remarks (required for reject/return), and confirm.
+### Reviewing a request — stock check & allocation
+🔒 *Inventory Officer* (or an administrator standing in)
+
+1. Click **Review & Allocate** on a request in **Inventory Review**.
+2. The **Stock Check & Allocation** table shows, for each line: what was **Requested**, what is
+   **Available** (on hand minus stock already promised to approved requests), how much **other wards**
+   are asking for, the line's **Fair Share**, an **Allocate** box, and the **Remaining Stock** after
+   your allocation (red with *"must be procured"* if it goes negative).
+3. Use **Fair Share** to fill every line with its proportional cut, **Full Request** to give everything
+   asked for, or type quantities yourself. Lines given less than requested are highlighted.
+4. **Approve** (or Reject / Return with remarks). The requester is notified — including a note when
+   quantities were cut to the stock available — and the request moves to **Admin Approval**.
+
+### Stock allocation when wards compete
+🔒 *Inventory Officer, Hospital Administrator*
+
+When wards together ask for more than the storeroom has (e.g. 30 + 20 + 40 gloves against 80 on the
+shelf), don't let the first request drain it. Click **Stock Allocation** in the page header (an amber
+badge counts the items that are short). It lists every item that pending requests are competing for,
+with each ward's request and its **fair share** — a proportional split, with any spare unit going to the
+earliest request. Adjust as needed and **Save**; each request's review then starts from those figures.
+
+### Final approval
+🔒 *Hospital Administrator*
+
+Click **Final Approve** on a request in **Admin Approval**, review the allocated quantities, and
+**Approve**. The stock is released to the ward on the spot — or the request waits as **Awaiting Stock**
+if the storeroom has since run short.
 
 If the requesting department has a budget for the year, the review box shows what it has left and
 what this request is estimated to cost (see [Department Budgets](#15-procurement--department-budgets)).
 It never blocks the approval — the estimate isn't the final cost, so the budget is enforced when the
 purchase order is raised.
 
+### Releasing a request that was waiting on stock
+🔒 *Inventory Officer, Hospital Administrator* — on an **Awaiting Stock** request, click **Release** once
+the stock is in. If anything is still short, the system tells you exactly which items and how much is on
+hand, and nothing is issued.
+
 ### Viewing details
-Click **View** on any request to see its items, justification, attachments, and full **approval
-history** (who did what, when, with remarks). A **QR code of the request number** sits at the top right
+Click **View** on any request to see its progress bar, items (with the **Allocated** and **Released**
+quantities once Inventory has acted), purpose, attachments, and full **approval history** (who did what,
+when, with remarks). A **QR code of the request number** sits at the top right
 of the panel — see below.
 
 ### QR codes for requests
@@ -661,28 +834,37 @@ the live record in seconds.
 
 ## 13. Procurement — Department Requests
 
-**Sidebar → Procurement → Dept. Requests.** 🔒 *Super Admin, Hospital Administrator, Department Head.*
+**Sidebar → Procurement → Dept. Requests.** 🔒 *Super Admin, Hospital Administrator, Department Head,
+Department (Shared PC).*
 
-A department-scoped version of the requests page for Department Heads — it shows only **your
-department's** requests and drops the cost column. Create a request as a **draft**, review live item
-availability as you build it (Available / Not Available / below-reorder indicators), then **Submit** it
-into the same approval workflow described above. The same aging flags and attachments panel apply here.
-You must have a department assigned to your account.
+A department-scoped version of the requests page — it shows only **your department's** requests and
+drops the cost column. Create a request as a **draft**, review live item availability as you build it
+(Available / Not Available / below-reorder indicators), then **Submit** it into the same workflow
+described above. The same progress bar, aging flags and attachments panel apply here. You must have a
+department assigned to your account.
+
+**On a shared ward PC** (the *Department (Shared PC)* account), the account belongs to the ward, not to
+a person — so **Requested By** must be filled in on every request. That typed name is what appears as
+*Requested by (End User)* on the printed RIS, and it's the only record of who actually needed the
+supplies. Shared accounts can file and submit requests and see the ward's stock; approvals stay with
+named users.
 
 ---
 
 ## 14. Procurement — Purchase Orders & Deliveries
 
-Turns fully-approved requests into orders and receives the goods. **Sidebar → Procurement → Purchase
+Turns approved [Purchase Requests](#16-procurement--purchase-requests-storeroom-replenishment) into
+orders and receives the goods into central stock. **Sidebar → Procurement → Purchase
 Orders.**
 
 Top cards summarize **Total POs**, **Pending Delivery**, and **Delivered**.
 
 ### Generating a purchase order
 🔒 *Hospital Administrator, Procurement Staff*
-1. Click **Generate PO** (only appears when there are fully-approved requests waiting).
-2. Choose the **Approved Request** and an **accredited Supplier**.
-3. Enter the **unit cost** for each line — a running **Total** is calculated.
+1. Click **Generate PO** (only appears when there are approved requests waiting) — or click **Create PO**
+   on an approved Purchase Request, which opens this form with the request already picked.
+2. Choose the **Approved Request**. Its estimated unit costs are filled in as a starting point.
+3. Enter or correct the **unit cost** for each line — a running **Total** is calculated.
 4. **Generate PO**.
 
 Once you pick a request, a panel shows the department's remaining budget for the year and updates
@@ -692,31 +874,55 @@ administrator has switched enforcement off. Departments with no budget set aren'
 [Department Budgets](#15-procurement--department-budgets).
 
 ### Confirming a delivery (supports partial deliveries)
-🔒 *Hospital Administrator, Inventory Officer*
+🔒 *Super Admin, Procurement Staff*
+
+Suppliers often deliver an order in instalments. Record **each shipment as it arrives** — the system
+keeps a dated log per line, the same as the notes the supply office writes beside each PO line
+(*"37 = 8/18/26, 3 = 8/10/26 — Fully delivered"*).
+
 1. On a PO that isn't fully delivered, click **Deliver**. The modal lists only lines with something
-   still outstanding, showing *"Outstanding: 30 (of 50 ordered)"*.
-2. For each line, enter **Qty Received** (defaults to the outstanding amount — enter less for a partial
+   still outstanding, showing *"Outstanding: 30 (of 50 ordered)"*, with any earlier shipments for that
+   line listed under the item name.
+2. Enter the shipment details at the top:
+   - **Date Delivered** — the day the goods actually arrived. Defaults to today. You can pick an earlier
+     date if you're keying the receipt in late, but not a future date or a date before the PO was
+     generated.
+   - **DR / Invoice No.** — the supplier's delivery receipt number (optional, but makes the log easy
+     to match against the paperwork).
+3. For each line, enter **Qty Received** (defaults to the outstanding amount — enter less for a partial
    shipment, or 0 if that line wasn't in this delivery) plus the **Lot / Batch No.** and **Expiration
    Date** from the physical delivery.
-3. **Confirm Delivery** — stock goes up, a **batch** is created per received line (carrying the PO's
-   unit cost for valuation), and a Receipt movement is recorded.
+4. **Confirm Delivery** — stock goes up, a **batch** is created per received line (dated with the
+   delivery date and carrying the PO's unit cost for valuation), a Receipt movement is recorded with
+   the date and reference in its remarks, and the shipment is added to each line's delivery log.
 
 The PO's status runs **Pending → Partial → Delivered**; it only closes when every line reaches its
-ordered quantity, and the underlying request flips to **Delivered** at that point. Receiving more than
-the outstanding amount is rejected with a per-item message.
+ordered quantity, and the underlying request flips to **Delivered** at that point (the PO's delivered
+date is the day the last shipment arrived). Receiving more than the outstanding amount is rejected with
+a per-item message.
 
 ### Viewing & printing a PO
-Click **View** to see supplier, totals, and line items. **Print PO** opens a clean, print-ready purchase
-order (allow pop-ups).
+Click **View** to see totals and line items. Each line shows:
+- **Ordered**, **Delivered**, and **Balance** — the balance turns into a green **Fully delivered** badge
+  once the line is complete.
+- The **delivery log** under the item name, one entry per shipment: *"3 pc on Oct 1, 2026 · Ref.
+  DR-1001 · Lot A7"*.
+
+The status at the top reads **Pending Delivery**, **Partially Delivered**, or **Delivered (date)**.
+**Print PO** opens a clean, print-ready purchase order including the log (allow pop-ups).
+
+> POs delivered before the delivery log existed show their history too: each earlier receipt appears
+> with the date its batch was received. Very old deliveries that left no batch appear as a single
+> entry marked *"(recorded before delivery log)"*.
 
 ### QR codes for purchase orders
 Every PO carries a scannable QR code of its **PO number**.
 
-- **On screen:** open **View** — the QR is at the top right, beside the supplier and totals.
+- **On screen:** open **View** — the QR is at the top right, beside the totals.
 - **On the printed PO:** the QR is inside the printed area, so **Print PO** puts it on the paper copy
   automatically. Nothing extra to do.
 - **On paper labels:** click **QR Labels** in the page header for a printable sheet covering every PO
-  listed (QR, supplier, PO number, request number and delivery status).
+  listed (QR, PO number, request number and delivery status).
 
 **What scanning does:** press **Ctrl + K** to open global search and scan the code — the PO comes
 straight up. In practice: stick a label on each incoming delivery box, and the receiving officer scans
@@ -790,28 +996,48 @@ rather than the requester's estimates.
 
 ---
 
-## 16. Procurement — Suppliers
+## 16. Procurement — Purchase Requests (storeroom replenishment)
 
-**Sidebar → Procurement → Suppliers.** Manage the vendors you order from.
+How the storeroom restocks itself. **Sidebar → Procurement → Requests → Purchase Requests tab.**
+Procurement Staff land on this tab by default.
 
-### Viewing
-Search by name; each supplier shows contact details, **accreditation** status, and a **Performance**
-column: the percentage of its POs delivered (green ≥ 80%, amber ≥ 50%, red below) and its average
-**lead time** — days from PO generation to confirmed delivery. Use it to compare vendors before
-generating a PO. Only **accredited** suppliers can be chosen when generating one.
+A Purchase Request (PR) buys stock **for central stock** — it is never allocated or released to a
+ward. It follows its own four steps:
 
-### Adding / editing a supplier
+1. **Draft** — the Supply Officer builds the PR.
+2. **Chief Approval** — the Hospital Administrator approves it as Chief of Hospital.
+3. **Purchase Order** — Procurement generates the PO.
+4. **Delivered** — the goods arrive (possibly in several shipments) and go into central stock.
+
+### Creating a Purchase Request
 🔒 *Super Admin, Hospital Administrator, Procurement Staff*
-1. **Add Supplier** (or ✏️ edit).
-2. Fill in name, contact person, email, phone, address, **accreditation number**, whether it's
-   **accredited**, and the **accreditation expiry**.
-3. Save.
+1. On the **Purchase Requests** tab, click **New Purchase Request** — or use **Reorder** /
+   **Request Replenishment** on the Items page, which pre-fills low-stock items with suggested
+   quantities.
+2. Fill in the **Office / Section**, and optionally **Fund**, **Section** and **FPP** (usually assigned
+   later by the provincial offices — leave them blank to write on the printout).
+3. Enter the **Purpose** the way it should read on the form, e.g. *"Medical supplies for use of
+   Pangasinan Provincial Hospital July – December CY 2026"*.
+4. Add the items and quantities, with an **Estimated Unit Cost** where you have one.
+5. **Save Draft**, or **Save & Submit** to send it to the Chief.
 
-### Order history
-Click the 🕘 history action to see all purchase orders placed with that supplier.
+> **One PR per category per semester.** The supply office raises separate PRs for medical, office and
+> janitorial supplies, each for a half-year, so each prints as its own Appendix 47 form.
 
-### Deleting
-🔒 *Super Admin, Hospital Administrator* — remove a supplier (blocked if it would break existing orders).
+### Chief approval
+🔒 *Hospital Administrator* — click **Chief Approval** on a submitted PR, then **Approve**, **Reject**, or
+**Return** (remarks required for the last two). Approval notifies Procurement to raise the PO; the
+badge reads **Approved – for PO**.
+
+### From approval to delivery
+Click **Create PO** on the approved PR to [generate the purchase order](#generating-a-purchase-order),
+then [confirm each delivery](#confirming-a-delivery-supports-partial-deliveries) as it arrives. When the
+last line is fully delivered the PR shows **Delivered**, and any ward requests that were **Awaiting
+Stock** can be released.
+
+### Printing the PR
+Open the PR with **View** and click **PR Form** for the Appendix 47 form — see
+[Official forms](#official-forms-ris--pr).
 
 ---
 
@@ -852,13 +1078,15 @@ error. Each month only alerts once, even if forecasts are regenerated.
 
 ## 18. Analytics — Reports
 
-**Sidebar → Analytics → Reports.** Three report types. You always **see the data as charts first**, then
+**Sidebar → Analytics → Reports.** Four report types. You always **see the data as charts first**, then
 decide whether to generate the file — so nothing is exported before you've checked it looks right.
 
-### The three steps
+### The steps
 
-1. **Pick the report type** — Consumption, Procurement, or Forecast Accuracy (the buttons at the top).
-2. **Set the filter and click "Visualize Data"** — a **year** for Consumption and Forecast Accuracy, a
+1. **Pick the report type** — Consumption, Procurement, Forecast Accuracy, or Item Rankings (the buttons
+   at the top).
+2. **Set the filter and click "Visualize Data"** — a **year** for Consumption, Forecast Accuracy and
+   Item Rankings, a
    **date range** for Procurement. The page fills with summary cards and charts for exactly that slice.
 3. **Generate the report** — the **Generate Excel** and **Generate PDF** buttons appear in the header only
    once the data is on screen, and they use the same filters you just previewed.
@@ -871,11 +1099,16 @@ decide whether to generate the file — so nothing is exported before you've che
    items** ranked by quantity.
 2. **Procurement Report** (by date range) — request counts, total PO value, and delivered POs, plus:
    **requests by status** across the whole approval pipeline; **fulfillment meters** for POs delivered and
-   requests fully approved; and **top suppliers by PO amount**.
+   requests fully approved.
 3. **Forecast Accuracy** (by year) — forecasts generated, method split, overall **MAE** (mean absolute
    error), and how many items sit below their reorder point, plus: **projected demand vs stock on hand**
    for the items with the largest shortfalls; **forecast error (MAE) by item**; and the full per-item
    summary table.
+4. **Item Rankings** (by year) — the **most used** items (units issued) or the **most procured** items
+   (units ordered on purchase orders), switchable with the **Ranking** dropdown. Each item shows its
+   category; the **Category** dropdown ranks within one category or shows every category's own
+   leaderboard side by side, and **Show** sets how many items are listed. The Consumption Report includes
+   the same rankings at the bottom.
 
 ### Reading the charts
 
@@ -925,13 +1158,19 @@ period the administrators configured.
 ### Viewing
 Search by name or username; the table shows role, department, active status, and last login.
 
-### Creating a user
-1. **Add User.**
-2. Fill in first/last name (middle optional), **Username**, **Employee ID**, **Role**, optional
-   **Department** (required in practice for Department Heads), **Email**, and an **Initial Password**
-   meeting the policy (live hints shown).
-3. **Create.** (Username and Employee ID can't be changed later.) The user is **forced to set their own
-   password on first login** — the one you typed is only a handover credential.
+### Adding a user
+New accounts are created here by the administrator — no database or seeder changes are needed.
+
+1. Click **Add User**.
+2. Fill in the person's details: first/last name (middle optional), **Username**, **Employee ID**,
+   **Email**, and an **Initial Password** meeting the policy (live hints shown).
+3. Choose their **Role** (Inventory Officer, Procurement Staff, Department Head, Department Staff
+   (Shared PC), and — for a Super Admin only — Hospital Administrator / Super Admin).
+4. Choose their **Department**. It's required for **Department Head** and **Department Staff**, since
+   those accounts only see and request for their own department.
+5. Click **Add User**. Username, email and Employee ID must each be unused — the form tells you if one
+   is already taken. (Username and Employee ID can't be changed later.) The user is **forced to set
+   their own password on first login** — the one you typed is only a handover credential.
 
 ### Editing a user
 ✏️ pencil → change name, role, department, email, and **Active/Inactive** status.
@@ -1006,7 +1245,7 @@ A searchable trail of sensitive actions.
    details, and IP address. Results are paged; the header shows the true total found.
 3. **Export CSV** downloads the full filtered set (up to 1,000 rows) — not just the visible page.
 
-What gets logged: sign-ins (including failures and lockouts), password changes/resets, item imports,
+What gets logged: sign-ins (including failures and lockouts), password changes/resets, item imports and merges,
 batch corrections and disposals, movements and voids, cycle counts, request/approval actions,
 attachment uploads/deletions, PO generation and deliveries, backup runs and verifications, user
 administration, and settings changes.
@@ -1060,6 +1299,21 @@ Server-wide settings that apply to everyone:
   would take a department past its fiscal-year budget is rejected; off, it goes through and
   administrators are notified instead. Departments with no budget set are never checked either way.
   The figures themselves live on the [Budgets page](#15-procurement--department-budgets).
+- **Purchase Request form** — what prints on every [PR Form](#official-forms-ris--pr): the **LGU**
+  line, the **Department** (*PPH*), and the three signatories — **Requested by**, **Cash
+  Availability**, and **For & By Authority of the Governor** — each with a printed name and a
+  designation. Type names exactly as they should appear, titles and post-nominals included
+  (e.g. *Juan Dela Cruz, MD, DPBS, FPSGS, FPCS*). A blank name prints as an empty signing line.
+- **Requisition and Issue Slip** — what prints on every [RIS](#official-forms-ris--pr): the
+  **letterhead address** and **certification line** (ISO / CIP), the two **approvers** (names and
+  designations — *OIC - Chief of Ancillary Service* and *Chief Nurse* by default), and the document
+  control fields **Form code**, **Revision No.** and **Revision date**. When the form is revised, update
+  these three fields — no system change is needed.
+
+  > **Seals on the RIS letterhead.** The province and hospital seals are image files on the server,
+  > not a setting. Ask whoever maintains the server to place clean PNGs (square, transparent
+  > background) at `PPHIPMSystem.Server/Assets/Forms/province-seal.png` and `hospital-seal.png`.
+  > Without them the letterhead prints the text only.
 - **Announcement** — the hospital-wide banner message, with optional **show-from / show-until** times so
   maintenance notices appear and clear themselves on schedule.
 
@@ -1092,9 +1346,13 @@ Recording **ward usage** afterwards is a second, separate ledger: it only draws 
 balance so the ward's figures match its shelf. Keeping these apart is what stops the same units being
 subtracted twice and the forecasts coming out double.
 
-**The procurement chain.** Request (with attachments) → (submit) → Procurement approval → Inventory
-approval → Final approval → **Fully Approved** → Purchase Order → Delivery (possibly in parts) → stock +
-batches. Any approver can reject or return for revision along the way.
+**The two procurement chains.**
+- *Ward request:* Draft → (submit) → Inventory review & allocation → Admin approval → **Released** into
+  the ward's stock — or **Awaiting Stock** until the storeroom is restocked, then released.
+- *Purchase Request:* Draft → (submit) → Chief approval → Purchase Order → Delivery (possibly in parts)
+  → central stock + batches.
+
+Any reviewer can reject or return for revision along the way.
 
 **Reorder threshold.** Each item's low-stock trigger. Dropping to/below it flags the item, drives the
 Low Stock dashboard/notifications, and enables the one-click reorder buttons.
@@ -1124,7 +1382,7 @@ rarely need to refresh.
 
 - **Ctrl + K / ⌘ + K** — focus global search from anywhere.
 - In search and dropdowns: **↑ / ↓** to move, **Enter** to select, **Esc** to close.
-- **Type-to-filter dropdowns** — the searchable pickers (items, suppliers, departments) accept a barcode
+- **Type-to-filter dropdowns** — the searchable pickers (items, departments) accept a barcode
   scanner's input too: print QR labels from the Items or Batches pages, focus a picker, scan, Enter.
 - **Scan a request or PO straight to its record** — press **Ctrl + K**, then scan the QR label on the
   paperwork or delivery box.

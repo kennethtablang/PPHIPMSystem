@@ -23,4 +23,8 @@ public class PurchaseOrderItem
 
     [Column(TypeName = "decimal(18,2)")]
     public decimal TotalCost => QuantityOrdered * UnitCost;
+
+    // Each shipment that brought part of this line in; QuantityDelivered is
+    // their running total.
+    public ICollection<PurchaseOrderDelivery> Deliveries { get; set; } = [];
 }

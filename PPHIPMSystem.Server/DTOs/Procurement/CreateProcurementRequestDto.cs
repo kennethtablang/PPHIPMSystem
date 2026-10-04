@@ -19,6 +19,16 @@ public class CreateProcurementRequestDto
     [Required, MaxLength(1000)]
     public string Justification { get; set; } = string.Empty;
 
+    // Purchase Request form fields (replenishment PRs); all optional.
+    [MaxLength(100)]
+    public string? Fund { get; set; }
+
+    [MaxLength(150)]
+    public string? Section { get; set; }
+
+    [MaxLength(100)]
+    public string? Fpp { get; set; }
+
     [Required, MinLength(1)]
     public List<CreateProcurementRequestItemDto> Items { get; set; } = [];
 }

@@ -13,6 +13,14 @@ import { useAuth } from '../../context/AuthContext';
 const ROLES = ['SuperAdmin', 'HospitalAdministrator', 'InventoryOfficer', 'ProcurementStaff', 'DepartmentHead', 'DepartmentStaff'];
 // Only a Super Admin may create, edit, or reset administrator accounts (enforced by the server).
 const PRIVILEGED_ROLES = ['SuperAdmin', 'HospitalAdministrator'];
+const ROLE_NAMES = {
+  SuperAdmin: 'Super Admin',
+  HospitalAdministrator: 'Hospital Administrator',
+  InventoryOfficer: 'Inventory Officer',
+  ProcurementStaff: 'Procurement Staff',
+  DepartmentHead: 'Department Head',
+  DepartmentStaff: 'Department Staff (Shared PC)',
+};
 const BLANK = { username: '', password: '', firstName: '', middleName: '', lastName: '', employeeId: '', role: 'InventoryOfficer', departmentId: '', email: '', isActive: true };
 
 export default function UsersPage() {
@@ -96,7 +104,7 @@ export default function UsersPage() {
       departmentId: form.departmentId === '' ? null : Number(form.departmentId),
     };
     try {
-      if (modal === 'create') { await createUser(payload); toast.success('User created.'); }
+      if (modal === 'create') { await createUser(payload); toast.success(`Account created for ${payload.firstName}. They will be asked to set a new password at first login.`); }
       else { await updateUser(modal.id, payload); toast.success('User updated.'); }
       setModal(null); load();
     } catch (e) { toast.error(e.response?.data?.message ?? 'Failed to save.'); }
@@ -180,12 +188,12 @@ export default function UsersPage() {
 
       {modal && (
         <Modal
-          title={modal === 'create' ? 'Create User' : `Edit: ${modal.firstName} ${modal.lastName}`}
+          title={modal === 'create' ? 'Add User' : `Edit: ${modal.firstName} ${modal.lastName}`}
           onClose={() => setModal(null)} size="modal-lg"
           footer={
             <>
               <button className="btn btn-secondary" onClick={() => setModal(null)}>Cancel</button>
-              <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? 'Saving…' : modal === 'create' ? 'Create' : 'Save'}</button>
+              <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? 'Saving…' : modal === 'create' ? 'Add User' : 'Save'}</button>
             </>
           }
         >
@@ -230,7 +238,7 @@ export default function UsersPage() {
             <div className="form-group">
               <label className="form-label">Role *</label>
               <select className="form-control" value={form.role} onChange={set('role')} disabled={isSelf}>
-                {(assignableRoles.includes(form.role) ? assignableRoles : [form.role, ...assignableRoles]).map(r => <option key={r} value={r}>{r}</option>)}
+                {(assignableRoles.includes(form.role) ? assignableRoles : [form.role, ...assignableRoles]).map(r => <option key={r} value={r}>{ROLE_NAMES[r] ?? r}</option>)}
               </select>
             </div>
             <div className="form-group">

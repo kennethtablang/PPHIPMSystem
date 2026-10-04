@@ -15,11 +15,13 @@ public class InventoryController : ControllerBase
 
     private readonly IInventoryService _inventory;
     private readonly IInventoryImportService _import;
+    private readonly IInventoryDuplicateService _duplicates;
 
-    public InventoryController(IInventoryService inventory, IInventoryImportService import)
+    public InventoryController(IInventoryService inventory, IInventoryImportService import, IInventoryDuplicateService duplicates)
     {
         _inventory = inventory;
         _import = import;
+        _duplicates = duplicates;
     }
 
     [HttpGet("dashboard")]
@@ -41,6 +43,38 @@ public class InventoryController : ControllerBase
     {
         var result = await _inventory.GetByIdAsync(id);
         return result is null ? NotFound() : Ok(result);
+    }
+
+    // ── Duplicate items ──────────────────────────────────────────────────────
+
+    // Groups of active items that look like the same item entered twice.
+    [HttpGet("duplicates")]
+    [Authorize(Roles = "HospitalAdministrator,InventoryOfficer")]
+    public async Task<IActionResult> GetDuplicates()
+        => Ok(await _duplicates.FindDuplicateGroupsAsync());
+
+    // Live check for the Add/Edit form: existing items similar to what's being typed.
+    [HttpGet("similar")]
+    [Authorize(Roles = "HospitalAdministrator,InventoryOfficer")]
+    public async Task<IActionResult> GetSimilar(
+        [FromQuery] string name, [FromQuery] string? brand, [FromQuery] string? unit,
+        [FromQuery] int? categoryId, [FromQuery] int? excludeId)
+        => Ok(await _duplicates.FindSimilarAsync(name, brand, unit, categoryId, excludeId));
+
+    // Folds duplicates into one item. Irreversible, so admin-only like Delete.
+    [HttpPost("merge")]
+    [Authorize(Roles = "HospitalAdministrator")]
+    public async Task<IActionResult> Merge([FromBody] MergeItemsDto dto)
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        try
+        {
+            return Ok(await _duplicates.MergeAsync(dto, userId));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     // ── Bulk import from spreadsheet ─────────────────────────────────────────

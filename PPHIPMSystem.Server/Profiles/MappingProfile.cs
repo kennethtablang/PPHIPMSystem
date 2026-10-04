@@ -107,7 +107,15 @@ public class MappingProfile : Profile
         CreateMap<PurchaseOrderItem, PurchaseOrderItemDto>()
             .ForMember(d => d.ItemName, o => o.MapFrom(s => s.InventoryItem.Name))
             .ForMember(d => d.Unit, o => o.MapFrom(s => s.InventoryItem.Unit))
-            .ForMember(d => d.TotalCost, o => o.MapFrom(s => s.QuantityOrdered * s.UnitCost));
+            .ForMember(d => d.TotalCost, o => o.MapFrom(s => s.QuantityOrdered * s.UnitCost))
+            .ForMember(d => d.Deliveries, o => o.MapFrom(s => s.Deliveries.OrderBy(x => x.DeliveredOn).ThenBy(x => x.Id)));
+
+        CreateMap<PurchaseOrderDelivery, PurchaseOrderDeliveryDto>()
+            .ForMember(d => d.DeliveredOn, o => o.MapFrom(s => DateOnly.FromDateTime(s.DeliveredOn)))
+            .ForMember(d => d.ReceivedByFullName, o => o.MapFrom(s =>
+                s.ReceivedByUser == null ? null : s.ReceivedByUser.FirstName + " " + s.ReceivedByUser.LastName))
+            .ForMember(d => d.LotNumber, o => o.MapFrom(s => s.ItemBatch == null ? null : s.ItemBatch.LotNumber))
+            .ForMember(d => d.ExpirationDate, o => o.MapFrom(s => s.ItemBatch == null ? null : s.ItemBatch.ExpirationDate));
 
         // DemandForecast
         CreateMap<DemandForecast, DemandForecastDto>()

@@ -25,10 +25,10 @@ public class SearchController : ControllerBase
             return Ok(new { items = Array.Empty<object>(), requests = Array.Empty<object>(), purchaseOrders = Array.Empty<object>(), users = Array.Empty<object>() });
 
         var items = await _db.InventoryItems.AsNoTracking()
-            .Where(i => i.IsActive && (i.Name.Contains(q) || (i.ItemCode != null && i.ItemCode.Contains(q))))
+            .Where(i => i.IsActive && (i.Name.Contains(q) || (i.ItemCode != null && i.ItemCode.Contains(q)) || (i.Brand != null && i.Brand.Contains(q))))
             .OrderBy(i => i.Name)
             .Take(MaxPerGroup)
-            .Select(i => new { i.Id, Title = i.Name, Subtitle = i.ItemCode ?? i.Unit })
+            .Select(i => new { i.Id, Title = i.Name, Subtitle = i.Brand != null ? i.Brand + " · " + (i.ItemCode ?? i.Unit) : i.ItemCode ?? i.Unit })
             .ToListAsync();
 
         // Department heads only see their own department's requests and have no

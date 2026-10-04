@@ -31,4 +31,9 @@
     </ProjectReference>
   </ItemGroup>
 
+  <!-- Seals printed on the RIS letterhead (see ReportExportService.LoadFormSeals). -->
+  <ItemGroup>
+    <None Update="Assets\Forms\*.png" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

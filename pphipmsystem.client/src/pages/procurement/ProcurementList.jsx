@@ -447,13 +447,13 @@ export default function ProcurementList() {
         <Modal title={`Request: ${viewModal.requestNumber}`} onClose={() => setViewModal(null)} size="modal-lg"
           footer={
             <>
-              <button
+              {viewModal.type !== 'Replenishment' && <button
                 className="btn btn-secondary"
                 onClick={() => exportRisForm(viewModal.id).then(() => toast.success('RIS downloaded.')).catch(() => toast.error('Failed to export RIS.'))}
                 title="Requisition and Issue Slip (Excel)"
               >
                 <MdFileDownload size={15} /> RIS
-              </button>
+              </button>}
               <button
                 className="btn btn-secondary"
                 onClick={() => exportPurchaseRequestForm(viewModal.id).then(() => toast.success('Purchase Request downloaded.')).catch(() => toast.error('Failed to export PR.'))}
@@ -476,6 +476,12 @@ export default function ProcurementList() {
               <div><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Status</span><br /><StatusBadge status={viewModal.status} type={viewModal.type} /></div>
               <div><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Requested By</span><br /><strong>{viewModal.requestedByName || viewModal.requestedByFullName}</strong></div>
               <div><span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Date</span><br /><strong>{new Date(viewModal.requestedAt).toLocaleDateString('en-PH')}</strong></div>
+              {viewModal.type === 'Replenishment' && (viewModal.fund || viewModal.section || viewModal.fpp) && (
+                <div style={{ gridColumn: '1 / -1', fontSize: 12, color: 'var(--text-secondary)' }}>
+                  {[['Fund', viewModal.fund], ['Section', viewModal.section], ['FPP', viewModal.fpp]]
+                    .filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join(' · ')}
+                </div>
+              )}
             </div>
             {/* Scannable request number — staple to the printed PR/RIS so the
                 paper copy can be scanned straight back into global search. */}
