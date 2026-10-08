@@ -7,7 +7,7 @@ import {
   MdShoppingCart, MdLocalShipping, MdBarChart,
   MdPeople, MdBusiness, MdCategory, MdHistory, MdAnalytics,
   MdNotifications, MdChevronLeft, MdChevronRight,
-  MdGridView, MdBackup, MdAccountBalanceWallet,
+  MdGridView, MdBackup,
 } from 'react-icons/md';
 
 const W_OPEN   = 252;
@@ -132,9 +132,6 @@ export default function Sidebar() {
               {/* Inventory officers confirm deliveries on the Purchase Orders page. */}
               {is(ROLE.SuperAdmin, ROLE.Admin, ROLE.Procurement, ROLE.Inventory) && (
                 <Item to="/purchase-orders" Icon={MdLocalShipping} label="Purchase Orders" collapsed={collapsed} />
-              )}
-              {is(ROLE.SuperAdmin, ROLE.Admin, ROLE.Procurement, ROLE.DeptHead) && (
-                <Item to="/budgets" Icon={MdAccountBalanceWallet} label="Budgets" collapsed={collapsed} />
               )}
             </Group>
           )}

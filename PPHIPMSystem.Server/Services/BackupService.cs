@@ -118,7 +118,6 @@ public class BackupService : IBackupService
         total += AddSheet(wb, "ProcurementApprovals", await _db.ProcurementApprovals.AsNoTracking().ToListAsync());
         total += AddSheet(wb, "PurchaseOrders", await _db.PurchaseOrders.AsNoTracking().ToListAsync());
         total += AddSheet(wb, "PurchaseOrderItems", await _db.PurchaseOrderItems.AsNoTracking().ToListAsync());
-        total += AddSheet(wb, "DepartmentBudgets", await _db.DepartmentBudgets.AsNoTracking().ToListAsync());
         total += AddSheet(wb, "DemandForecasts", await _db.DemandForecasts.AsNoTracking().ToListAsync());
 
         // Attachment metadata only — the files themselves live on disk and are

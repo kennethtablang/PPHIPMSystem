@@ -32,7 +32,6 @@ import SettingsPage from './pages/settings/SettingsPage';
 
 import UsersPage from './pages/admin/UsersPage';
 import DepartmentsPage from './pages/admin/DepartmentsPage';
-import DepartmentBudgetsPage from './pages/admin/DepartmentBudgetsPage';
 import CategoriesPage from './pages/admin/CategoriesPage';
 import BackupManagementPage from './pages/admin/BackupManagementPage';
 import AuditLogPage from './pages/audit/AuditLogPage';
@@ -82,16 +81,6 @@ export default function App() {
           <Route path="procurement" element={<PrivateRoute roles={[...STAFF_ROLES, 'DepartmentHead']}><ProcurementList /></PrivateRoute>} />
           <Route path="department-requests" element={<PrivateRoute roles={['SuperAdmin', 'HospitalAdministrator', 'DepartmentHead', 'DepartmentStaff']}><DepartmentRequestsPage /></PrivateRoute>} />
           <Route path="purchase-orders" element={<PrivateRoute roles={STAFF_ROLES}><PurchaseOrders /></PrivateRoute>} />
-          {/* Admins set the figures; procurement staff and department heads read
-              them (the server scopes heads to their own department). */}
-          <Route
-            path="budgets"
-            element={
-              <PrivateRoute roles={['SuperAdmin', 'HospitalAdministrator', 'ProcurementStaff', 'DepartmentHead']}>
-                <DepartmentBudgetsPage />
-              </PrivateRoute>
-            }
-          />
 
           <Route path="forecast" element={<PrivateRoute roles={STAFF_ROLES}><ForecastPage /></PrivateRoute>} />
           <Route path="reports" element={<PrivateRoute roles={STAFF_ROLES}><ReportsPage /></PrivateRoute>} />

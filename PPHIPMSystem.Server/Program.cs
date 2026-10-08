@@ -129,7 +129,6 @@ namespace PPHIPMSystem.Server
             builder.Services.AddScoped<IStockMovementService, StockMovementService>();
             builder.Services.AddScoped<IStockAdjustmentService, StockAdjustmentService>();
             builder.Services.AddScoped<IProcurementService, ProcurementService>();
-            builder.Services.AddScoped<IDepartmentBudgetService, DepartmentBudgetService>();
             builder.Services.AddScoped<IForecastService, ForecastService>();
             builder.Services.AddScoped<IReportService, ReportService>();
             builder.Services.AddScoped<IReportExportService, ReportExportService>();

@@ -4,7 +4,6 @@ import { QRCodeSVG } from 'qrcode.react';
 import { MdAdd, MdVisibility, MdSchedule, MdFileDownload, MdQrCode2, MdBalance, MdOutbox, MdWarning, MdEdit, MdCancel, MdSend, MdLocalShipping } from 'react-icons/md';
 import { exportRisForm, exportPurchaseRequestForm } from '../../api/reports';
 import { getRequests, approveRequest, submitRequest, releaseRequest, getAllocation, cancelRequest } from '../../api/procurement';
-import { checkRequestBudget } from '../../api/departmentBudgets';
 import { getItems } from '../../api/inventory';
 import AttachmentsPanel from '../../components/common/AttachmentsPanel';
 import LabelPrintModal from '../../components/common/LabelPrintModal';
@@ -27,7 +26,6 @@ const AGING_WARN_DAYS = 7;
 const daysWaiting = r => Math.floor((Date.now() - new Date(r.updatedAt ?? r.requestedAt).getTime()) / 86400000);
 const isStalled = r => PENDING_STATUSES.includes(r.status) && daysWaiting(r) >= AGING_WARN_DAYS;
 
-const peso = n => `₱${Number(n ?? 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const qty = n => Number(n ?? 0).toLocaleString('en-PH', { maximumFractionDigits: 2 });
 
 export default function ProcurementList() {
@@ -65,9 +63,6 @@ export default function ProcurementList() {
   const [lineAlloc, setLineAlloc] = useState({});
   const [boardOpen, setBoardOpen] = useState(false);
   const [shortCount, setShortCount] = useState(0);
-  // Requesting department's remaining appropriation for the request under
-  // review; null while it loads or when no budget lookup was possible.
-  const [approveBudget, setApproveBudget] = useState(null);
   const [saving, setSaving] = useState(false);
   // QR label sheet for the requests currently listed — the QR encodes the
   // request number, which global search (Ctrl+K) resolves back to the request.
@@ -117,15 +112,9 @@ export default function ProcurementList() {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: reload only when these inputs change
   }, [location.state]);
 
-  // Approvers see what the department has left before waving a request on. The
-  // figure is an estimate (real costs land on the PO), so it never blocks the
-  // approval — the hard check happens when the purchase order is raised.
   const openApprove = r => {
     setApproveModal(r);
     setApproveForm({ action: 'Approve', remarks: '' });
-    setApproveBudget(null);
-    checkRequestBudget(r.id).then(res => setApproveBudget(res.data)).catch(() => {});
-
     setAllocInfo({});
     setLineAlloc({});
     if (r.type !== 'Replenishment' && INVENTORY_STAGE.includes(r.status)) {
@@ -548,29 +537,6 @@ export default function ProcurementList() {
             </>
           }
         >
-          {approveBudget && (
-            <div
-              className={`alert ${approveBudget.wouldExceed ? 'alert-warning' : 'alert-info'}`}
-              style={{ display: 'block', fontSize: 12 }}
-            >
-              {approveBudget.hasBudget ? (
-                <>
-                  <strong>{approveBudget.departmentName}</strong> has{' '}
-                  <strong>{peso(approveBudget.remaining)}</strong> left of its FY{approveBudget.fiscalYear}{' '}
-                  budget ({peso(approveBudget.amount)} appropriated, {peso(approveBudget.committed)} committed).
-                  <div style={{ marginTop: 4 }}>
-                    This request is estimated at <strong>{peso(approveBudget.proposedAmount)}</strong>
-                    {approveBudget.wouldExceed
-                      ? ' — more than the department has left. Approving is still allowed; the purchase order is where the budget is enforced.'
-                      : `, leaving ${peso(approveBudget.remainingAfter)}.`}
-                  </div>
-                </>
-              ) : (
-                <>No FY{approveBudget.fiscalYear} budget is set for <strong>{approveBudget.departmentName}</strong>.</>
-              )}
-            </div>
-          )}
-
           {isInventoryReview && (
             <div style={{ marginBottom: 14 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>

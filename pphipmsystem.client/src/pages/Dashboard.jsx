@@ -344,7 +344,7 @@ export default function Dashboard() {
                   <tr>
                     <th>Type</th>
                     <th>Description</th>
-                    <th>Performed By</th>
+                    <th>Issued By</th>
                     <th>Date & Time</th>
                     <th></th>
                   </tr>

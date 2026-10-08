@@ -71,6 +71,16 @@ public class StockMovementService : IStockMovementService
         };
     }
 
+    // Every movement that touches a department says which one in its remarks
+    // ("Released to Medicine Ward — ..."), so the ledger reads on its own
+    // without cross-checking the department column. Remarks is 500 chars.
+    private static string? DepartmentRemarks(string? where, string? remarks)
+    {
+        remarks = string.IsNullOrWhiteSpace(remarks) ? null : remarks.Trim();
+        var text = where is null ? remarks : remarks is null ? where : $"{where} — {remarks}";
+        return text is { Length: > 500 } ? text[..500] : text;
+    }
+
     public async Task<StockMovementDto> CreateAsync(CreateStockMovementDto dto, string userId)
     {
         var item = await _db.InventoryItems.FindAsync(dto.InventoryItemId)
@@ -133,7 +143,12 @@ public class StockMovementService : IStockMovementService
             Quantity = dto.Quantity,
             QuantityBeforeMovement = before,
             QuantityAfterMovement = after,
-            Remarks = dto.Remarks,
+            Remarks = DepartmentRemarks(dto.MovementType switch
+            {
+                StockMovementType.Issuance when department is not null => $"Released to {department.Name}",
+                StockMovementType.Return when department is not null => $"Returned by {department.Name}",
+                _ => null,
+            }, dto.Remarks),
             PerformedByUserId = userId,
             PurchaseOrderId = dto.PurchaseOrderId,
             DepartmentId = dto.DepartmentId,
@@ -217,7 +232,7 @@ public class StockMovementService : IStockMovementService
             // on-hand figure keeps the movement row meaningful in the ledger.
             QuantityBeforeMovement = item.QuantityOnHand,
             QuantityAfterMovement = item.QuantityOnHand,
-            Remarks = dto.Remarks,
+            Remarks = DepartmentRemarks($"Used by {department.Name}", dto.Remarks),
             PerformedByUserId = userId,
             DepartmentId = department.Id,
             MovementDate = DateTime.UtcNow
@@ -274,7 +289,7 @@ public class StockMovementService : IStockMovementService
             // on-hand figure keeps the row meaningful alongside the others.
             QuantityBeforeMovement = item.QuantityOnHand,
             QuantityAfterMovement = item.QuantityOnHand,
-            Remarks = dto.Remarks,
+            Remarks = DepartmentRemarks($"Transferred from {from.Name} to {to.Name}", dto.Remarks),
             PerformedByUserId = userId,
             DepartmentId = from.Id,
             ToDepartmentId = to.Id,

@@ -18,17 +18,15 @@ public class ReportExportService : IReportExportService
     private readonly IReportService _reports;
     private readonly ISystemSettingsService _settings;
     private readonly ApplicationDbContext _db;
-    private readonly IDepartmentBudgetService _budgets;
     private readonly IWebHostEnvironment _env;
 
     public ReportExportService(IReportService reports, ISystemSettingsService settings,
-        ApplicationDbContext db, IDepartmentBudgetService budgets, IWebHostEnvironment env)
+        ApplicationDbContext db, IWebHostEnvironment env)
     {
         _env = env;
         _reports = reports;
         _settings = settings;
         _db = db;
-        _budgets = budgets;
     }
 
     public async Task<byte[]> ExportConsumptionAsync(ReportFilterDto filter)
@@ -287,60 +285,6 @@ public class ReportExportService : IReportExportService
             "Department stock has already been deducted from Stock on Hand — the two sheets do not overlap.";
         ws4.Cell(row4, 1).Style.Font.SetItalic().Font.SetFontColor(XLColor.Gray);
         ws4.Columns().AdjustToContents();
-
-        return ToBytes(wb);
-    }
-
-    // Appropriation vs. actual commitment per department for one fiscal year —
-    // the sheet the annual budget review and COA ask for. Spend comes from the
-    // same service the Budgets page uses, so the paper and the screen can't
-    // disagree.
-    public async Task<byte[]> ExportDepartmentBudgetsAsync(int fiscalYear)
-    {
-        var org = (await _settings.GetAsync()).OrganizationName;
-        var rows = (await _budgets.GetAllAsync(fiscalYear, null)).ToList();
-        var budgeted = rows.Where(r => r.HasBudget).ToList();
-
-        using var wb = new XLWorkbook();
-        var ws = wb.AddWorksheet($"FY{fiscalYear} Budgets");
-        var row = WriteDocumentHeader(ws, org, $"Department Budget Utilisation — FY {fiscalYear}", lastCol: 6);
-
-        row = WriteKeyValueBlock(ws, row, "Summary", new (string, object)[]
-        {
-            ("Departments with a budget", budgeted.Count),
-            ("Total appropriated", budgeted.Sum(r => r.Amount)),
-            ("Total committed (purchase orders)", budgeted.Sum(r => r.Committed)),
-            ("Total remaining", budgeted.Sum(r => r.Remaining)),
-            ("Departments over budget", budgeted.Count(r => r.Remaining < 0)),
-        });
-
-        row = WriteTable(ws, row, "By Department",
-            ["Department", "Appropriation", "Committed", "Remaining", "Utilisation %", "Purchase Orders"],
-            rows.Select(r => new object[]
-            {
-                r.DepartmentName,
-                r.HasBudget ? r.Amount : "Not set",
-                r.Committed,
-                r.HasBudget ? r.Remaining : "—",
-                r.HasBudget ? r.UtilizationPercent : "—",
-                r.PurchaseOrderCount,
-            }));
-
-        // Estimates, kept well clear of the committed figures above so nobody
-        // adds the two together.
-        var pending = rows.Where(r => r.Pending > 0).ToList();
-        if (pending.Count > 0)
-        {
-            row = WriteTable(ws, row + 1, "Requests Not Yet on a Purchase Order (estimated)",
-                ["Department", "Estimated Value"],
-                pending.Select(r => new object[] { r.DepartmentName, r.Pending }));
-        }
-
-        ws.Cell(row, 1).Value =
-            "Committed = total of purchase orders raised against the department's requests in this fiscal year. " +
-            "Estimated values are the requesters' figures and are not commitments.";
-        ws.Cell(row, 1).Style.Font.SetItalic().Font.SetFontColor(XLColor.Gray);
-        ws.Columns().AdjustToContents();
 
         return ToBytes(wb);
     }
@@ -665,17 +609,17 @@ public class ReportExportService : IReportExportService
         double[] widths = [7, 9, 30, 20, 10, 11, 17];
         for (var c = 0; c < widths.Length; c++) ws.Column(c + 1).Width = widths[c];
 
-        var lines = request.Items.OrderBy(i => i.InventoryItem.Name).ToList();
-        var pages = Math.Max(1, (int)Math.Ceiling(lines.Count / (double)PrLinesPerPage));
+        var lines = request.Items.ToList();
+        var printRows = PurchaseRequestRows(lines);
+        var pages = Math.Max(1, (int)Math.Ceiling(printRows.Count / (double)PrLinesPerPage));
         var hasCosts = lines.Any(i => i.EstimatedUnitCost.HasValue);
 
         var row = 1;
         for (var page = 0; page < pages; page++)
         {
-            var pageLines = lines.Skip(page * PrLinesPerPage).Take(PrLinesPerPage).ToList();
+            var pageRows = printRows.Skip(page * PrLinesPerPage).Take(PrLinesPerPage).ToList();
             var isLast = page == pages - 1;
-            row = WritePurchaseRequestPage(ws, row, request, s, pageLines,
-                firstItemNo: page * PrLinesPerPage + 1,
+            row = WritePurchaseRequestPage(ws, row, request, s, pageRows,
                 grandTotal: isLast && hasCosts
                     ? lines.Where(i => i.EstimatedUnitCost.HasValue).Sum(i => i.QuantityRequested * i.EstimatedUnitCost!.Value)
                     : null,
@@ -697,9 +641,32 @@ public class ReportExportService : IReportExportService
         return ToBytes(wb);
     }
 
+    // One ruled line of the PR item table: a category heading or an item.
+    private record PrRow(string? Heading, Models.ProcurementRequestItem? Line, int ItemNo);
+
+    // Items grouped by category (both alphabetical), numbered straight through
+    // — the same order the PR form on screen shows (utils/purchaseRequest.js).
+    // A PR covering a single category, like most paper PRs, gets no heading.
+    private static List<PrRow> PurchaseRequestRows(List<Models.ProcurementRequestItem> lines)
+    {
+        var groups = lines
+            .GroupBy(i => (i.InventoryItem.Category?.Name ?? "Uncategorized").Trim(), StringComparer.OrdinalIgnoreCase)
+            .OrderBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var rows = new List<PrRow>();
+        var no = 0;
+        foreach (var g in groups)
+        {
+            if (groups.Count > 1) rows.Add(new PrRow(g.Key.ToUpperInvariant(), null, 0));
+            foreach (var line in g.OrderBy(i => i.InventoryItem.Name, StringComparer.OrdinalIgnoreCase))
+                rows.Add(new PrRow(null, line, ++no));
+        }
+        return rows;
+    }
+
     private static int WritePurchaseRequestPage(IXLWorksheet ws, int top, Models.ProcurementRequest request,
-        DTOs.System.SystemSettingsDto s, List<Models.ProcurementRequestItem> pageLines,
-        int firstItemNo, decimal? grandTotal, int pageNo, int pageCount)
+        DTOs.System.SystemSettingsDto s, List<PrRow> pageRows,
+        decimal? grandTotal, int pageNo, int pageCount)
     {
         const int last = 7;
         var row = top;
@@ -786,10 +753,14 @@ public class ReportExportService : IReportExportService
         for (var i = 0; i < PrLinesPerPage; i++)
         {
             ws.Range(row, 3, row, 4).Merge();
-            if (i < pageLines.Count)
+            if (i < pageRows.Count && pageRows[i].Heading is string heading)
             {
-                var line = pageLines[i];
-                ws.Cell(row, 1).Value = firstItemNo + i;
+                ws.Cell(row, 3).Value = heading;
+                ws.Cell(row, 3).Style.Font.SetBold().Font.SetUnderline();
+            }
+            else if (i < pageRows.Count && pageRows[i].Line is { } line)
+            {
+                ws.Cell(row, 1).Value = pageRows[i].ItemNo;
                 ws.Cell(row, 2).Value = FormUnit(line.InventoryItem.Unit);
                 // No brand on a PR: government procurement specifies the
                 // item, never the make.
@@ -906,7 +877,7 @@ public class ReportExportService : IReportExportService
         _db.ProcurementRequests.AsNoTracking()
             .Include(r => r.Department)
             .Include(r => r.RequestedByUser)
-            .Include(r => r.Items).ThenInclude(i => i.InventoryItem)
+            .Include(r => r.Items).ThenInclude(i => i.InventoryItem).ThenInclude(ii => ii.Category)
             .Include(r => r.Approvals).ThenInclude(a => a.ApproverUser)
             .FirstOrDefaultAsync(r => r.Id == requestId);
 

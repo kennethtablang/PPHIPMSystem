@@ -89,7 +89,7 @@ The system is a web-based platform that consolidates hospital supply chain opera
 | ID | Requirement |
 |---|---|
 | FR-5.1 | The system shall automatically sync and aggregate historical consumption data directly from actual stock movement (issuance) records. |
-| FR-5.2 | The system shall compute demand forecasts using the Moving Average method over a configurable time window. |
+| FR-5.2 | The system shall compute demand forecasts using the Moving Average method over a configurabl
 | FR-5.3 | The system shall compute demand forecasts using the Exponential Smoothing method with a configurable smoothing constant. |
 | FR-5.4 | The system shall allow users to dynamically select the forecast period length (e.g., 1 to 12 months ahead). |
 | FR-5.5 | The system shall display forecasted demand, actual consumption, and suggested reorder quantities (+10% buffer) on a real-time interactive chart. |

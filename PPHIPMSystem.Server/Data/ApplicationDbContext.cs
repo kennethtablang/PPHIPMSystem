@@ -29,7 +29,6 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<RequestAttachment> RequestAttachments => Set<RequestAttachment>();
     public DbSet<DepartmentStock> DepartmentStocks => Set<DepartmentStock>();
-    public DbSet<DepartmentBudget> DepartmentBudgets => Set<DepartmentBudget>();
 
     // Every timestamp is written as DateTime.UtcNow, but SQL Server hands values
     // back with Kind=Unspecified, which serializes without a "Z". Browsers then
@@ -89,16 +88,6 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
              .WithMany()
              .HasForeignKey(m => m.ItemBatchId)
              .OnDelete(DeleteBehavior.Restrict);
-        });
-
-        builder.Entity<DepartmentBudget>(e =>
-        {
-            // One appropriation per department per fiscal year.
-            e.HasIndex(b => new { b.DepartmentId, b.FiscalYear }).IsUnique();
-            e.HasOne(b => b.Department)
-             .WithMany()
-             .HasForeignKey(b => b.DepartmentId)
-             .OnDelete(DeleteBehavior.Cascade);
         });
 
         builder.Entity<RequestAttachment>(e =>

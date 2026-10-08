@@ -21,7 +21,6 @@ const TITLES = {
   '/procurement': 'Procurement Requests',
   '/department-requests': 'Department Requests',
   '/purchase-orders': 'Purchase Orders',
-  '/budgets': 'Department Budgets',
   '/forecast': 'Demand Forecasting',
   '/reports': 'Reports',
   '/notifications': 'Notifications',

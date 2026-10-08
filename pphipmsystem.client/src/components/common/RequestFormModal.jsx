@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { MdAdd, MdCheck, MdClose, MdSearch, MdExpandMore, MdChevronRight } from 'react-icons/md';
 import { createRequest, updateRequest, submitRequest } from '../../api/procurement';
 import { getItems } from '../../api/inventory';
 import { getDepartments } from '../../api/departments';
+import { getSystemSettings } from '../../api/systemSettings';
+import { formUnit, groupPrLines, peso } from '../../utils/purchaseRequest';
 import Modal from './Modal';
 import { toast } from './Toast';
 import { useAuth } from '../../context/AuthContext';
@@ -14,10 +16,14 @@ import { useAuth } from '../../context/AuthContext';
 // build a long request without scrolling one giant dropdown per line.
 //
 // `request` given → edit mode (same form, pre-filled). `showCost` adds an
-// estimated unit cost column for staff filing on a department's behalf.
+// optional estimated unit cost column for staff filing on a department's
+// behalf — a request can always be submitted without prices.
 // `replenishment` switches to the Supply Officer's Purchase Request for
 // restocking the storeroom: low-stock items are one tap away and come
-// pre-filled with a suggested reorder quantity.
+// pre-filled with a suggested reorder quantity. The PR is laid out like the
+// paper Appendix 47 form (LGU/Fund, Department/PR No./Date, Section/FPP, then
+// Item No. | Unit | Item Description | Quantity | Unit Cost | Total Cost,
+// grouped by category) so it can be checked against the printed copy.
 export default function RequestFormModal({ request = null, prefill = null, showCost = false, replenishment = false, onClose, onSaved }) {
   const { user } = useAuth();
   const isAdmin = ['SuperAdmin', 'HospitalAdministrator'].includes(user?.role);
@@ -28,6 +34,8 @@ export default function RequestFormModal({ request = null, prefill = null, showC
 
   const [items, setItems] = useState([]);
   const [departments, setDepartments] = useState([]);
+  // LGU and Department lines printed on the Appendix 47 header.
+  const [form, setForm] = useState({ prLgu: '', prDepartment: '' });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -60,6 +68,8 @@ export default function RequestFormModal({ request = null, prefill = null, showC
       })
       .catch(() => toast.error('Failed to load items.'))
       .finally(() => setLoading(false));
+    if (isPr) getSystemSettings().then(r => setForm({ prLgu: r.data.prLgu ?? '', prDepartment: r.data.prDepartment ?? '' })).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- load once
   }, []);
 
   const itemMap = useMemo(() => Object.fromEntries(items.map(i => [String(i.id), i])), [items]);
@@ -143,6 +153,20 @@ export default function RequestFormModal({ request = null, prefill = null, showC
     }
   };
 
+  // Requested lines in Appendix 47 order: by category, then item name.
+  const prGroups = useMemo(() => (isPr
+    ? groupPrLines(lines.map((l, idx) => ({ ...l, idx })), l => itemMap[l.inventoryItemId]?.categoryName, l => itemMap[l.inventoryItemId]?.name)
+    : []), [isPr, lines, itemMap]);
+  const prTotal = lines.reduce((t, l) => t + (+l.quantityRequested || 0) * (+l.estimatedUnitCost || 0), 0);
+  const prHasCost = lines.some(l => l.estimatedUnitCost !== '');
+
+  const purposeField = (
+    <div className="form-group" style={{ marginTop: 12 }}>
+      <label className="form-label">Purpose *</label>
+      <textarea className="form-control" rows={2} value={purpose} onChange={e => setPurpose(e.target.value)} placeholder={isPr ? 'e.g. Medical supplies for use of Pangasinan Provincial Hospital July – December CY 2026' : 'What are these supplies for?'} maxLength={1000} />
+    </div>
+  );
+
   const ownDept = departments.find(d => String(d.id) === String(user?.departmentId));
   const today = new Date().toLocaleDateString('en-PH');
 
@@ -171,56 +195,103 @@ export default function RequestFormModal({ request = null, prefill = null, showC
     >
       <style>{CSS}</style>
 
-      {/* RIS header */}
-      <div className="rf-head">
-        <div className="form-group">
-          <label className="form-label">{isPr ? 'Office / Section *' : 'Requesting Department *'}</label>
-          {canPickDept ? (
-            <select className="form-control" value={departmentId} onChange={e => setDepartmentId(e.target.value)}>
-              <option value="">Select department…</option>
-              {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-            </select>
-          ) : (
-            <div className="form-control rf-readonly">{ownDept?.name ?? user?.departmentName ?? '—'}</div>
-          )}
-        </div>
-        <div className="form-group">
-          <label className="form-label">Requested By {isSharedPc && '*'}</label>
-          <input
-            className="form-control"
-            value={requestedByName}
-            onChange={e => setRequestedByName(e.target.value)}
-            placeholder={isSharedPc ? 'Your full name' : 'Name of requester'}
-            maxLength={150}
-          />
-        </div>
-        <div className="form-group">
-          <label className="form-label">{isPr ? 'PR No. / Date' : 'RIS No. / Date'}</label>
-          <div className="form-control rf-readonly">{request?.requestNumber ?? 'Assigned on save'} · {today}</div>
-        </div>
-      </div>
-      {isPr && (
-        <div className="rf-head" style={{ marginTop: 12 }}>
-          <div className="form-group">
-            <label className="form-label">Fund</label>
-            <input className="form-control" value={prFields.fund} onChange={setPrField('fund')} placeholder="Leave blank to fill in by hand" maxLength={100} />
+      {isPr ? (
+        // Appendix 47 header, row for row as on the paper form.
+        <div className="rf-pr-head">
+          <div className="rf-pr-title">PURCHASE REQUEST</div>
+          <div className="rf-pr-row" style={{ gridTemplateColumns: '2fr 1fr' }}>
+            <div className="form-group">
+              <label className="form-label">LGU</label>
+              <div className="form-control rf-readonly">{form.prLgu || '—'}</div>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Fund</label>
+              <input className="form-control" value={prFields.fund} onChange={setPrField('fund')} placeholder="Leave blank to fill in by hand" maxLength={100} />
+            </div>
           </div>
-          <div className="form-group">
-            <label className="form-label">Section</label>
-            <input className="form-control" value={prFields.section} onChange={setPrField('section')} placeholder="Optional" maxLength={150} />
+          <div className="rf-pr-row">
+            <div className="form-group">
+              <label className="form-label">Department</label>
+              <div className="form-control rf-readonly">{form.prDepartment || '—'}</div>
+            </div>
+            <div className="form-group">
+              <label className="form-label">PR No.</label>
+              <div className="form-control rf-readonly">{request?.requestNumber ?? 'Assigned on save'}</div>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Date</label>
+              <div className="form-control rf-readonly">{request ? new Date(request.requestedAt).toLocaleDateString('en-PH') : today}</div>
+            </div>
           </div>
-          <div className="form-group">
-            <label className="form-label">FPP</label>
-            <input className="form-control" value={prFields.fpp} onChange={setPrField('fpp')} placeholder="Leave blank to fill in by hand" maxLength={100} />
+          <div className="rf-pr-row" style={{ gridTemplateColumns: '2fr 1fr' }}>
+            <div className="form-group">
+              <label className="form-label">Section</label>
+              <input className="form-control" value={prFields.section} onChange={setPrField('section')} placeholder="Optional" maxLength={150} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">FPP</label>
+              <input className="form-control" value={prFields.fpp} onChange={setPrField('fpp')} placeholder="Leave blank to fill in by hand" maxLength={100} />
+            </div>
+          </div>
+          <div className="rf-pr-row" style={{ gridTemplateColumns: '1fr 1fr' }}>
+            <div className="form-group">
+              <label className="form-label">Requesting Office *</label>
+              {canPickDept ? (
+                <select className="form-control" value={departmentId} onChange={e => setDepartmentId(e.target.value)}>
+                  <option value="">Select department…</option>
+                  {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </select>
+              ) : (
+                <div className="form-control rf-readonly">{ownDept?.name ?? user?.departmentName ?? '—'}</div>
+              )}
+            </div>
+            <div className="form-group">
+              <label className="form-label">Requested By {isSharedPc && '*'}</label>
+              <input
+                className="form-control"
+                value={requestedByName}
+                onChange={e => setRequestedByName(e.target.value)}
+                placeholder={isSharedPc ? 'Your full name' : 'Name of requester'}
+                maxLength={150}
+              />
+            </div>
           </div>
         </div>
+      ) : (
+        <>
+          {/* RIS header */}
+          <div className="rf-head">
+            <div className="form-group">
+              <label className="form-label">Requesting Department *</label>
+              {canPickDept ? (
+                <select className="form-control" value={departmentId} onChange={e => setDepartmentId(e.target.value)}>
+                  <option value="">Select department…</option>
+                  {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                </select>
+              ) : (
+                <div className="form-control rf-readonly">{ownDept?.name ?? user?.departmentName ?? '—'}</div>
+              )}
+            </div>
+            <div className="form-group">
+              <label className="form-label">Requested By {isSharedPc && '*'}</label>
+              <input
+                className="form-control"
+                value={requestedByName}
+                onChange={e => setRequestedByName(e.target.value)}
+                placeholder={isSharedPc ? 'Your full name' : 'Name of requester'}
+                maxLength={150}
+              />
+            </div>
+            <div className="form-group">
+              <label className="form-label">RIS No. / Date</label>
+              <div className="form-control rf-readonly">{request?.requestNumber ?? 'Assigned on save'} · {today}</div>
+            </div>
+          </div>
+          {purposeField}
+        </>
       )}
-      <div className="form-group" style={{ marginTop: 12 }}>
-        <label className="form-label">Purpose *</label>
-        <textarea className="form-control" rows={2} value={purpose} onChange={e => setPurpose(e.target.value)} placeholder={isPr ? 'e.g. Medical supplies for use of Pangasinan Provincial Hospital July – December CY 2026' : 'What are these supplies for?'} maxLength={1000} />
-      </div>
 
-      <div className="rf-body">
+      <div className={`rf-body ${isPr ? 'rf-body-pr' : ''}`}>
         {/* Catalogue */}
         <div className="rf-catalog">
           <div className="rf-search">
@@ -282,6 +353,66 @@ export default function RequestFormModal({ request = null, prefill = null, showC
           <div className="form-label" style={{ marginBottom: 8 }}>Requested Items ({lines.length})</div>
           {lines.length === 0 ? (
             <div className="rf-empty">Pick items from the list to add them here.</div>
+          ) : isPr ? (
+            // Same columns and order as the printed Appendix 47 form.
+            <div className="table-wrap">
+              <table className="rf-pr-table">
+                <thead>
+                  <tr>
+                    <th>Item No.</th>
+                    <th>Unit</th>
+                    <th>Item Description</th>
+                    <th>Quantity</th>
+                    <th title="Optional — leave blank if the price is not yet known">Unit Cost <small>(optional)</small></th>
+                    <th>Total Cost</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {prGroups.map(g => (
+                    <Fragment key={g.category}>
+                      <tr className="rf-pr-cat"><td colSpan={6}>{g.category}</td></tr>
+                      {g.lines.map(({ line: l, itemNo }) => {
+                        const it = itemMap[l.inventoryItemId];
+                        const total = (+l.quantityRequested || 0) * (+l.estimatedUnitCost || 0);
+                        return (
+                          <tr key={l.inventoryItemId}>
+                            <td style={{ textAlign: 'center' }}>{itemNo}</td>
+                            <td style={{ whiteSpace: 'nowrap' }}>{formUnit(it?.unit)}</td>
+                            <td>
+                              <strong style={{ fontSize: 12.5 }}>{(it?.name ?? 'Unknown item').toUpperCase()}</strong>
+                              {it && (
+                                <div style={{ fontSize: 11, color: it.isBelowReorder ? 'var(--amber-600)' : 'var(--text-muted)' }}>
+                                  {it.itemCode && <span style={{ fontFamily: 'monospace' }}>{it.itemCode} · </span>}
+                                  {it.quantityOnHand} on hand · reorder at {it.reorderThreshold}
+                                </div>
+                              )}
+                            </td>
+                            <td>
+                              <input className="form-control" type="number" min="1" step="1" value={l.quantityRequested} onChange={setLine(l.idx, 'quantityRequested')} placeholder="0" style={{ padding: '6px 8px', width: 76 }} />
+                            </td>
+                            <td>
+                              <input className="form-control" type="number" min="0" step="0.01" value={l.estimatedUnitCost} onChange={setLine(l.idx, 'estimatedUnitCost')} placeholder="—" style={{ padding: '6px 8px', width: 90 }} />
+                            </td>
+                            <td>
+                              <div className="rf-pr-totalcell">
+                                <span>{total > 0 ? peso(total) : ''}</span>
+                                <button className="btn btn-danger btn-icon btn-sm" onClick={() => removeLine(l.idx)} aria-label="Remove item" title="Remove item">×</button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </Fragment>
+                  ))}
+                  {prHasCost && (
+                    <tr className="rf-pr-total">
+                      <td colSpan={5} style={{ textAlign: 'right' }}>TOTAL</td>
+                      <td style={{ whiteSpace: 'nowrap' }}>₱{peso(prTotal)}</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           ) : (
             <div className="table-wrap">
               <table>
@@ -289,10 +420,8 @@ export default function RequestFormModal({ request = null, prefill = null, showC
                   <tr>
                     <th>Description</th>
                     <th>Qty</th>
-                    {showCost && <th>Est. Unit Cost</th>}
-                    {/* A PR restocks empty shelves, so "available?" is moot there;
-                        on-hand is shown under the description instead. */}
-                    {!isPr && <th>Stock Avail.</th>}
+                    {showCost && <th title="Optional — leave blank if the price is not yet known">Est. Unit Cost <small>(optional)</small></th>}
+                    <th>Stock Avail.</th>
                     <th>Remarks</th>
                     <th />
                   </tr>
@@ -309,27 +438,22 @@ export default function RequestFormModal({ request = null, prefill = null, showC
                           <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                             {it?.itemCode && <span style={{ fontFamily: 'monospace' }}>{it.itemCode} · </span>}{it?.unit}
                           </div>
-                          {isPr && it && (
-                            <div style={{ fontSize: 11, color: it.isBelowReorder ? 'var(--amber-600)' : 'var(--text-muted)' }}>
-                              {it.quantityOnHand} on hand · reorder at {it.reorderThreshold}
-                            </div>
-                          )}
                         </td>
                         <td>
                           <input className="form-control" type="number" min="1" step="1" value={l.quantityRequested} onChange={setLine(idx, 'quantityRequested')} placeholder="0" style={{ padding: '6px 8px', minWidth: 72 }} />
                         </td>
                         {showCost && (
                           <td>
-                            <input className="form-control" type="number" min="0" step="0.01" value={l.estimatedUnitCost} onChange={setLine(idx, 'estimatedUnitCost')} placeholder="0.00" style={{ padding: '6px 8px', minWidth: 88 }} />
+                            <input className="form-control" type="number" min="0" step="0.01" value={l.estimatedUnitCost} onChange={setLine(idx, 'estimatedUnitCost')} placeholder="Optional" style={{ padding: '6px 8px', minWidth: 88 }} />
                           </td>
                         )}
-                        {!isPr && <td>
+                        <td>
                           {it && (
                             <span className={`badge ${enough ? 'badge-green' : 'badge-amber'}`} title={`${it.quantityOnHand} ${it.unit} on hand`}>
                               {enough ? 'Yes' : it.quantityOnHand > 0 ? `Only ${it.quantityOnHand}` : 'No'}
                             </span>
                           )}
-                        </td>}
+                        </td>
                         <td>
                           <input className="form-control" value={l.remarks} onChange={setLine(idx, 'remarks')} placeholder="Optional" maxLength={300} style={{ padding: '6px 8px', minWidth: 90 }} />
                         </td>
@@ -345,6 +469,7 @@ export default function RequestFormModal({ request = null, prefill = null, showC
           )}
         </div>
       </div>
+      {isPr && purposeField}
     </Modal>
   );
 }
@@ -378,8 +503,18 @@ const CSS = `
 .rf-add { width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--bg-muted); color: var(--text-secondary); flex-shrink: 0; }
 .rf-item.on .rf-add { background: var(--green-600); color: #fff; }
 .rf-lines { min-width: 0; }
+.rf-pr-head { border: 1.5px solid var(--border); border-radius: var(--radius-md, 18px); padding: 10px 14px 4px; background: var(--card-bg); }
+.rf-pr-title { text-align: center; font-weight: 800; letter-spacing: .08em; font-size: 14px; color: var(--text-primary); margin-bottom: 6px; }
+.rf-pr-row { display: grid; grid-template-columns: 1.2fr 1fr 1fr; gap: 12px; }
+.rf-body-pr { grid-template-columns: minmax(240px, 4fr) 8fr; }
+.rf-pr-table th, .rf-pr-table td { padding-left: 8px; padding-right: 8px; }
+.rf-pr-table th { white-space: nowrap; }
+.rf-pr-table th small { font-weight: 500; text-transform: none; opacity: .75; }
+.rf-pr-cat td { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-accent); background: var(--bg-muted); padding-top: 6px; padding-bottom: 6px; }
+.rf-pr-total td { font-weight: 700; }
+.rf-pr-totalcell { display: flex; align-items: center; justify-content: space-between; gap: 6px; white-space: nowrap; }
 .rf-empty { padding: 28px 12px; text-align: center; color: var(--text-muted); font-size: 13px; border: 1px dashed var(--border); border-radius: var(--radius-sm); }
 @media (max-width: 860px) {
-  .rf-head, .rf-body { grid-template-columns: 1fr; }
+  .rf-head, .rf-body, .rf-pr-row { grid-template-columns: 1fr !important; }
 }
 `;

@@ -3,7 +3,6 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import { MdAdd, MdVisibility, MdLocalShipping, MdPrint, MdCheckCircle, MdAssignment, MdPendingActions, MdQrCode2 } from 'react-icons/md';
 import { getPurchaseOrders, getPurchaseOrder, generatePO, confirmDelivery, getRequests } from '../../api/procurement';
-import { checkRequestBudget } from '../../api/departmentBudgets';
 import LabelPrintModal from '../../components/common/LabelPrintModal';
 import Modal from '../../components/common/Modal';
 import Pagination, { usePagination } from '../../components/common/Pagination';
@@ -63,9 +62,6 @@ export default function PurchaseOrders() {
   const [viewModal, setViewModal] = useState(null);
   const [genModal, setGenModal] = useState(false);
   const [genForm, setGenForm] = useState({ requestId: '', itemCosts: [] });
-  // Requesting department's remaining appropriation, fetched when a request is
-  // picked. Null = no request selected yet or the lookup failed.
-  const [budget, setBudget] = useState(null);
   const [saving, setSaving] = useState(false);
   // Delivery confirmation modal: PO detail + per-line lot/expiry inputs.
   const [deliverModal, setDeliverModal] = useState(null);
@@ -91,10 +87,6 @@ export default function PurchaseOrders() {
       // The PR's estimated unit costs are the starting point for the PO.
       itemCosts: (req?.items ?? []).map(i => ({ procurementRequestItemId: i.id, itemName: i.itemName, unit: i.unit, quantityRequested: i.quantityRequested, unitCost: i.estimatedUnitCost ?? '' }))
     }));
-    // Show what the department has left before any costs are typed in, so an
-    // over-budget order is obvious here rather than at submit time.
-    setBudget(null);
-    if (reqId) checkRequestBudget(reqId).then(r => setBudget(r.data)).catch(() => {});
   };
 
   useEffect(() => {
@@ -118,10 +110,8 @@ export default function PurchaseOrders() {
     setViewModal(data);
   };
 
-  // Live PO total from the entered unit costs, weighed against the department's
-  // remaining appropriation.
+  // Live PO total from the entered unit costs.
   const genTotal = genForm.itemCosts.reduce((s, c) => s + (c.quantityRequested * (c.unitCost || 0)), 0);
-  const overBudget = budget?.hasBudget && genTotal > budget.remaining;
 
   const generate = async () => {
     setSaving(true);
@@ -262,7 +252,7 @@ export default function PurchaseOrders() {
           {canGenerate && approvedReqs.length > 0 && (
             <button
               className="btn btn-primary"
-              onClick={() => { setGenForm({ requestId: '', itemCosts: [] }); setBudget(null); setGenModal(true); }}
+              onClick={() => { setGenForm({ requestId: '', itemCosts: [] }); setGenModal(true); }}
             >
               <MdAdd size={16} /> Generate PO
             </button>
@@ -355,34 +345,6 @@ export default function PurchaseOrders() {
               ))}
             </select>
           </div>
-          {budget && (
-            <div
-              className={`alert ${overBudget ? 'alert-warning' : 'alert-info'}`}
-              style={{ display: 'block', fontSize: 12 }}
-            >
-              {budget.hasBudget ? (
-                <>
-                  <strong>{budget.departmentName}</strong> — FY{budget.fiscalYear} budget{' '}
-                  <strong>{peso(budget.amount)}</strong>, committed {peso(budget.committed)},{' '}
-                  <strong>{peso(budget.remaining)} remaining</strong>.
-                  {genTotal > 0 && (
-                    <div style={{ marginTop: 4 }}>
-                      This order of <strong>{peso(genTotal)}</strong>{' '}
-                      {overBudget
-                        ? <>exceeds what is left by <strong>{peso(genTotal - budget.remaining)}</strong>
-                            {budget.enforced
-                              ? ' — it will be rejected until the budget is raised or the order reduced.'
-                              : ' — enforcement is off, so it will go through and administrators will be notified.'}</>
-                        : <>leaves <strong>{peso(budget.remaining - genTotal)}</strong> for the rest of the year.</>}
-                    </div>
-                  )}
-                </>
-              ) : (
-                <>No FY{budget.fiscalYear} budget is set for <strong>{budget.departmentName}</strong>, so this
-                order is not checked against one.</>
-              )}
-            </div>
-          )}
           {genForm.itemCosts.length > 0 && (
             <div>
               <label className="form-label">Unit Costs per Item</label>
@@ -402,7 +364,7 @@ export default function PurchaseOrders() {
                   </div>
                 </div>
               ))}
-              <div style={{ textAlign: 'right', marginTop: 10, fontWeight: 700, color: overBudget ? '#dc2626' : 'var(--green-700)' }}>
+              <div style={{ textAlign: 'right', marginTop: 10, fontWeight: 700, color: 'var(--green-700)' }}>
                 Total: {peso(genTotal)}
               </div>
             </div>

@@ -15,7 +15,6 @@ public class ProcurementService : IProcurementService
     private readonly IMapper _mapper;
     private readonly INotificationService _notifications;
     private readonly IAuditLogService _audit;
-    private readonly IDepartmentBudgetService _budgets;
     private readonly IStockMovementService _stockMovements;
 
     // A request can be edited or cancelled by its department until inventory
@@ -42,13 +41,12 @@ public class ProcurementService : IProcurementService
     ];
 
     public ProcurementService(ApplicationDbContext db, IMapper mapper, INotificationService notifications,
-        IAuditLogService audit, IDepartmentBudgetService budgets, IStockMovementService stockMovements)
+        IAuditLogService audit, IStockMovementService stockMovements)
     {
         _db = db;
         _mapper = mapper;
         _notifications = notifications;
         _audit = audit;
-        _budgets = budgets;
         _stockMovements = stockMovements;
     }
 
@@ -486,7 +484,7 @@ public class ProcurementService : IProcurementService
                         MovementType = StockMovementType.Issuance,
                         Quantity = qty,
                         DepartmentId = request.DepartmentId,
-                        Remarks = $"Released for request {request.RequestNumber}"
+                        Remarks = $"Request {request.RequestNumber}"
                     }, userId);
                     line.QuantityReleased = qty;
                 }
@@ -687,20 +685,6 @@ public class ProcurementService : IProcurementService
         };
         po.TotalAmount = po.Items.Sum(i => i.QuantityOrdered * i.UnitCost);
 
-        // Budget guard. The PO — not the approval — is where money is actually
-        // committed, and it is the first point where real costs
-        // (rather than the requester's estimates) are known, so the department's
-        // appropriation is checked here. Departments with no budget row for the
-        // year are unbudgeted and pass straight through; whether an overrun
-        // blocks or merely warns is the EnforceDepartmentBudget system setting.
-        var budget = await _budgets.EvaluateAsync(request.DepartmentId, DateTime.UtcNow.Year, po.TotalAmount);
-        if (budget.WouldBlock)
-            throw new InvalidOperationException(
-                $"Over budget: {budget.DepartmentName} has ₱{budget.Remaining:N2} left of its FY{budget.FiscalYear} " +
-                $"appropriation (₱{budget.Amount:N2} budgeted, ₱{budget.Committed:N2} already committed). " +
-                $"This order of ₱{po.TotalAmount:N2} exceeds it by ₱{Math.Abs(budget.RemainingAfter):N2}. " +
-                "Raise the department's budget or reduce the order.");
-
         _db.PurchaseOrders.Add(po);
         request.Status = ProcurementStatus.PurchaseOrderGenerated;
         request.UpdatedAt = DateTime.UtcNow;
@@ -727,33 +711,6 @@ public class ProcurementService : IProcurementService
             po.Id, "PurchaseOrder");
 
         await _audit.LogAsync(userId, "POGenerated", "PurchaseOrder", po.Id, po.PONumber);
-
-        // Tell the people who own the money when a department is at the edge of
-        // its appropriation — either an overrun that enforcement was off for, or
-        // a ward that has now spent most of its year.
-        if (budget.HasBudget)
-        {
-            var committedAfter = budget.Committed + po.TotalAmount;
-            var utilisation = budget.Amount <= 0 ? 100 : committedAfter / budget.Amount * 100;
-            if (budget.WouldExceed)
-            {
-                await _notifications.CreateForRoleAsync(UserRole.HospitalAdministrator,
-                    NotificationType.BudgetAlert,
-                    "Department Over Budget",
-                    $"{budget.DepartmentName} is now ₱{committedAfter - budget.Amount:N2} over its FY{budget.FiscalYear} " +
-                    $"budget of ₱{budget.Amount:N2} after PO {po.PONumber}.",
-                    po.Id, "PurchaseOrder");
-            }
-            else if (utilisation >= 90)
-            {
-                await _notifications.CreateForRoleAsync(UserRole.HospitalAdministrator,
-                    NotificationType.BudgetAlert,
-                    "Department Budget Nearly Exhausted",
-                    $"{budget.DepartmentName} has used {utilisation:N1}% of its FY{budget.FiscalYear} budget " +
-                    $"(₱{budget.Amount - committedAfter:N2} left) after PO {po.PONumber}.",
-                    po.Id, "PurchaseOrder");
-            }
-        }
 
         return _mapper.Map<PurchaseOrderDto>(await PurchaseOrderQuery().FirstAsync(p => p.Id == po.Id));
     }

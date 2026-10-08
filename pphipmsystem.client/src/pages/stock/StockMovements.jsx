@@ -28,6 +28,20 @@ const TYPE_COLOR = {
 const TYPE_LABEL = { DepartmentConsumption: 'Ward Usage', DepartmentTransfer: 'Ward Transfer' };
 const typeLabel = t => TYPE_LABEL[t] ?? t;
 
+// Remarks always name the department the stock went to or came from. The
+// server writes this into new movements; older rows get it added here.
+const WHERE = {
+  Issuance: m => `Released to ${m.departmentName}`,
+  Return: m => `Returned by ${m.departmentName}`,
+  DepartmentConsumption: m => `Used by ${m.departmentName}`,
+  DepartmentTransfer: m => `Transferred from ${m.departmentName} to ${m.toDepartmentName ?? '—'}`,
+};
+const movementRemarks = m => {
+  const where = m.departmentName && WHERE[m.movementType]?.(m);
+  if (!where || m.remarks?.includes(m.departmentName)) return m.remarks || '—';
+  return m.remarks ? `${where} — ${m.remarks}` : where;
+};
+
 export default function StockMovements() {
   const { user } = useAuth();
   const canCreate = ['SuperAdmin', 'HospitalAdministrator', 'InventoryOfficer'].includes(user?.role);
@@ -183,7 +197,7 @@ export default function StockMovements() {
                 <th style={{ textAlign: 'right' }}>Before</th>
                 <th style={{ textAlign: 'right' }}>After</th>
                 <th>Remarks</th>
-                <th>Performed By</th>
+                <th>Issued By</th>
                 <th>Date & Time</th>
                 {canCreate && <th />}
               </tr>
@@ -228,9 +242,9 @@ export default function StockMovements() {
                   <td style={{ textAlign: 'right', fontWeight: 600, color: m.quantityAfterMovement < m.quantityBeforeMovement ? '#dc2626' : '#059669' }}>
                     {m.quantityAfterMovement}
                   </td>
-                  <td style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-muted)', fontSize: 12 }}
-                      title={m.isVoided ? `Voided by ${m.voidedByFullName}: ${m.voidReason}` : (m.remarks ?? '')}>
-                    {m.remarks ?? '—'}
+                  <td style={{ maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-muted)', fontSize: 12 }}
+                      title={m.isVoided ? `Voided by ${m.voidedByFullName}: ${m.voidReason}` : movementRemarks(m)}>
+                    {movementRemarks(m)}
                   </td>
                   <td style={{ fontSize: 13 }}>{m.performedByFullName}</td>
                   <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{fmtDateTime(m.movementDate)}</td>

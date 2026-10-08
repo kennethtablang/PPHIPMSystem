@@ -1,4 +1,6 @@
+import { Fragment } from 'react';
 import { MdCheck } from 'react-icons/md';
+import { formUnit, groupPrLines, peso } from '../../utils/purchaseRequest';
 
 // Where a department request is in the PPH cycle:
 // Department request → Inventory review (stock check + allocation)
@@ -75,6 +77,7 @@ export function RequestProgress({ status, type }) {
 // columns only appear once inventory has acted, so a fresh request stays simple.
 export function RequestLinesTable({ request, itemMap, showCost = false }) {
   const items = request.items ?? [];
+  if (request.type === 'Replenishment') return <PurchaseRequestLines items={items} showCost={showCost} />;
   const hasApproved = items.some(i => i.quantityApproved != null);
   const hasReleased = items.some(i => i.quantityReleased != null);
   return (
@@ -141,3 +144,59 @@ const CSS = `
 .rp-step.now, .rp-step.done { color: var(--text-primary); }
 .rp-label { font-size: 11px; font-weight: 600; text-align: center; }
 `;
+
+// A Purchase Request's lines as they appear on the printed Appendix 47 form:
+// grouped by category, numbered straight through, with unit and total cost.
+function PurchaseRequestLines({ items, showCost }) {
+  const groups = groupPrLines(items, i => i.categoryName, i => i.itemName);
+  const lineTotal = i => (i.estimatedUnitCost != null ? i.quantityRequested * i.estimatedUnitCost : null);
+  const hasCost = items.some(i => i.estimatedUnitCost != null);
+  const total = items.reduce((t, i) => t + (lineTotal(i) ?? 0), 0);
+  const cols = showCost ? 6 : 4;
+  return (
+    <div className="table-wrap" style={{ marginTop: 8 }}>
+      <table>
+        <thead>
+          <tr>
+            <th>Item No.</th>
+            <th>Unit</th>
+            <th>Item Description</th>
+            <th>Quantity</th>
+            {showCost && <th>Unit Cost</th>}
+            {showCost && <th>Total Cost</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {groups.map(g => (
+            <Fragment key={g.category}>
+              <tr>
+                <td colSpan={cols} style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.05em', color: 'var(--text-accent)', background: 'var(--bg-muted)' }}>
+                  {g.category}
+                </td>
+              </tr>
+              {g.lines.map(({ line: it, itemNo }) => (
+                <tr key={it.id}>
+                  <td style={{ textAlign: 'center' }}>{itemNo}</td>
+                  <td>{formUnit(it.unit)}</td>
+                  <td>
+                    <strong>{it.itemName?.toUpperCase()}</strong>
+                    {it.remarks && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{it.remarks}</div>}
+                  </td>
+                  <td style={{ fontWeight: 600 }}>{it.quantityRequested}</td>
+                  {showCost && <td>{it.estimatedUnitCost != null ? peso(it.estimatedUnitCost) : '—'}</td>}
+                  {showCost && <td>{lineTotal(it) != null ? peso(lineTotal(it)) : '—'}</td>}
+                </tr>
+              ))}
+            </Fragment>
+          ))}
+          {showCost && hasCost && (
+            <tr>
+              <td colSpan={5} style={{ textAlign: 'right', fontWeight: 700 }}>TOTAL</td>
+              <td style={{ fontWeight: 700 }}>₱{peso(total)}</td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  );
+}
