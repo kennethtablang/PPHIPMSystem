@@ -328,10 +328,14 @@ public class AuthService : IAuthService
         return result.Succeeded;
     }
 
-    public async Task<bool> ForgotPasswordAsync(string email)
+    // Every active account can recover its password this way, the Super Admin
+    // included — there is deliberately no role exclusion.
+    public async Task<bool> ForgotPasswordAsync(string usernameOrEmail)
     {
-        var user = await _userManager.FindByEmailAsync(email);
-        if (user == null || !user.IsActive) return false;
+        var login = usernameOrEmail.Trim();
+        var user = await _userManager.FindByEmailAsync(login) ?? await _userManager.FindByNameAsync(login);
+        if (user == null || !user.IsActive || string.IsNullOrWhiteSpace(user.Email)) return false;
+        var email = user.Email;
 
         var token = await _userManager.GeneratePasswordResetTokenAsync(user);
         
@@ -363,6 +367,10 @@ public class AuthService : IAuthService
         var result = await _userManager.ResetPasswordAsync(user, dto.Token, dto.NewPassword);
         if (result.Succeeded)
         {
+            // A forgotten password often comes after a lockout from repeated
+            // failed sign-ins; the new password should work straight away.
+            await _userManager.SetLockoutEndDateAsync(user, null);
+            await _userManager.ResetAccessFailedCountAsync(user);
             // The user chose this password themselves — no forced change needed.
             if (user.MustChangePassword)
             {

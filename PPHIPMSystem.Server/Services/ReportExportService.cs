@@ -428,7 +428,11 @@ public class ReportExportService : IReportExportService
         AddSeal(ws, seals.Left, headTop, 1, "SealLeft" + top);
         AddSeal(ws, seals.Right, headTop, last, "SealRight" + top);
 
-        Text(row, 1, last, "REQUISITION AND ISSUE SLIP", size: 14, align: XLAlignmentHorizontalValues.Center);
+        // Urgent requests are flagged on the printed slip so the storeroom
+        // prioritises the paper copy as well.
+        var risTitle = Text(row, 1, last, request.IsUrgent ? "REQUISITION AND ISSUE SLIP — URGENT" : "REQUISITION AND ISSUE SLIP",
+            size: 14, align: XLAlignmentHorizontalValues.Center);
+        if (request.IsUrgent) risTitle.Style.Font.SetFontColor(XLColor.Red);
         ws.Row(row).Height = 26;
         row++;
 
@@ -801,7 +805,7 @@ public class ReportExportService : IReportExportService
         Label(row, 1, 2, "Purpose:");
         ws.Cell(row, 1).Style.Alignment.SetVertical(XLAlignmentVerticalValues.Top);
         var purpose = ws.Range(row, 3, row + 2, last).Merge();
-        purpose.Value = request.Justification.ToUpperInvariant();
+        purpose.Value = (request.IsUrgent ? $"URGENT — {request.UrgentReason?.ToUpperInvariant()}. " : "") + request.Justification.ToUpperInvariant();
         purpose.Style.Font.SetBold().Alignment.SetWrapText()
             .Alignment.SetVertical(XLAlignmentVerticalValues.Top);
         for (var r = row; r <= row + 2; r++) ws.Row(r).Height = 16;

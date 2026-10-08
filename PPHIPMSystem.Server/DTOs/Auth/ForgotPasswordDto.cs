@@ -4,7 +4,10 @@ namespace PPHIPMSystem.Server.DTOs.Auth;
 
 public class ForgotPasswordDto
 {
-    [Required, EmailAddress, MaxLength(100)]
+    // Username or email. Accounts that sign in by username — the Super Admin
+    // in particular — must be able to recover without knowing which address
+    // is on file.
+    [Required, MaxLength(256)]
     public string Email { get; set; } = string.Empty;
 }
 

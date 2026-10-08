@@ -52,6 +52,14 @@ public class ProcurementService : IProcurementService
 
     public static bool IsEditable(ProcurementStatus status) => EditableStatuses.Contains(status);
 
+    // Still moving through the cycle — not yet finished, refused or withdrawn.
+    private static bool IsOpen(ProcurementStatus status) => status is not (ProcurementStatus.Released
+        or ProcurementStatus.Delivered or ProcurementStatus.Rejected or ProcurementStatus.Cancelled);
+
+    // Notification titles for urgent requests carry the flag so they stand out
+    // in the bell and in email subjects.
+    private static string Flag(ProcurementRequest r, string title) => r.IsUrgent ? $"URGENT: {title}" : title;
+
     private IQueryable<ProcurementRequest> BaseQuery() =>
         _db.ProcurementRequests
             .Include(r => r.Department)
@@ -70,6 +78,8 @@ public class ProcurementService : IProcurementService
         if (departmentId.HasValue)
             query = query.Where(r => r.DepartmentId == departmentId.Value);
         var items = await query.OrderByDescending(r => r.RequestedAt).ToListAsync();
+        // Urgent requests still waiting on someone go to the top of every queue.
+        items = items.OrderByDescending(r => r.IsUrgent && IsOpen(r.Status)).ToList();
         return _mapper.Map<IEnumerable<ProcurementRequestDto>>(items);
     }
 
@@ -86,6 +96,11 @@ public class ProcurementService : IProcurementService
             ?? throw new InvalidOperationException("Department not found.");
         if (!department.IsActive)
             throw new InvalidOperationException("That department is inactive.");
+
+        // An urgent request jumps the queue, so it has to say why.
+        if (dto.IsUrgent && (dto.UrgentReason?.Trim().Length ?? 0) < 10)
+            throw new InvalidOperationException(
+                "Urgent requests need a reason (at least 10 characters) explaining why the supplies must be prioritised.");
 
         var requestedIds = dto.Items.Select(i => i.InventoryItemId).Distinct().ToList();
         if (requestedIds.Count != dto.Items.Count)
@@ -121,6 +136,8 @@ public class ProcurementService : IProcurementService
             RequestedByUserId = userId,
             RequestedByName = CleanName(dto.RequestedByName),
             Justification = dto.Justification,
+            IsUrgent = dto.IsUrgent,
+            UrgentReason = dto.IsUrgent ? dto.UrgentReason!.Trim() : null,
             Fund = CleanName(dto.Fund),
             Section = CleanName(dto.Section),
             Fpp = CleanName(dto.Fpp),
@@ -168,6 +185,8 @@ public class ProcurementService : IProcurementService
         request.DepartmentId = departmentId;
         request.RequestedByName = CleanName(dto.RequestedByName);
         request.Justification = dto.Justification;
+        request.IsUrgent = dto.IsUrgent;
+        request.UrgentReason = dto.IsUrgent ? dto.UrgentReason!.Trim() : null;
         request.Fund = CleanName(dto.Fund);
         request.Section = CleanName(dto.Section);
         request.Fpp = CleanName(dto.Fpp);
@@ -179,7 +198,7 @@ public class ProcurementService : IProcurementService
         if (request.Status == ProcurementStatus.SubmittedToProcurement)
             await _notifications.CreateForRoleAsync(ReviewerRole(request),
                 NotificationType.ProcurementSubmitted,
-                "Request Updated",
+                Flag(request, "Request Updated"),
                 $"Request {request.RequestNumber} was edited before review.",
                 request.Id, "ProcurementRequest");
 
@@ -232,8 +251,11 @@ public class ProcurementService : IProcurementService
             throw new InvalidOperationException("Request cannot be submitted at this stage.");
 
         request.Status = ProcurementStatus.SubmittedToProcurement;
+        request.SubmittedAt = DateTime.UtcNow;
         request.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
+
+        var urgentNote = request.IsUrgent ? $" Marked URGENT: {request.UrgentReason}" : "";
 
         // Department requests go to Inventory first: it checks stock and
         // allocates. Procurement only hears about it if stock runs short.
@@ -241,14 +263,14 @@ public class ProcurementService : IProcurementService
         if (request.Type == RequestType.Replenishment)
             await _notifications.CreateForRoleAsync(UserRole.HospitalAdministrator,
                 NotificationType.ProcurementSubmitted,
-                "Purchase Request for Approval",
-                $"Replenishment Purchase Request {request.RequestNumber} ({request.Items.Count} item(s)) needs your approval.",
+                Flag(request, "Purchase Request for Approval"),
+                $"Replenishment Purchase Request {request.RequestNumber} ({request.Items.Count} item(s)) needs your approval." + urgentNote,
                 request.Id, "ProcurementRequest");
         else
             await _notifications.CreateForRoleAsync(UserRole.InventoryOfficer,
                 NotificationType.ProcurementSubmitted,
-                "Department Request Needs Inventory Review",
-                $"Department request {request.RequestNumber} has been submitted. Please check stock and allocate quantities.",
+                Flag(request, "Department Request Needs Inventory Review"),
+                $"Department request {request.RequestNumber} has been submitted. Please check stock and allocate quantities." + urgentNote,
                 request.Id, "ProcurementRequest");
 
         await _audit.LogAsync(userId, "ProcurementSubmitted", "ProcurementRequest", request.Id, request.RequestNumber);
@@ -341,8 +363,9 @@ public class ProcurementService : IProcurementService
         if (newStatus == ProcurementStatus.ApprovedByInventoryOfficer)
             await _notifications.CreateForRoleAsync(UserRole.HospitalAdministrator,
                 NotificationType.ProcurementSubmitted,
-                "Request Awaiting Final Approval",
-                $"Request {request.RequestNumber} ({request.Department.Name}) passed inventory review and needs your approval.",
+                Flag(request, "Request Awaiting Final Approval"),
+                $"Request {request.RequestNumber} ({request.Department.Name}) passed inventory review and needs your approval." +
+                (request.IsUrgent ? $" Marked URGENT: {request.UrgentReason}" : ""),
                 id, "ProcurementRequest");
 
         // Final approval: no second data entry — the approved quantities are
@@ -395,7 +418,7 @@ public class ProcurementService : IProcurementService
             request.Id, "ProcurementRequest");
         if (action == ApprovalAction.Approved)
             await _notifications.CreateForRoleAsync(UserRole.ProcurementStaff, NotificationType.ProcurementApproved,
-                "Purchase Request Approved",
+                Flag(request, "Purchase Request Approved"),
                 $"Purchase Request {request.RequestNumber} is approved — generate its purchase order.",
                 request.Id, "ProcurementRequest");
 
@@ -519,7 +542,7 @@ public class ProcurementService : IProcurementService
             // Procurement to replenish, and Inventory releases once it lands.
             var detail = string.Join("; ", shortages);
             await _notifications.CreateForRoleAsync(UserRole.ProcurementStaff, NotificationType.LowStock,
-                "Replenishment Needed",
+                Flag(request, "Replenishment Needed"),
                 $"Approved request {request.RequestNumber} ({request.Department.Name}) cannot be released: {detail}.",
                 request.Id, "ProcurementRequest");
             await _notifications.CreateForRoleAsync(UserRole.InventoryOfficer, NotificationType.LowStock,
@@ -582,6 +605,7 @@ public class ProcurementService : IProcurementService
                         ProcurementRequestId = l.ProcurementRequestId,
                         RequestNumber = l.ProcurementRequest.RequestNumber,
                         DepartmentName = l.ProcurementRequest.Department.Name,
+                        IsUrgent = l.ProcurementRequest.IsUrgent,
                         RequestedAt = l.ProcurementRequest.RequestedAt,
                         QuantityRequested = l.QuantityRequested,
                         QuantityApproved = l.QuantityApproved,
@@ -756,12 +780,16 @@ public class ProcurementService : IProcurementService
         var deliveredAt = deliveredOn.ToDateTime(TimeOnly.MinValue);
         var referenceNo = string.IsNullOrWhiteSpace(dto?.ReferenceNo) ? null : dto!.ReferenceNo!.Trim();
 
-        // Per-line details the receiver typed in (qty received, lot, expiry).
+        // Per-line details the receiver typed in (qty received, lot, expiry,
+        // and any problem with what arrived).
         var lineDetails = (dto?.Lines ?? [])
             .GroupBy(l => l.PurchaseOrderItemId)
             .ToDictionary(g => g.Key, g => g.Last());
+        var delayed = dto?.Delayed == true;
+        const DeliveryIssue refusedKinds = DeliveryIssue.Damaged | DeliveryIssue.Substandard;
 
-        var receivedAnything = false;
+        var recordedAnything = false;
+        var problems = new List<string>();
         foreach (var item in po.Items)
         {
             var invItem = await _db.InventoryItems.FindAsync(item.InventoryItemId);
@@ -771,32 +799,66 @@ public class ProcurementService : IProcurementService
             var details = lineDetails.GetValueOrDefault(item.Id);
             // No explicit quantity means the whole outstanding amount arrived.
             var received = details?.QuantityReceived ?? outstanding;
+            var rejected = details?.QuantityRejected ?? 0;
 
-            if (received <= 0) continue; // nothing of this line in the shipment
+            if (received <= 0 && rejected <= 0) continue; // nothing of this line in the shipment
             if (received > outstanding)
                 throw new InvalidOperationException(
                     $"{invItem.Name}: received quantity ({received}) exceeds the outstanding amount ({outstanding}).");
+            if (received + rejected > outstanding)
+                throw new InvalidOperationException(
+                    $"{invItem.Name}: accepted ({received}) plus refused ({rejected}) exceeds the outstanding amount ({outstanding}).");
 
-            receivedAnything = true;
-            invItem.QuantityOnHand += received;
-            invItem.UpdatedAt = DateTime.UtcNow;
-            item.QuantityDelivered = (item.QuantityDelivered ?? 0) + received;
+            var issues = (details?.Issues ?? []).Aggregate(DeliveryIssue.None, (all, f) => all | f);
+            if (delayed) issues |= DeliveryIssue.Delayed;
+            if (rejected > 0 && (issues & refusedKinds) == 0)
+                throw new InvalidOperationException(
+                    $"{invItem.Name}: mark the refused units as damaged or substandard.");
+            var issueRemarks = string.IsNullOrWhiteSpace(details?.IssueRemarks) ? null : details!.IssueRemarks!.Trim();
+            if ((issues & refusedKinds) != 0 && issueRemarks is null)
+                throw new InvalidOperationException(
+                    $"{invItem.Name}: describe the damage or quality problem in the remarks.");
 
-            // Every delivered line becomes a batch so expiration tracking and
-            // FEFO issuance can see PO-received stock.
-            var batch = new ItemBatch
+            recordedAnything = true;
+            ItemBatch? batch = null;
+            if (received > 0)
             {
-                InventoryItemId = item.InventoryItemId,
-                Quantity = received,
-                RemainingQuantity = received,
-                LotNumber = string.IsNullOrWhiteSpace(details?.LotNumber) ? null : details!.LotNumber!.Trim(),
-                ExpirationDate = details?.ExpirationDate,
-                UnitCost = item.UnitCost, // carries acquisition cost for valuation
-                PurchaseOrderId = purchaseOrderId,
-                ReceivedDate = deliveredAt
-            };
-            _db.ItemBatches.Add(batch);
+                invItem.QuantityOnHand += received;
+                invItem.UpdatedAt = DateTime.UtcNow;
+                item.QuantityDelivered = (item.QuantityDelivered ?? 0) + received;
 
+                // Every delivered line becomes a batch so expiration tracking and
+                // FEFO issuance can see PO-received stock.
+                batch = new ItemBatch
+                {
+                    InventoryItemId = item.InventoryItemId,
+                    Quantity = received,
+                    RemainingQuantity = received,
+                    LotNumber = string.IsNullOrWhiteSpace(details?.LotNumber) ? null : details!.LotNumber!.Trim(),
+                    ExpirationDate = details?.ExpirationDate,
+                    UnitCost = item.UnitCost, // carries acquisition cost for valuation
+                    PurchaseOrderId = purchaseOrderId,
+                    ReceivedDate = deliveredAt
+                };
+                _db.ItemBatches.Add(batch);
+
+                _db.StockMovements.Add(new StockMovement
+                {
+                    InventoryItemId = item.InventoryItemId,
+                    MovementType = StockMovementType.Receipt,
+                    Quantity = received,
+                    QuantityBeforeMovement = invItem.QuantityOnHand - received,
+                    QuantityAfterMovement = invItem.QuantityOnHand,
+                    Remarks = $"Received via PO {po.PONumber}, delivered {deliveredOn:MM/dd/yyyy}" +
+                              (referenceNo is null ? "" : $" (ref. {referenceNo})"),
+                    PerformedByUserId = userId,
+                    PurchaseOrderId = purchaseOrderId,
+                    ItemBatch = batch
+                });
+            }
+
+            // Refused units are recorded but never stocked; they stay
+            // outstanding until the supplier replaces them.
             item.Deliveries.Add(new PurchaseOrderDelivery
             {
                 Quantity = received,
@@ -804,24 +866,18 @@ public class ProcurementService : IProcurementService
                 ReferenceNo = referenceNo,
                 ReceivedByUserId = userId,
                 ItemBatch = batch,
+                Issues = issues,
+                QuantityRejected = rejected,
+                IssueRemarks = issueRemarks,
             });
 
-            _db.StockMovements.Add(new StockMovement
-            {
-                InventoryItemId = item.InventoryItemId,
-                MovementType = StockMovementType.Receipt,
-                Quantity = received,
-                QuantityBeforeMovement = invItem.QuantityOnHand - received,
-                QuantityAfterMovement = invItem.QuantityOnHand,
-                Remarks = $"Received via PO {po.PONumber}, delivered {deliveredOn:MM/dd/yyyy}" +
-                          (referenceNo is null ? "" : $" (ref. {referenceNo})"),
-                PerformedByUserId = userId,
-                PurchaseOrderId = purchaseOrderId,
-                ItemBatch = batch
-            });
+            if (issues != DeliveryIssue.None)
+                problems.Add($"{invItem.Name}: {issues}" +
+                             (rejected > 0 ? $", {rejected:0.##} {invItem.Unit} refused" : "") +
+                             (issueRemarks is null ? "" : $" — {issueRemarks}"));
         }
 
-        if (!receivedAnything)
+        if (!recordedAnything)
             throw new InvalidOperationException("No quantities were received — enter at least one line quantity.");
 
         // The PO closes only once every line is fully delivered.
@@ -837,7 +893,18 @@ public class ProcurementService : IProcurementService
         await _db.SaveChangesAsync();
         await _audit.LogAsync(userId, "DeliveryConfirmed", "PurchaseOrder", purchaseOrderId,
             $"{po.PONumber} ({(fullyDelivered ? "fully delivered" : "partial delivery")}, delivered {deliveredOn:yyyy-MM-dd}" +
-            (referenceNo is null ? ")" : $", ref. {referenceNo})"));
+            (referenceNo is null ? ")" : $", ref. {referenceNo})") +
+            (problems.Count == 0 ? "" : $". Problems: {string.Join("; ", problems)}"));
+
+        if (problems.Count > 0)
+        {
+            var title = $"Delivery Problem — {po.PONumber}";
+            var message = $"Delivery for {po.PONumber} on {deliveredOn:MMM d, yyyy}" +
+                          (referenceNo is null ? "" : $" (DR {referenceNo})") + $" had problems: {string.Join("; ", problems)}.";
+            foreach (var role in new[] { UserRole.HospitalAdministrator, UserRole.InventoryOfficer, UserRole.ProcurementStaff })
+                await _notifications.CreateForRoleAsync(role, NotificationType.DeliveryProblem, title, message,
+                    purchaseOrderId, "PurchaseOrder");
+        }
 
         // The replenishment the department was waiting on has landed: close
         // the cycle by releasing its approved quantities. Saved above first, so

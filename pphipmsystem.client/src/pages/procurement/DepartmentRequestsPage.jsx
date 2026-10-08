@@ -7,7 +7,7 @@ import AttachmentsPanel from '../../components/common/AttachmentsPanel';
 import Modal from '../../components/common/Modal';
 import Pagination, { usePagination } from '../../components/common/Pagination';
 import RequestFormModal from '../../components/common/RequestFormModal';
-import { RequestProgress, RequestLinesTable } from '../../components/common/RequestProgress';
+import { RequestProgress, RequestLinesTable, RequestTimeline, StageLine, UrgentBadge } from '../../components/common/RequestProgress';
 import StatusBadge from '../../components/common/StatusBadge';
 import { toast } from '../../components/common/Toast';
 import { fmtDateTime } from '../../utils/format';
@@ -173,7 +173,10 @@ export default function DepartmentRequestsPage() {
                 <tr><td colSpan={isAdmin ? 7 : 6} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>No requests found.</td></tr>
               ) : pager.pageItems.map(r => (
                 <tr key={r.id}>
-                  <td style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: 12 }}>{r.requestNumber}</td>
+                  <td style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: 12 }}>
+                    {r.requestNumber}
+                    {r.isUrgent && <div style={{ marginTop: 3 }}><UrgentBadge request={r} /></div>}
+                  </td>
                   {isAdmin && <td>{r.departmentName}</td>}
                   <td>
                     {r.requestedByName || r.requestedByFullName}
@@ -184,6 +187,7 @@ export default function DepartmentRequestsPage() {
                   <td><span className="badge badge-blue">{r.items?.length ?? 0} items</span></td>
                   <td>
                     <StatusBadge status={r.status} />
+                    <StageLine request={r} />
                     {isStalled(r) && (
                       <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 600, color: daysWaiting(r) >= 14 ? '#dc2626' : '#d97706' }}>
                         <MdSchedule size={12} /> waiting {daysWaiting(r)}d
@@ -262,24 +266,18 @@ export default function DepartmentRequestsPage() {
             </div>
           </div>
           <RequestProgress status={viewModal.status} />
+          {viewModal.isUrgent && (
+            <div className="alert alert-danger" style={{ fontSize: 13 }}>
+              <strong>URGENT / EMERGENCY:</strong>&nbsp;{viewModal.urgentReason}
+            </div>
+          )}
           <div className="alert alert-info"><strong>Purpose:</strong>&nbsp;{viewModal.justification}</div>
           <div>
             <label className="form-label">Items Requested</label>
-            <RequestLinesTable request={viewModal} itemMap={itemMap} />
+            <RequestLinesTable request={viewModal} itemMap={itemMap} showCost />
           </div>
           <AttachmentsPanel requestId={viewModal.id} />
-          {(viewModal.approvals ?? []).length > 0 && (
-            <div style={{ marginTop: 16 }}>
-              <label className="form-label">Approval History</label>
-              {viewModal.approvals.map(a => (
-                <div key={a.id} style={{ padding: '8px 12px', background: 'var(--green-50)', borderRadius: 'var(--radius-sm)', marginTop: 6, fontSize: 13 }}>
-                  <strong>{a.approverFullName}</strong> ({a.approverRole}) — <span className={`badge badge-${a.actionName === 'Approved' ? 'green' : a.actionName === 'Rejected' ? 'red' : 'amber'}`}>{a.actionName}</span>
-                  {a.remarks && <div style={{ color: 'var(--text-muted)', marginTop: 2 }}>{a.remarks}</div>}
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{fmtDateTime(a.actedAt)}</div>
-                </div>
-              ))}
-            </div>
-          )}
+          <RequestTimeline request={viewModal} />
         </Modal>
       )}
 

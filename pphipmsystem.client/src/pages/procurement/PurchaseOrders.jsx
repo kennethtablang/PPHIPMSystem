@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
-import { MdAdd, MdVisibility, MdLocalShipping, MdPrint, MdCheckCircle, MdAssignment, MdPendingActions, MdQrCode2 } from 'react-icons/md';
+import { MdAdd, MdVisibility, MdLocalShipping, MdPrint, MdCheckCircle, MdAssignment, MdPendingActions, MdQrCode2, MdReportProblem } from 'react-icons/md';
 import { getPurchaseOrders, getPurchaseOrder, generatePO, confirmDelivery, getRequests } from '../../api/procurement';
 import LabelPrintModal from '../../components/common/LabelPrintModal';
 import Modal from '../../components/common/Modal';
@@ -18,8 +18,15 @@ const todayIso = () => {
   return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
 };
 
+// Problems the receiving clerk can record. Delayed is shipment-wide; the rest
+// are per line. Damaged / substandard units can be refused (not stocked).
+const ISSUE_LABEL = { Delayed: 'Delayed', Incomplete: 'Incomplete', Damaged: 'Damaged', Substandard: 'Substandard' };
+const LINE_ISSUES = ['Incomplete', 'Damaged', 'Substandard'];
+const REFUSABLE = ['Damaged', 'Substandard'];
+const poHasIssues = po => (po.items ?? []).some(i => (i.deliveries ?? []).some(d => d.issues?.length));
+
 // "37 on Aug 18, 2026 · Ref. DR-1234" — one line per shipment, like the notes
-// the supply office pencils beside each PO line.
+// the supply office pencils beside each PO line — plus any problem recorded.
 function DeliveryHistory({ deliveries, unit }) {
   if (!deliveries?.length) return null;
   return (
@@ -30,6 +37,14 @@ function DeliveryHistory({ deliveries, unit }) {
           <strong style={{ color: 'var(--text-secondary)' }}>{d.quantity} {unit}</strong> on {fmtDay(d.deliveredOn)}
           {d.referenceNo && <> · Ref. {d.referenceNo}</>}
           {d.lotNumber && <> · Lot {d.lotNumber}</>}
+          {d.issues?.length > 0 && (
+            <div style={{ color: 'var(--red-500)', marginLeft: 15 }}>
+              <MdReportProblem size={11} style={{ verticalAlign: '-1px', marginRight: 3 }} />
+              {d.issues.map(i => ISSUE_LABEL[i] ?? i).join(', ')}
+              {d.quantityRejected > 0 && <> · {d.quantityRejected} {unit} refused</>}
+              {d.issueRemarks && <> — {d.issueRemarks}</>}
+            </div>
+          )}
         </div>
       ))}
     </div>
@@ -67,7 +82,7 @@ export default function PurchaseOrders() {
   const [deliverModal, setDeliverModal] = useState(null);
   const [deliverLines, setDeliverLines] = useState([]);
   // Shipment-wide details: the day it arrived and the supplier's DR number.
-  const [deliverMeta, setDeliverMeta] = useState({ deliveredOn: '', referenceNo: '' });
+  const [deliverMeta, setDeliverMeta] = useState({ deliveredOn: '', referenceNo: '', delayed: false });
   const [delivering, setDelivering] = useState(false);
   // QR label sheet for the listed POs; the QR encodes the PO number, which
   // global search (Ctrl+K) resolves back to the order.
@@ -136,29 +151,44 @@ export default function PurchaseOrders() {
           outstanding: i.quantityOrdered - (i.quantityDelivered ?? 0),
           quantityReceived: String(i.quantityOrdered - (i.quantityDelivered ?? 0)),
           lotNumber: '', expirationDate: '',
+          // Problem report for this line (hidden until "Report problem").
+          showIssue: false, issues: [], quantityRejected: '', issueRemarks: '',
           deliveries: i.deliveries ?? [],
         }))
         .filter(l => l.outstanding > 0));
-      setDeliverMeta({ deliveredOn: todayIso(), referenceNo: '' });
+      setDeliverMeta({ deliveredOn: todayIso(), referenceNo: '', delayed: false });
       setDeliverModal(data);
     } catch { toast.error('Failed to load purchase order.'); }
   };
 
-  const setDeliverLine = (i, k) => e => setDeliverLines(lines => {
+  const patchDeliverLine = (i, patch) => setDeliverLines(lines => {
     const next = [...lines];
-    next[i] = { ...next[i], [k]: e.target.value };
+    next[i] = { ...next[i], ...patch };
+    return next;
+  });
+  const setDeliverLine = (i, k) => e => patchDeliverLine(i, { [k]: e.target.value });
+  const toggleIssue = (i, issue) => setDeliverLines(lines => {
+    const next = [...lines];
+    const has = next[i].issues.includes(issue);
+    next[i] = { ...next[i], issues: has ? next[i].issues.filter(x => x !== issue) : [...next[i].issues, issue] };
     return next;
   });
 
   const deliver = async () => {
     for (const l of deliverLines) {
       const qty = Number(l.quantityReceived || 0);
+      const refused = Number(l.quantityRejected || 0);
       if (Number.isNaN(qty) || qty < 0) { toast.error(`${l.itemName}: enter a valid quantity.`); return; }
       if (qty > l.outstanding) { toast.error(`${l.itemName}: received quantity exceeds the outstanding ${l.outstanding}.`); return; }
+      if (Number.isNaN(refused) || refused < 0) { toast.error(`${l.itemName}: enter a valid refused quantity.`); return; }
+      if (qty + refused > l.outstanding) { toast.error(`${l.itemName}: accepted plus refused exceeds the outstanding ${l.outstanding}.`); return; }
+      const refusable = l.issues.some(x => REFUSABLE.includes(x));
+      if (refused > 0 && !refusable) { toast.error(`${l.itemName}: mark the refused units as damaged or substandard.`); return; }
+      if (refusable && !l.issueRemarks.trim()) { toast.error(`${l.itemName}: describe the damage or quality problem.`); return; }
     }
     if (!deliverMeta.deliveredOn) { toast.error('Enter the date the delivery arrived.'); return; }
     if (deliverMeta.deliveredOn > todayIso()) { toast.error('The delivery date cannot be in the future.'); return; }
-    if (!deliverLines.some(l => Number(l.quantityReceived || 0) > 0)) {
+    if (!deliverLines.some(l => Number(l.quantityReceived || 0) > 0 || Number(l.quantityRejected || 0) > 0)) {
       toast.error('Enter the quantity received for at least one line.');
       return;
     }
@@ -168,14 +198,21 @@ export default function PurchaseOrders() {
       await confirmDelivery(deliverModal.id, {
         deliveredOn: deliverMeta.deliveredOn,
         referenceNo: deliverMeta.referenceNo.trim() || null,
+        delayed: deliverMeta.delayed,
         lines: deliverLines.map(l => ({
           purchaseOrderItemId: l.purchaseOrderItemId,
           quantityReceived: Number(l.quantityReceived || 0),
           lotNumber: l.lotNumber || null,
           expirationDate: l.expirationDate || null,
+          issues: l.issues,
+          quantityRejected: Number(l.quantityRejected || 0),
+          issueRemarks: l.issueRemarks.trim() || null,
         })),
       });
-      toast.success('Delivery recorded — stock updated and batches created.');
+      const problems = deliverMeta.delayed || deliverLines.some(l => l.issues.length);
+      toast.success(problems
+        ? 'Delivery recorded with the reported problems — Inventory and the Administrator were notified.'
+        : 'Delivery recorded — stock updated and batches created.');
       setDeliverModal(null);
       load();
     } catch (e) {
@@ -264,6 +301,7 @@ export default function PurchaseOrders() {
         <StatCard label="Total POs" value={orders.length} icon={MdAssignment} color="blue" />
         <StatCard label="Pending Delivery" value={orders.filter(o => !o.isDelivered).length} icon={MdPendingActions} color="amber" />
         <StatCard label="Delivered" value={orders.filter(o => o.isDelivered).length} icon={MdCheckCircle} color="green" />
+        <StatCard label="With Delivery Problems" value={orders.filter(poHasIssues).length} icon={MdReportProblem} color="red" />
       </div>
 
 
@@ -301,6 +339,11 @@ export default function PurchaseOrders() {
                       <span className="badge badge-blue">Partial</span>
                     ) : (
                       <span className="badge badge-amber">Pending</span>
+                    )}
+                    {poHasIssues(po) && (
+                      <div style={{ marginTop: 4 }}>
+                        <span className="badge badge-red" title="A problem was recorded on one of its deliveries"><MdReportProblem size={11} /> Problem reported</span>
+                      </div>
                     )}
                   </td>
                   <td>
@@ -462,12 +505,17 @@ export default function PurchaseOrders() {
                 onChange={e => setDeliverMeta(m => ({ ...m, referenceNo: e.target.value }))} />
             </div>
           </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 12, cursor: 'pointer' }}>
+            <input type="checkbox" checked={deliverMeta.delayed} onChange={e => setDeliverMeta(m => ({ ...m, delayed: e.target.checked }))} />
+            <MdReportProblem size={15} color="var(--red-500)" /> This delivery arrived <strong>late</strong> (delayed)
+          </label>
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Item</th><th>Outstanding</th><th>Qty Received *</th><th>Lot / Batch No.</th><th>Expiration Date</th></tr></thead>
+              <thead><tr><th>Item</th><th>Outstanding</th><th>Qty Accepted *</th><th>Lot / Batch No.</th><th>Expiration Date</th><th /></tr></thead>
               <tbody>
                 {deliverLines.map((l, i) => (
-                  <tr key={l.purchaseOrderItemId}>
+                  <Fragment key={l.purchaseOrderItemId}>
+                  <tr>
                     <td>
                       {l.itemName} <span style={{ color: 'var(--text-muted)', fontSize: 11 }}>({l.unit})</span>
                       <DeliveryHistory deliveries={l.deliveries} unit={l.unit} />
@@ -487,7 +535,50 @@ export default function PurchaseOrders() {
                     <td>
                       <input className="form-control" type="date" value={l.expirationDate} onChange={setDeliverLine(i, 'expirationDate')} />
                     </td>
+                    <td>
+                      <button
+                        className={`btn btn-sm ${l.showIssue || l.issues.length ? 'btn-danger' : 'btn-ghost'}`}
+                        onClick={() => patchDeliverLine(i, { showIssue: !l.showIssue })}
+                        title="Record a problem: incomplete, damaged or substandard"
+                        style={{ whiteSpace: 'nowrap' }}
+                      >
+                        <MdReportProblem size={14} /> {l.issues.length ? `${l.issues.length} problem${l.issues.length > 1 ? 's' : ''}` : 'Problem?'}
+                      </button>
+                    </td>
                   </tr>
+                  {l.showIssue && (
+                    <tr>
+                      <td colSpan={6} style={{ background: 'rgba(239,68,68,.05)' }}>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, alignItems: 'flex-end' }}>
+                          <div>
+                            <div className="form-label" style={{ marginBottom: 4 }}>Problem with this item</div>
+                            <div style={{ display: 'flex', gap: 12 }}>
+                              {LINE_ISSUES.map(x => (
+                                <label key={x} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 13, cursor: 'pointer' }}>
+                                  <input type="checkbox" checked={l.issues.includes(x)} onChange={() => toggleIssue(i, x)} /> {ISSUE_LABEL[x]}
+                                </label>
+                              ))}
+                            </div>
+                          </div>
+                          {l.issues.some(x => REFUSABLE.includes(x)) && (
+                            <div style={{ width: 140 }}>
+                              <div className="form-label" style={{ marginBottom: 4 }} title="Refused units are not added to stock and stay outstanding until replaced">Qty Refused</div>
+                              <input className="form-control" type="number" min="0" step="0.01" value={l.quantityRejected} onChange={setDeliverLine(i, 'quantityRejected')} placeholder="0" />
+                            </div>
+                          )}
+                          <div style={{ flex: 1, minWidth: 220 }}>
+                            <div className="form-label" style={{ marginBottom: 4 }}>Remarks {l.issues.some(x => REFUSABLE.includes(x)) && '*'}</div>
+                            <input className="form-control" value={l.issueRemarks} onChange={setDeliverLine(i, 'issueRemarks')} maxLength={500}
+                              placeholder="e.g. 5 boxes crushed and wet; expiry shorter than agreed" />
+                          </div>
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
+                          Refused units are not added to stock and remain outstanding on the PO until the supplier replaces them.
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>

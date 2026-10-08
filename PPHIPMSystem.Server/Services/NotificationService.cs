@@ -62,14 +62,18 @@ public class NotificationService : INotificationService
     public Task BroadcastStockChangedAsync()
         => _hubContext.Clients.All.SendAsync("StockChanged");
 
+    // Messages built from user text (urgent reasons, delivery problems, item
+    // names) can outgrow the columns; clip instead of failing the save.
+    private static string Clip(string text, int max) => text.Length <= max ? text : text[..(max - 1)] + "…";
+
     public async Task CreateAsync(string userId, NotificationType type, string title, string message, int? referenceId = null, string? referenceType = null)
     {
         var notification = new Notification
         {
             UserId = userId,
             Type = type,
-            Title = title,
-            Message = message,
+            Title = Clip(title, 200),
+            Message = Clip(message, 1000),
             ReferenceId = referenceId,
             ReferenceType = referenceType
         };
@@ -123,8 +127,8 @@ public class NotificationService : INotificationService
             {
                 UserId = u.Id,
                 Type = type,
-                Title = title,
-                Message = message,
+                Title = Clip(title, 200),
+                Message = Clip(message, 1000),
                 ReferenceId = referenceId,
                 ReferenceType = referenceType
             };

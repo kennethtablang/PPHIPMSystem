@@ -113,9 +113,9 @@ public class AuthController : ControllerBase
     [EnableRateLimiting("auth-email")]
     public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordDto dto)
     {
-        // Always return OK to prevent email enumeration attacks
+        // Always return OK to prevent account enumeration attacks
         await _auth.ForgotPasswordAsync(dto.Email);
-        return Ok(new { message = "If the email is registered, a password reset link has been sent." });
+        return Ok(new { message = "If the account exists, a password reset link has been sent to its email address." });
     }
 
     [HttpPost("reset-password-token")]

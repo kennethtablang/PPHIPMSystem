@@ -1,6 +1,7 @@
 import { Fragment } from 'react';
-import { MdCheck } from 'react-icons/md';
+import { MdCheck, MdPriorityHigh } from 'react-icons/md';
 import { formUnit, groupPrLines, peso } from '../../utils/purchaseRequest';
+import { fmtDateTime } from '../../utils/format';
 
 // Where a department request is in the PPH cycle:
 // Department request → Inventory review (stock check + allocation)
@@ -72,6 +73,138 @@ export function RequestProgress({ status, type }) {
     </div>
   );
 }
+
+// Where a request is right now in plain words, so nobody has to follow up by
+// phone: the phase (Pending / Forwarded / Approved / Ongoing / Completed …),
+// who is holding it, and what happens next.
+const STAGE = {
+  SubmittedByDepartment: { phase: 'Draft', holder: 'Requester', text: 'Saved as a draft — not yet submitted.' },
+  ReturnedForRevision: { phase: 'Returned', holder: 'Requester', text: 'Returned to the requester for revision.' },
+  SubmittedToProcurement: { phase: 'Pending', holder: 'Inventory Office', text: 'Pending — the Inventory Office is checking stock and allocating.' },
+  ApprovedByProcurement: { phase: 'Pending', holder: 'Inventory Office', text: 'Pending — the Inventory Office is checking stock and allocating.' },
+  ApprovedByInventoryOfficer: { phase: 'Forwarded', holder: 'Hospital Administrator', text: 'Passed inventory review — forwarded to the Hospital Administrator for final approval.' },
+  FullyApproved: { phase: 'Ongoing', holder: 'Procurement / Inventory', text: 'Approved — waiting for stock; Procurement is replenishing and Inventory releases it once it arrives.' },
+  PurchaseOrderGenerated: { phase: 'Ongoing', holder: 'Supplier', text: 'Ongoing — purchase order raised, waiting on the supplier delivery.' },
+  Delivered: { phase: 'Completed', holder: null, text: 'Delivered against its purchase order.' },
+  Released: { phase: 'Completed', holder: null, text: "Completed — released to the department's stock." },
+  Rejected: { phase: 'Rejected', holder: null, text: 'Rejected — see the remarks in the timeline.' },
+  Cancelled: { phase: 'Cancelled', holder: null, text: 'Cancelled by the requester.' },
+};
+const PR_STAGE = {
+  ...STAGE,
+  SubmittedToProcurement: { phase: 'Pending', holder: 'Chief of Hospital', text: "Pending — waiting for the Chief of Hospital's approval." },
+  ApprovedByProcurement: { phase: 'Pending', holder: 'Chief of Hospital', text: "Pending — waiting for the Chief of Hospital's approval." },
+  FullyApproved: { phase: 'Approved', holder: 'Procurement', text: 'Approved — forwarded to Procurement to raise the purchase order.' },
+  Delivered: { phase: 'Completed', holder: null, text: 'Completed — delivered and added to central stock.' },
+};
+const PHASE_TONE = {
+  Draft: 'gray', Returned: 'amber', Pending: 'amber', Forwarded: 'purple', Approved: 'green',
+  Ongoing: 'blue', Completed: 'green', Rejected: 'red', Cancelled: 'gray',
+};
+
+function requestStage(r) {
+  return (r.type === 'Replenishment' ? PR_STAGE : STAGE)[r.status] ?? { phase: r.status, holder: null, text: '' };
+}
+
+const daysSince = iso => Math.floor((Date.now() - new Date(iso).getTime()) / 86400000);
+
+// Compact line under the status badge in request lists: "Pending · with Inventory Office · 3d".
+export function StageLine({ request }) {
+  const st = requestStage(request);
+  const days = daysSince(request.updatedAt ?? request.requestedAt);
+  return (
+    <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 3 }}>
+      <strong style={{ color: 'var(--text-secondary)' }}>{st.phase}</strong>
+      {st.holder && <> · with {st.holder} · {days === 0 ? 'today' : `${days}d`}</>}
+    </div>
+  );
+}
+
+export function UrgentBadge({ request }) {
+  if (!request?.isUrgent) return null;
+  return (
+    <span className="badge badge-red" title={request.urgentReason ?? 'Urgent request'} style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+      <MdPriorityHigh size={12} /> URGENT
+    </span>
+  );
+}
+
+const ROLE_LABEL = {
+  InventoryOfficer: 'Inventory Office',
+  HospitalAdministrator: 'Hospital Administrator',
+  SuperAdmin: 'Super Admin',
+  ProcurementStaff: 'Procurement',
+  DepartmentHead: 'Department Head',
+};
+const ACTION_LABEL = { Approved: 'Approved', Rejected: 'Rejected', ReturnedForRevision: 'Returned for revision' };
+
+// Status tracker: where the request is now, then every step it has been
+// through with who acted and when — filed, submitted, each review, PO,
+// delivery and release.
+export function RequestTimeline({ request: r }) {
+  const st = requestStage(r);
+  const events = [
+    { at: r.requestedAt, title: 'Request filed', who: r.requestedByName || r.requestedByFullName, tone: 'gray' },
+    r.submittedAt && { at: r.submittedAt, title: r.type === 'Replenishment' ? 'Submitted for Chief approval' : 'Submitted for inventory review', tone: 'blue' },
+    ...(r.approvals ?? []).map(a => ({
+      at: a.actedAt,
+      title: `${ACTION_LABEL[a.actionName] ?? a.actionName} by ${ROLE_LABEL[a.approverRole] ?? a.approverRole}`,
+      who: a.approverFullName,
+      note: a.remarks,
+      tone: a.actionName === 'Approved' ? 'green' : a.actionName === 'Rejected' ? 'red' : 'amber',
+    })),
+    r.poGeneratedAt && { at: r.poGeneratedAt, title: `Purchase order ${r.poNumber} raised`, tone: 'blue' },
+    r.poDeliveredAt && { at: r.poDeliveredAt, title: 'Fully delivered by the supplier', tone: 'green' },
+    r.releasedAt && { at: r.releasedAt, title: `Released to ${r.departmentName}`, tone: 'green' },
+    r.status === 'Cancelled' && { at: r.updatedAt, title: 'Cancelled', tone: 'gray' },
+  ].filter(Boolean).sort((a, b) => new Date(a.at) - new Date(b.at));
+  const days = daysSince(r.updatedAt ?? r.requestedAt);
+  const tone = PHASE_TONE[st.phase] ?? 'gray';
+
+  return (
+    <div className="rt">
+      <style>{TIMELINE_CSS}</style>
+      <label className="form-label">Status Tracking</label>
+      <div className="rt-now">
+        <span className={`badge badge-${tone}`}>{st.phase}</span>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontWeight: 600, fontSize: 13 }}>{st.text}</div>
+          {st.holder && (
+            <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+              Currently with <strong>{st.holder}</strong> · since {fmtDateTime(r.updatedAt ?? r.requestedAt)}
+              {days > 0 && ` (${days} day${days > 1 ? 's' : ''})`}
+            </div>
+          )}
+        </div>
+      </div>
+      <ol className="rt-list">
+        {events.map((e, i) => (
+          <li key={i} className={`rt-ev rt-${e.tone}`}>
+            <div className="rt-title">{e.title}{e.who && <span className="rt-who"> — {e.who}</span>}</div>
+            {e.note && <div className="rt-note">{e.note}</div>}
+            <div className="rt-at">{fmtDateTime(e.at)}</div>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+const TIMELINE_CSS = `
+.rt { margin: 14px 0; }
+.rt-now { display: flex; gap: 10px; align-items: flex-start; padding: 10px 14px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: var(--bg-muted); }
+.rt-list { list-style: none; margin: 12px 0 0 6px; padding: 0 0 0 14px; border-left: 2px solid var(--border); }
+.rt-ev { position: relative; padding: 0 0 10px 6px; }
+.rt-ev::before { content: ''; position: absolute; left: -21px; top: 3px; width: 12px; height: 12px; border-radius: 50%; background: var(--card-bg); border: 2px solid var(--text-muted); }
+.rt-ev.rt-green::before { border-color: var(--green-600); background: var(--green-600); }
+.rt-ev.rt-blue::before { border-color: var(--green-500); }
+.rt-ev.rt-amber::before { border-color: var(--amber-500); background: var(--amber-500); }
+.rt-ev.rt-red::before { border-color: var(--red-500); background: var(--red-500); }
+.rt-title { font-size: 13px; font-weight: 600; }
+.rt-who { font-weight: 400; color: var(--text-secondary); }
+.rt-note { font-size: 12px; color: var(--text-muted); margin-top: 2px; white-space: pre-wrap; }
+.rt-at { font-size: 11px; color: var(--text-muted); margin-top: 1px; }
+`;
 
 // Request lines with the quantities each stage settled on. Approved/Released
 // columns only appear once inventory has acted, so a fresh request stays simple.

@@ -13,6 +13,8 @@ const BLANK = { inventoryItemId: '', physicalCount: '', reason: '' };
 export default function StockAdjustments() {
   const { user } = useAuth();
   const canCreate = ['SuperAdmin', 'HospitalAdministrator', 'InventoryOfficer'].includes(user?.role);
+  // Corrections are filed by the Inventory Head and approved by the Head of
+  // Property & Supply (Hospital Administrator) — never by whoever filed them.
   const canApprove = ['SuperAdmin', 'HospitalAdministrator'].includes(user?.role);
 
   const [list, setList] = useState([]);
@@ -108,7 +110,7 @@ export default function StockAdjustments() {
       <div className="page-header">
         <div>
           <h1 className="page-title">Stock Adjustments</h1>
-          <p className="page-subtitle">Reconcile physical count discrepancies with digital records</p>
+          <p className="page-subtitle">Inventory corrections for count discrepancies — filed by the Inventory Head, applied only after approval by the Head of Property &amp; Supply</p>
         </div>
         {canCreate && (
           <div style={{ display: 'flex', gap: 8 }}>
@@ -145,6 +147,7 @@ export default function StockAdjustments() {
                 <th>Variance</th>
                 <th>Reason</th>
                 <th>Requested By</th>
+                <th>Approved By</th>
                 <th>Status</th>
                 <th>Date</th>
                 {canApprove && <th>Actions</th>}
@@ -152,7 +155,7 @@ export default function StockAdjustments() {
             </thead>
             <tbody>
               {list.length === 0 ? (
-                <tr><td colSpan={9} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>No adjustments found.</td></tr>
+                <tr><td colSpan={10} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>No adjustments found.</td></tr>
               ) : list.map(a => (
                 <tr key={a.id}>
                   <td style={{ fontWeight: 500 }}>{a.itemName}</td>
@@ -163,15 +166,23 @@ export default function StockAdjustments() {
                   </td>
                   <td style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-muted)', fontSize: 12 }}>{a.reason}</td>
                   <td>{a.requestedByFullName}</td>
+                  <td style={{ fontSize: 12 }}>
+                    {a.approvedByFullName ?? <span style={{ color: 'var(--text-muted)' }}>—</span>}
+                    {a.approverRemarks && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{a.approverRemarks}</div>}
+                  </td>
                   <td><StatusBadge status={a.status} /></td>
                   <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{new Date(a.requestedAt).toLocaleDateString('en-PH')}</td>
                   {canApprove && (
                     <td>
-                      {a.status === 'Pending' && (
+                      {a.status === 'Pending' && (a.requestedByUserId === user?.userId ? (
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }} title="You filed this correction — another approver must review it">
+                          Awaiting another approver
+                        </span>
+                      ) : (
                         <button className="btn btn-primary btn-sm" onClick={() => { setApproveModal(a); setApproveForm({ approved: true, remarks: '' }); }}>
                           Review
                         </button>
-                      )}
+                      ))}
                     </td>
                   )}
                 </tr>
@@ -307,7 +318,7 @@ export default function StockAdjustments() {
 
       {approveModal && (
         <Modal
-          title={`Review Adjustment — ${approveModal.itemName}`}
+          title={`Approve Inventory Correction — ${approveModal.itemName}`}
           onClose={() => setApproveModal(null)}
           footer={
             <>
@@ -327,6 +338,10 @@ export default function StockAdjustments() {
           </div>
           <div className={`alert ${approveModal.variance > 0 ? 'alert-success' : 'alert-error'}`}>
             Variance: <strong>{approveModal.variance > 0 ? '+' : ''}{approveModal.variance}</strong> — {approveModal.reason}
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
+            Filed by <strong>{approveModal.requestedByFullName}</strong> on {new Date(approveModal.requestedAt).toLocaleDateString('en-PH')}.
+            Approving as Head of Property &amp; Supply applies the variance to stock; rejecting leaves stock unchanged.
           </div>
           <div className="form-group">
             <label className="form-label">Decision</label>

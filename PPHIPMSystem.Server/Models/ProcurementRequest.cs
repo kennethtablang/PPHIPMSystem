@@ -37,6 +37,14 @@ public class ProcurementRequest
     [MaxLength(100)]
     public string? Fpp { get; set; }
 
+    // Urgent / emergency request: shown first in every review queue and
+    // flagged in notifications. The reason is mandatory so whoever approves
+    // can judge whether the priority is justified.
+    public bool IsUrgent { get; set; }
+
+    [MaxLength(1000)]
+    public string? UrgentReason { get; set; }
+
     public ProcurementStatus Status { get; set; } = ProcurementStatus.Draft;
 
     // Existing rows default to DepartmentSupply (0) — every request before
@@ -45,6 +53,9 @@ public class ProcurementRequest
 
     public DateTime RequestedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    // Last time the request was sent for review (re-set on resubmission
+    // after a return), for the status timeline.
+    public DateTime? SubmittedAt { get; set; }
     public DateTime? ReleasedAt { get; set; }
 
     public ICollection<ProcurementRequestItem> Items { get; set; } = [];

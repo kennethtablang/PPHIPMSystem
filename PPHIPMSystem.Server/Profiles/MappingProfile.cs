@@ -11,6 +11,7 @@ using PPHIPMSystem.Server.DTOs.StockAdjustment;
 using PPHIPMSystem.Server.DTOs.StockMovement;
 using PPHIPMSystem.Server.DTOs.User;
 using PPHIPMSystem.Server.Models;
+using PPHIPMSystem.Server.Models.Enums;
 
 namespace PPHIPMSystem.Server.Profiles;
 
@@ -86,7 +87,9 @@ public class MappingProfile : Profile
             .ForMember(d => d.DepartmentName, o => o.MapFrom(s => s.Department.Name))
             .ForMember(d => d.RequestedByFullName, o => o.MapFrom(s => $"{s.RequestedByUser.FirstName} {s.RequestedByUser.LastName}"))
             .ForMember(d => d.PurchaseOrderId, o => o.MapFrom(s => s.PurchaseOrder != null ? s.PurchaseOrder.Id : (int?)null))
-            .ForMember(d => d.PONumber, o => o.MapFrom(s => s.PurchaseOrder != null ? s.PurchaseOrder.PONumber : null));
+            .ForMember(d => d.PONumber, o => o.MapFrom(s => s.PurchaseOrder != null ? s.PurchaseOrder.PONumber : null))
+            .ForMember(d => d.POGeneratedAt, o => o.MapFrom(s => s.PurchaseOrder != null ? s.PurchaseOrder.GeneratedAt : (DateTime?)null))
+            .ForMember(d => d.PODeliveredAt, o => o.MapFrom(s => s.PurchaseOrder != null ? s.PurchaseOrder.DeliveredAt : null));
 
         CreateMap<ProcurementRequestItem, ProcurementRequestItemDto>()
             .ForMember(d => d.ItemName, o => o.MapFrom(s => s.InventoryItem.Name))
@@ -115,7 +118,11 @@ public class MappingProfile : Profile
             .ForMember(d => d.ReceivedByFullName, o => o.MapFrom(s =>
                 s.ReceivedByUser == null ? null : s.ReceivedByUser.FirstName + " " + s.ReceivedByUser.LastName))
             .ForMember(d => d.LotNumber, o => o.MapFrom(s => s.ItemBatch == null ? null : s.ItemBatch.LotNumber))
-            .ForMember(d => d.ExpirationDate, o => o.MapFrom(s => s.ItemBatch == null ? null : s.ItemBatch.ExpirationDate));
+            .ForMember(d => d.ExpirationDate, o => o.MapFrom(s => s.ItemBatch == null ? null : s.ItemBatch.ExpirationDate))
+            .ForMember(d => d.Issues, o => o.MapFrom(s => Enum.GetValues<DeliveryIssue>()
+                .Where(f => f != DeliveryIssue.None && s.Issues.HasFlag(f))
+                .Select(f => f.ToString())
+                .ToList()));
 
         // DemandForecast
         CreateMap<DemandForecast, DemandForecastDto>()

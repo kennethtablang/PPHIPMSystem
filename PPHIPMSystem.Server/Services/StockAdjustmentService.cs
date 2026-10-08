@@ -69,7 +69,7 @@ public class StockAdjustmentService : IStockAdjustmentService
             UserRole.HospitalAdministrator,
             NotificationType.StockAdjustmentRequested,
             "Stock Adjustment Requested",
-            $"A stock adjustment for {item.Name} has been submitted for approval.",
+            $"A stock correction for {item.Name} (recorded {item.QuantityOnHand:0.##}, counted {dto.PhysicalCount:0.##}) needs your approval as Head of Property & Supply.",
             adjustment.Id, "StockAdjustment");
 
         await _audit.LogAsync(userId, "AdjustmentRequested", "StockAdjustment", adjustment.Id,
@@ -139,6 +139,12 @@ public class StockAdjustmentService : IStockAdjustmentService
             .FirstOrDefaultAsync(a => a.Id == id && a.Status == AdjustmentStatus.Pending);
 
         if (adjustment is null) return null;
+
+        // Corrections are made by the Inventory Head and approved by the Head
+        // of Property & Supply — never by the person who counted.
+        if (adjustment.RequestedByUserId == approverId)
+            throw new InvalidOperationException(
+                "You filed this correction, so it must be approved by another Head of Property & Supply account.");
 
         adjustment.ApprovedByUserId = approverId;
         adjustment.ApproverRemarks = dto.Remarks;

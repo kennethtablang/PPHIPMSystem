@@ -169,7 +169,7 @@ export default function AllocationBoard({ onClose, onSaved }) {
                         return (
                           <tr key={l.procurementRequestItemId}>
                             <td style={{ fontFamily: 'monospace', fontSize: 12, fontWeight: 600 }}>{l.requestNumber}</td>
-                            <td>{l.departmentName}</td>
+                            <td>{l.departmentName}{l.isUrgent && <span className="badge badge-red" style={{ marginLeft: 6 }} title="Urgent / emergency request">URGENT</span>}</td>
                             <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{new Date(l.requestedAt).toLocaleDateString('en-PH')}</td>
                             <td style={{ fontWeight: 600 }}>{fmt(l.quantityRequested)}</td>
                             <td style={{ color: 'var(--text-muted)' }}>{fmt(l.fairShare)}</td>

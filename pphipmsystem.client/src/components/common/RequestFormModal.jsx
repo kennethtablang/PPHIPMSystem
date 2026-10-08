@@ -1,8 +1,9 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
-import { MdAdd, MdCheck, MdClose, MdSearch, MdExpandMore, MdChevronRight } from 'react-icons/md';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import { MdAdd, MdCheck, MdClose, MdSearch, MdExpandMore, MdChevronRight, MdPriorityHigh, MdWarning } from 'react-icons/md';
 import { createRequest, updateRequest, submitRequest } from '../../api/procurement';
 import { getItems } from '../../api/inventory';
 import { getDepartments } from '../../api/departments';
+import { getDepartmentStock } from '../../api/departmentStock';
 import { getSystemSettings } from '../../api/systemSettings';
 import { formUnit, groupPrLines, peso } from '../../utils/purchaseRequest';
 import Modal from './Modal';
@@ -15,16 +16,21 @@ import { useAuth } from '../../context/AuthContext';
 // grouped by category with a search box and category chips, so a ward can
 // build a long request without scrolling one giant dropdown per line.
 //
-// `request` given → edit mode (same form, pre-filled). `showCost` adds an
-// optional estimated unit cost column for staff filing on a department's
-// behalf — a request can always be submitted without prices.
+// `request` given → edit mode (same form, pre-filled). Every line has an
+// optional estimated unit cost — a request can always be submitted without
+// prices.
+// A request can be flagged urgent / emergency; that needs a reason so the
+// reviewers can judge the priority. Before saving, lines whose stock is still
+// sufficient (the ward already holds enough, or for a PR the storeroom is
+// above its reorder level) are pointed out and must be confirmed, to avoid
+// over-requesting and excess inventory.
 // `replenishment` switches to the Supply Officer's Purchase Request for
 // restocking the storeroom: low-stock items are one tap away and come
 // pre-filled with a suggested reorder quantity. The PR is laid out like the
 // paper Appendix 47 form (LGU/Fund, Department/PR No./Date, Section/FPP, then
 // Item No. | Unit | Item Description | Quantity | Unit Cost | Total Cost,
 // grouped by category) so it can be checked against the printed copy.
-export default function RequestFormModal({ request = null, prefill = null, showCost = false, replenishment = false, onClose, onSaved }) {
+export default function RequestFormModal({ request = null, prefill = null, replenishment = false, onClose, onSaved }) {
   const { user } = useAuth();
   const isAdmin = ['SuperAdmin', 'HospitalAdministrator'].includes(user?.role);
   const isSharedPc = user?.role === 'DepartmentStaff';
@@ -43,6 +49,13 @@ export default function RequestFormModal({ request = null, prefill = null, showC
   // A shared PC logs in as the ward, so the person's name must be typed.
   const [requestedByName, setRequestedByName] = useState(request?.requestedByName ?? (isSharedPc ? '' : user?.fullName ?? ''));
   const [purpose, setPurpose] = useState(request?.justification ?? prefill?.justification ?? '');
+  const [isUrgent, setIsUrgent] = useState(!!request?.isUrgent);
+  const [urgentReason, setUrgentReason] = useState(request?.urgentReason ?? '');
+  // Ward balances (department requests) for the sufficient-stock check.
+  const [wardStock, setWardStock] = useState({});
+  // Set when save was held back by the sufficient-stock warning: { submit }.
+  const [stockCheck, setStockCheck] = useState(null);
+  const warnRef = useRef(null);
   // Appendix 47 header fields — usually assigned later by the Provincial
   // offices, so optional; the printed form leaves a line to write on.
   const [prFields, setPrFields] = useState({ fund: request?.fund ?? '', section: request?.section ?? '', fpp: request?.fpp ?? '' });
@@ -72,7 +85,32 @@ export default function RequestFormModal({ request = null, prefill = null, showC
   // eslint-disable-next-line react-hooks/exhaustive-deps -- load once
   }, []);
 
+  useEffect(() => {
+    if (isPr || !departmentId) { setWardStock({}); return; }
+    getDepartmentStock(departmentId)
+      .then(r => setWardStock(Object.fromEntries(r.data.map(d => [String(d.inventoryItemId), d.quantity]))))
+      .catch(() => setWardStock({}));
+  }, [isPr, departmentId]);
+
   const itemMap = useMemo(() => Object.fromEntries(items.map(i => [String(i.id), i])), [items]);
+
+  // Why a line may be unnecessary: the department still holds enough of it,
+  // or (Purchase Request) the storeroom is above its reorder level.
+  const sufficientNote = l => {
+    const it = itemMap[l.inventoryItemId];
+    if (!it) return null;
+    if (isPr) {
+      return it.quantityOnHand > it.reorderThreshold
+        ? `${it.quantityOnHand} ${it.unit} still on hand — above the reorder level of ${it.reorderThreshold}.`
+        : null;
+    }
+    const ward = wardStock[l.inventoryItemId] ?? 0;
+    const qty = +l.quantityRequested || 0;
+    return ward > 0 && ward >= qty
+      ? `The department still has ${ward} ${it.unit} — enough to cover the ${qty || 'quantity'} requested.`
+      : null;
+  };
+  const sufficientLines = lines.map(l => ({ l, note: sufficientNote(l) })).filter(x => x.note);
   const picked = useMemo(() => new Set(lines.map(l => l.inventoryItemId)), [lines]);
 
   const lowCount = useMemo(() => items.filter(i => i.isBelowReorder).length, [items]);
@@ -113,18 +151,27 @@ export default function RequestFormModal({ request = null, prefill = null, showC
   const setLine = (idx, k) => e => setLines(p => p.map((l, j) => (j === idx ? { ...l, [k]: e.target.value } : l)));
   const removeLine = idx => setLines(p => p.filter((_, j) => j !== idx));
 
-  const save = async ({ submit = false } = {}) => {
+  const save = async ({ submit = false, stockConfirmed = false } = {}) => {
     if (!departmentId) { toast.error('Choose the requesting department.'); return; }
     if (isSharedPc && !requestedByName.trim()) { toast.error('Enter your name — this PC is shared by the department.'); return; }
     if (!purpose.trim()) { toast.error('Purpose is required.'); return; }
+    if (isUrgent && urgentReason.trim().length < 10) { toast.error('Explain why this request is urgent (at least 10 characters).'); return; }
     if (lines.length === 0) { toast.error('Add at least one item.'); return; }
     if (lines.some(l => !(+l.quantityRequested > 0))) { toast.error('Every item needs a quantity greater than zero.'); return; }
+    if (!stockConfirmed && sufficientLines.length > 0) {
+      setStockCheck({ submit });
+      setTimeout(() => warnRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 0);
+      return;
+    }
+    setStockCheck(null);
 
     const payload = {
       departmentId: +departmentId,
       requestedByName: requestedByName.trim() || null,
       isReplenishment: isPr,
       justification: purpose.trim(),
+      isUrgent,
+      urgentReason: isUrgent ? urgentReason.trim() : null,
       ...(isPr && {
         fund: prFields.fund.trim() || null,
         section: prFields.section.trim() || null,
@@ -167,6 +214,43 @@ export default function RequestFormModal({ request = null, prefill = null, showC
     </div>
   );
 
+  const urgentField = (
+    <div className={`rf-urgent ${isUrgent ? 'on' : ''}`}>
+      <label className="rf-urgent-toggle">
+        <input type="checkbox" checked={isUrgent} onChange={e => setIsUrgent(e.target.checked)} />
+        <MdPriorityHigh size={16} />
+        <span><strong>Urgent / Emergency request</strong> — processed ahead of regular requests</span>
+      </label>
+      {isUrgent && (
+        <div className="form-group" style={{ margin: '8px 0 0' }}>
+          <label className="form-label">Reason for urgency *</label>
+          <textarea
+            className="form-control" rows={2} value={urgentReason} onChange={e => setUrgentReason(e.target.value)} maxLength={1000}
+            placeholder="Why must these supplies be prioritised? e.g. IV sets ran out in the ER with patients waiting"
+          />
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>
+            Reviewers see this reason and may return the request if the urgency is not justified.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  const stockWarning = stockCheck && sufficientLines.length > 0 && (
+    <div ref={warnRef} className="alert alert-warning" style={{ marginTop: 12, fontSize: 12.5, display: 'block' }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontWeight: 700, marginBottom: 6 }}>
+        <MdWarning size={16} /> Stock is still sufficient for {sufficientLines.length} item{sufficientLines.length > 1 ? 's' : ''}
+      </div>
+      <ul style={{ margin: '0 0 6px 18px', padding: 0 }}>
+        {sufficientLines.map(({ l, note }) => (
+          <li key={l.inventoryItemId}><strong>{itemMap[l.inventoryItemId]?.name}</strong>: {note}</li>
+        ))}
+      </ul>
+      Requesting items that are still in stock can lead to excess inventory. Remove or reduce these lines, or choose
+      <strong> Proceed Anyway</strong> if they are really needed (say why in the purpose or line remarks).
+    </div>
+  );
+
   const ownDept = departments.find(d => String(d.id) === String(user?.departmentId));
   const today = new Date().toLocaleDateString('en-PH');
 
@@ -180,7 +264,14 @@ export default function RequestFormModal({ request = null, prefill = null, showC
       footer={
         <>
           <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
-          {editing ? (
+          {stockCheck && sufficientLines.length > 0 ? (
+            <>
+              <button className="btn btn-secondary" onClick={() => setStockCheck(null)}>Review Items</button>
+              <button className="btn btn-primary" onClick={() => save({ submit: stockCheck.submit, stockConfirmed: true })} disabled={saving}>
+                {saving ? 'Saving…' : 'Proceed Anyway'}
+              </button>
+            </>
+          ) : editing ? (
             <button className="btn btn-primary" onClick={() => save()} disabled={saving}>{saving ? 'Saving…' : 'Save Changes'}</button>
           ) : (
             <>
@@ -288,6 +379,7 @@ export default function RequestFormModal({ request = null, prefill = null, showC
             </div>
           </div>
           {purposeField}
+          {urgentField}
         </>
       )}
 
@@ -386,6 +478,7 @@ export default function RequestFormModal({ request = null, prefill = null, showC
                                   {it.quantityOnHand} on hand · reorder at {it.reorderThreshold}
                                 </div>
                               )}
+                              {sufficientNote(l) && <div className="rf-sufficient"><MdWarning size={12} /> Stock still sufficient</div>}
                             </td>
                             <td>
                               <input className="form-control" type="number" min="1" step="1" value={l.quantityRequested} onChange={setLine(l.idx, 'quantityRequested')} placeholder="0" style={{ padding: '6px 8px', width: 76 }} />
@@ -420,7 +513,7 @@ export default function RequestFormModal({ request = null, prefill = null, showC
                   <tr>
                     <th>Description</th>
                     <th>Qty</th>
-                    {showCost && <th title="Optional — leave blank if the price is not yet known">Est. Unit Cost <small>(optional)</small></th>}
+                    <th title="Optional — leave blank if the price is not yet known">Est. Unit Cost <small>(optional)</small></th>
                     <th>Stock Avail.</th>
                     <th>Remarks</th>
                     <th />
@@ -438,15 +531,18 @@ export default function RequestFormModal({ request = null, prefill = null, showC
                           <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
                             {it?.itemCode && <span style={{ fontFamily: 'monospace' }}>{it.itemCode} · </span>}{it?.unit}
                           </div>
+                          {sufficientNote(l) && (
+                            <div className="rf-sufficient" title={sufficientNote(l)}>
+                              <MdWarning size={12} /> Ward has {wardStock[l.inventoryItemId]} on hand
+                            </div>
+                          )}
                         </td>
                         <td>
                           <input className="form-control" type="number" min="1" step="1" value={l.quantityRequested} onChange={setLine(idx, 'quantityRequested')} placeholder="0" style={{ padding: '6px 8px', minWidth: 72 }} />
                         </td>
-                        {showCost && (
-                          <td>
-                            <input className="form-control" type="number" min="0" step="0.01" value={l.estimatedUnitCost} onChange={setLine(idx, 'estimatedUnitCost')} placeholder="Optional" style={{ padding: '6px 8px', minWidth: 88 }} />
-                          </td>
-                        )}
+                        <td>
+                          <input className="form-control" type="number" min="0" step="0.01" value={l.estimatedUnitCost} onChange={setLine(idx, 'estimatedUnitCost')} placeholder="Optional" style={{ padding: '6px 8px', minWidth: 88 }} />
+                        </td>
                         <td>
                           {it && (
                             <span className={`badge ${enough ? 'badge-green' : 'badge-amber'}`} title={`${it.quantityOnHand} ${it.unit} on hand`}>
@@ -470,6 +566,8 @@ export default function RequestFormModal({ request = null, prefill = null, showC
         </div>
       </div>
       {isPr && purposeField}
+      {isPr && urgentField}
+      {stockWarning}
     </Modal>
   );
 }
@@ -513,6 +611,11 @@ const CSS = `
 .rf-pr-cat td { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--text-accent); background: var(--bg-muted); padding-top: 6px; padding-bottom: 6px; }
 .rf-pr-total td { font-weight: 700; }
 .rf-pr-totalcell { display: flex; align-items: center; justify-content: space-between; gap: 6px; white-space: nowrap; }
+.rf-sufficient { display: flex; align-items: center; gap: 3px; font-size: 10.5px; font-weight: 600; color: var(--amber-600); margin-top: 2px; }
+.rf-urgent { margin-top: 12px; padding: 10px 14px; border: 1.5px dashed var(--border); border-radius: var(--radius-sm); }
+.rf-urgent.on { border-style: solid; border-color: var(--red-500); background: rgba(239,68,68,.06); }
+.rf-urgent-toggle { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
+.rf-urgent.on .rf-urgent-toggle { color: var(--red-500); }
 .rf-empty { padding: 28px 12px; text-align: center; color: var(--text-muted); font-size: 13px; border: 1px dashed var(--border); border-radius: var(--radius-sm); }
 @media (max-width: 860px) {
   .rf-head, .rf-body, .rf-pr-row { grid-template-columns: 1fr !important; }

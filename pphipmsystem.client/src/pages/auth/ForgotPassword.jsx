@@ -11,14 +11,14 @@ export default function ForgotPassword() {
   const handleSubmit = async e => {
     e.preventDefault();
     if (!email) {
-      toast.error('Please enter your email address.');
+      toast.error('Please enter your username or email address.');
       return;
     }
     setLoading(true);
     try {
       await forgotPassword(email);
       setSuccess(true);
-      toast.success('If the email is registered, a password reset link has been sent.');
+      toast.success('If the account exists, a password reset link has been sent to its email address.');
     } catch (err) {
       toast.error(err.response?.data?.message || 'An error occurred.');
     } finally {
@@ -82,24 +82,25 @@ export default function ForgotPassword() {
           <div style={{ textAlign: 'center', marginBottom: 32 }}>
             <h2 style={{ fontSize: 26, fontWeight: 800, color: '#fff', letterSpacing: '-.5px', marginBottom: 6 }}>Forgot Password</h2>
             <p style={{ fontSize: 13, color: 'rgba(255,255,255,.5)', lineHeight: 1.6, fontWeight: 400 }}>
-              Enter your email and we'll send you a link to reset your password.
+              Enter your username or email and we'll send a reset link to the email address on your account. This works for every account, including the Super Admin.
             </p>
           </div>
 
           {success ? (
             <div style={{ background: 'rgba(79,208,122,.15)', border: '1px solid rgba(79,208,122,.35)', color: '#86e8a8', borderRadius: 16, padding: '16px', fontSize: 13, textAlign: 'center', fontWeight: 500, marginBottom: 20 }}>
-              A password reset link has been sent to your email address. Please check your inbox and spam folder.
+              If the account exists, a password reset link has been sent to the email address on file. Please check your inbox and spam folder.
             </div>
           ) : (
             <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div>
                 <label style={{ display: 'block', fontSize: 11, fontWeight: 700, color: 'rgba(255,255,255,.55)', letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: 8 }}>
-                  Email Address
+                  Username or Email
                 </label>
                 <input
-                  type="email"
+                  type="text"
                   className="auth-input"
-                  placeholder="name@example.com"
+                  placeholder="e.g. superadmin or name@example.com"
+                  autoComplete="username"
                   value={email}
                   onChange={e => setEmail(e.target.value)}
                   required

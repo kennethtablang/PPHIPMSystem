@@ -19,6 +19,12 @@ public class CreateProcurementRequestDto
     [Required, MaxLength(1000)]
     public string Justification { get; set; } = string.Empty;
 
+    // Urgent / emergency request. UrgentReason is required when set.
+    public bool IsUrgent { get; set; }
+
+    [MaxLength(1000)]
+    public string? UrgentReason { get; set; }
+
     // Purchase Request form fields (replenishment PRs); all optional.
     [MaxLength(100)]
     public string? Fund { get; set; }

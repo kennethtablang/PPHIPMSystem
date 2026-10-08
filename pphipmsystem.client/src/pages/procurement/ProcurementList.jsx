@@ -10,10 +10,9 @@ import LabelPrintModal from '../../components/common/LabelPrintModal';
 import Modal from '../../components/common/Modal';
 import Pagination, { usePagination } from '../../components/common/Pagination';
 import RequestFormModal from '../../components/common/RequestFormModal';
-import { RequestProgress, RequestLinesTable } from '../../components/common/RequestProgress';
+import { RequestProgress, RequestLinesTable, RequestTimeline, StageLine, UrgentBadge } from '../../components/common/RequestProgress';
 import StatusBadge from '../../components/common/StatusBadge';
 import { toast } from '../../components/common/Toast';
-import { fmtDateTime } from '../../utils/format';
 import { useAuth } from '../../context/AuthContext';
 import AllocationBoard from './AllocationBoard';
 
@@ -327,12 +326,16 @@ export default function ProcurementList() {
                 <tr><td colSpan={7} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>No requests found.</td></tr>
               ) : pager.pageItems.map(r => (
                 <tr key={r.id}>
-                  <td style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: 12 }}>{r.requestNumber}</td>
+                  <td style={{ fontFamily: 'monospace', fontWeight: 600, fontSize: 12 }}>
+                    {r.requestNumber}
+                    {r.isUrgent && <div style={{ marginTop: 3 }}><UrgentBadge request={r} /></div>}
+                  </td>
                   <td>{r.departmentName}</td>
                   <td>{r.requestedByName || r.requestedByFullName}</td>
                   <td><span className="badge badge-blue">{r.items?.length ?? 0} items</span></td>
                   <td>
                     <StatusBadge status={r.status} type={r.type} />
+                    <StageLine request={r} />
                     {isStalled(r) && (
                       <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, fontWeight: 600, color: daysWaiting(r) >= 14 ? '#dc2626' : '#d97706' }}>
                         <MdSchedule size={12} /> waiting {daysWaiting(r)}d
@@ -418,7 +421,6 @@ export default function ProcurementList() {
           request={createModal.request ?? null}
           prefill={createModal.prefill}
           replenishment={!!createModal.replenishment}
-          showCost={user?.role !== 'DepartmentHead'}
           onClose={() => setCreateModal(null)}
           onSaved={() => { setCreateModal(null); refresh(); }}
         />
@@ -484,24 +486,18 @@ export default function ProcurementList() {
             </div>
           </div>
           <RequestProgress status={viewModal.status} type={viewModal.type} />
+          {viewModal.isUrgent && (
+            <div className="alert alert-danger" style={{ fontSize: 13 }}>
+              <strong>URGENT / EMERGENCY:</strong>&nbsp;{viewModal.urgentReason}
+            </div>
+          )}
           <div className="alert alert-info"><strong>Purpose:</strong>&nbsp;{viewModal.justification}</div>
           <div>
             <label className="form-label">Items Requested</label>
-            <RequestLinesTable request={viewModal} itemMap={itemMap} showCost={user?.role !== 'DepartmentHead'} />
+            <RequestLinesTable request={viewModal} itemMap={itemMap} showCost />
           </div>
           <AttachmentsPanel requestId={viewModal.id} />
-          {(viewModal.approvals ?? []).length > 0 && (
-            <div>
-              <label className="form-label">Approval History</label>
-              {viewModal.approvals.map(a => (
-                <div key={a.id} style={{ padding: '8px 12px', background: 'var(--green-50)', borderRadius: 'var(--radius-sm)', marginTop: 6, fontSize: 13 }}>
-                  <strong>{a.approverFullName}</strong> ({a.approverRole}) — <span className={`badge badge-${a.actionName === 'Approved' ? 'green' : a.actionName === 'Rejected' ? 'red' : 'amber'}`}>{a.actionName}</span>
-                  {a.remarks && <div style={{ color: 'var(--text-muted)', marginTop: 2 }}>{a.remarks}</div>}
-                  <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>{fmtDateTime(a.actedAt)}</div>
-                </div>
-              ))}
-            </div>
-          )}
+          <RequestTimeline request={viewModal} />
         </Modal>
       )}
 
@@ -537,6 +533,12 @@ export default function ProcurementList() {
             </>
           }
         >
+          {approveModal.isUrgent && (
+            <div className="alert alert-danger" style={{ fontSize: 13 }}>
+              <strong>URGENT / EMERGENCY request:</strong>&nbsp;{approveModal.urgentReason}
+              <div style={{ fontSize: 11, marginTop: 4 }}>If the urgency is not justified, return the request with your remarks.</div>
+            </div>
+          )}
           {isInventoryReview && (
             <div style={{ marginBottom: 14 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>

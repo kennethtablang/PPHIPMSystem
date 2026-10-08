@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   MdNotifications, MdDoneAll, MdWarning, MdError, MdInfo,
   MdCheckCircle, MdShoppingCart, MdLocalShipping,
-  MdTune, MdDeleteForever, MdCircle, MdAccountBalanceWallet,
+  MdTune, MdDeleteForever, MdCircle, MdReportProblem,
 } from 'react-icons/md';
 import { getNotifications, markRead, markAllRead, notifyNotificationsChanged } from '../../api/notifications';
 import { signalRService } from '../../api/signalrService';
@@ -22,7 +22,7 @@ const TYPE_META = {
   ProcurementRejected:         { icon: MdError,        color: '#dc2626', label: 'Request Rejected',          group: 'procurement' },
   ProcurementReturnedForRevision: { icon: MdInfo,      color: '#f59e0b', label: 'Returned for Revision',     group: 'procurement' },
   PurchaseOrderGenerated:      { icon: MdLocalShipping,color: '#059669', label: 'Purchase Order Generated',  group: 'procurement' },
-  BudgetAlert:                 { icon: MdAccountBalanceWallet, color: '#dc2626', label: 'Budget Alert',      group: 'procurement' },
+  DeliveryProblem:             { icon: MdReportProblem,color: '#dc2626', label: 'Delivery Problem',          group: 'procurement' },
   General:                     { icon: MdInfo,         color: '#6b7280', label: 'Notice',                    group: 'other' },
 };
 

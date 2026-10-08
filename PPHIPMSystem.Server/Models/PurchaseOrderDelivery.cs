@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using PPHIPMSystem.Server.Models.Enums;
 
 namespace PPHIPMSystem.Server.Models;
 
@@ -29,6 +30,18 @@ public class PurchaseOrderDelivery
     public ApplicationUser? ReceivedByUser { get; set; }
 
     public DateTime RecordedAt { get; set; } = DateTime.UtcNow;
+
+    // Problems noted on receipt (late, short, damaged, substandard).
+    public DeliveryIssue Issues { get; set; } = DeliveryIssue.None;
+
+    // Units that arrived damaged or substandard and were refused. They never
+    // enter stock and stay outstanding on the PO until the supplier replaces
+    // them.
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal QuantityRejected { get; set; }
+
+    [MaxLength(500)]
+    public string? IssueRemarks { get; set; }
 
     // The batch this shipment became (lot / expiry live there).
     public int? ItemBatchId { get; set; }

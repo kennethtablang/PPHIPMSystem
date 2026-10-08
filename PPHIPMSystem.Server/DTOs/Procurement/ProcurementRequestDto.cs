@@ -15,16 +15,23 @@ public class ProcurementRequestDto
     public string? Fund { get; set; }
     public string? Section { get; set; }
     public string? Fpp { get; set; }
+    public bool IsUrgent { get; set; }
+    public string? UrgentReason { get; set; }
     public ProcurementStatus Status { get; set; }
     public string StatusName => Status.ToString();
     public RequestType Type { get; set; }
     public DateTime RequestedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
+    public DateTime? SubmittedAt { get; set; }
     public DateTime? ReleasedAt { get; set; }
     public IEnumerable<ProcurementRequestItemDto> Items { get; set; } = [];
     public IEnumerable<ProcurementApprovalDto> Approvals { get; set; } = [];
     public int? PurchaseOrderId { get; set; }
     public string? PONumber { get; set; }
+    // For the status timeline: when the PO was raised and when its last
+    // line was delivered.
+    public DateTime? POGeneratedAt { get; set; }
+    public DateTime? PODeliveredAt { get; set; }
 }
 
 public class ProcurementRequestItemDto
@@ -77,6 +84,7 @@ public class AllocationLineDto
     public int ProcurementRequestId { get; set; }
     public string RequestNumber { get; set; } = string.Empty;
     public string DepartmentName { get; set; } = string.Empty;
+    public bool IsUrgent { get; set; }
     public DateTime RequestedAt { get; set; }
     public decimal QuantityRequested { get; set; }
     public decimal? QuantityApproved { get; set; }

@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using PPHIPMSystem.Server.Models.Enums;
 
 namespace PPHIPMSystem.Server.DTOs.Procurement;
 
@@ -15,6 +16,9 @@ public class ConfirmDeliveryDto
     // Supplier's delivery receipt / invoice number.
     [MaxLength(100)]
     public string? ReferenceNo { get; set; }
+
+    // The shipment arrived later than agreed — applies to every line in it.
+    public bool Delayed { get; set; }
 }
 
 public class DeliveryLineDto
@@ -31,6 +35,16 @@ public class DeliveryLineDto
     public string? LotNumber { get; set; }
 
     public DateTime? ExpirationDate { get; set; }
+
+    // Problems with this line: Damaged / Substandard (with the refused units
+    // in QuantityRejected) or Incomplete. Delayed is set shipment-wide above.
+    public List<DeliveryIssue>? Issues { get; set; }
+
+    [Range(0, 1_000_000_000)]
+    public decimal QuantityRejected { get; set; }
+
+    [MaxLength(500)]
+    public string? IssueRemarks { get; set; }
 }
 
 public class PurchaseOrderDto
@@ -71,4 +85,7 @@ public class PurchaseOrderDeliveryDto
     public string? ReceivedByFullName { get; set; }
     public string? LotNumber { get; set; }
     public DateTime? ExpirationDate { get; set; }
+    public List<string> Issues { get; set; } = [];
+    public decimal QuantityRejected { get; set; }
+    public string? IssueRemarks { get; set; }
 }
