@@ -1,29 +1,35 @@
 import { useEffect, useState } from 'react';
 import { MdAdd, MdChecklist, MdSearch } from 'react-icons/md';
-import { getAdjustments, createAdjustment, approveAdjustment, submitCycleCount } from '../../api/stockAdjustments';
+import { getAdjustments, approveAdjustment, submitCycleCount } from '../../api/stockAdjustments';
 import { getItems } from '../../api/inventory';
+import AdjustQuantityModal from '../../components/common/AdjustQuantityModal';
 import Modal from '../../components/common/Modal';
 import SearchSelect from '../../components/common/SearchSelect';
 import StatusBadge from '../../components/common/StatusBadge';
 import { toast } from '../../components/common/Toast';
 import { useAuth } from '../../context/AuthContext';
+import { fmtDateTime } from '../../utils/format';
+import StockHistoryTabs from './StockHistoryTabs';
 
-const BLANK = { inventoryItemId: '', physicalCount: '', reason: '' };
-
+// Adjustment history (Revision 4). Corrections are made directly — from the
+// Adjust button on the Items list, here, or with a cycle count — and apply at
+// once. Each row is the record: original quantity, adjusted quantity, the
+// reason, who made it and when. Requests filed under the old approval flow
+// can still be reviewed by an administrator.
 export default function StockAdjustments() {
   const { user } = useAuth();
   const canCreate = ['SuperAdmin', 'HospitalAdministrator', 'InventoryOfficer'].includes(user?.role);
-  // Corrections are filed by the Inventory Head and approved by the Head of
-  // Property & Supply (Hospital Administrator) — never by whoever filed them.
   const canApprove = ['SuperAdmin', 'HospitalAdministrator'].includes(user?.role);
 
   const [list, setList] = useState([]);
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState('');
-  const [createModal, setCreateModal] = useState(false);
+  // New adjustment: pick the item, then the shared Adjust Quantity dialog.
+  const [pickModal, setPickModal] = useState(false);
+  const [pickId, setPickId] = useState('');
+  const [adjustItem, setAdjustItem] = useState(null);
   const [approveModal, setApproveModal] = useState(null);
-  const [form, setForm] = useState(BLANK);
   const [approveForm, setApproveForm] = useState({ approved: true, remarks: '' });
   const [saving, setSaving] = useState(false);
   // Cycle count worksheet: counted quantities keyed by item id; blank = not counted.
@@ -38,26 +44,16 @@ export default function StockAdjustments() {
     getAdjustments(p).then(r => setList(r.data)).finally(() => setLoading(false));
   };
 
-  useEffect(() => { getItems().then(r => setItems(r.data)); }, []);
+  const loadItems = () => getItems().then(r => setItems(r.data));
+  useEffect(() => { loadItems(); }, []);
   // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: reload only when these inputs change
   useEffect(() => { load(); }, [statusFilter]);
 
-  const set = k => e => setForm(p => ({ ...p, [k]: e.target.value }));
-
-  // Live variance preview
-  const selectedItem = form.inventoryItemId ? items.find(i => i.id === +form.inventoryItemId) : null;
-  const variance = selectedItem && form.physicalCount !== '' ? +form.physicalCount - selectedItem.quantityOnHand : null;
-
-  const save = async () => {
-    setSaving(true);
-    try {
-      await createAdjustment({ ...form, inventoryItemId: +form.inventoryItemId, physicalCount: +form.physicalCount });
-      toast.success('Adjustment request submitted for approval.');
-      setCreateModal(false);
-      load();
-    } catch (e) {
-      toast.error(e.response?.data?.message ?? 'Failed to submit.');
-    } finally { setSaving(false); }
+  const startAdjust = () => {
+    const it = items.find(x => x.id === +pickId);
+    if (!it) { toast.error('Choose an item.'); return; }
+    setPickModal(false);
+    setAdjustItem(it);
   };
 
   const openCycleCount = () => {
@@ -86,9 +82,10 @@ export default function StockAdjustments() {
         reason: countReason.trim(),
         lines: countedLines.map(l => ({ inventoryItemId: l.item.id, physicalCount: l.counted })),
       });
-      toast.success(`${data.adjustmentsCreated} adjustment(s) submitted for approval; ${data.unchangedItems} item(s) matched the records.`);
+      toast.success(`${data.adjustmentsCreated} item(s) corrected; ${data.unchangedItems} item(s) matched the records.`);
       setCountModal(false);
       load();
+      loadItems();
     } catch (e) {
       toast.error(e.response?.data?.message ?? 'Failed to submit the count.');
     } finally { setSaving(false); }
@@ -109,30 +106,34 @@ export default function StockAdjustments() {
     <div>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Stock Adjustments</h1>
-          <p className="page-subtitle">Inventory corrections for count discrepancies — filed by the Inventory Head, applied only after approval by the Head of Property &amp; Supply</p>
+          <h1 className="page-title">Stock History</h1>
+          <p className="page-subtitle">Every quantity correction — original and adjusted quantity, reason, who made it and when</p>
         </div>
         {canCreate && (
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn btn-secondary" onClick={openCycleCount} title="Count many items at once">
               <MdChecklist size={16} /> Cycle Count
             </button>
-            <button className="btn btn-primary" onClick={() => { setForm(BLANK); setCreateModal(true); }}>
-              <MdAdd size={16} /> New Adjustment
+            <button className="btn btn-primary" onClick={() => { setPickId(''); setPickModal(true); }}>
+              <MdAdd size={16} /> Adjust an Item
             </button>
           </div>
         )}
       </div>
 
-      <div className="filter-bar">
-        {['', 'Pending', 'Approved', 'Rejected'].map(s => (
-          <button
-            key={s}
-            className={`btn btn-sm ${statusFilter === s ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => setStatusFilter(s)}
-          >{s || 'All'}</button>
-        ))}
-      </div>
+      <StockHistoryTabs />
+
+      {list.some(a => a.status === 'Pending') && (
+        <div className="filter-bar">
+          {['', 'Pending'].map(s => (
+            <button
+              key={s}
+              className={`btn btn-sm ${statusFilter === s ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setStatusFilter(s)}
+            >{s ? 'Old requests awaiting review' : 'All'}</button>
+          ))}
+        </div>
+      )}
 
       {loading ? (
         <div className="loading-center"><div className="spinner" /></div>
@@ -141,16 +142,14 @@ export default function StockAdjustments() {
           <table>
             <thead>
               <tr>
-                <th>Item</th>
-                <th>Recorded Qty</th>
-                <th>Physical Count</th>
-                <th>Variance</th>
-                <th>Reason</th>
-                <th>Requested By</th>
-                <th>Approved By</th>
-                <th>Status</th>
                 <th>Date</th>
-                {canApprove && <th>Actions</th>}
+                <th>Item</th>
+                <th>Original Qty</th>
+                <th>Adjusted Qty</th>
+                <th>Change</th>
+                <th>Reason</th>
+                <th>Adjusted By</th>
+                {canApprove && list.some(a => a.status === 'Pending') && <th>Actions</th>}
               </tr>
             </thead>
             <tbody>
@@ -158,21 +157,25 @@ export default function StockAdjustments() {
                 <tr><td colSpan={10} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>No adjustments found.</td></tr>
               ) : list.map(a => (
                 <tr key={a.id}>
-                  <td style={{ fontWeight: 500 }}>{a.itemName}</td>
+                  <td style={{ fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{fmtDateTime(a.requestedAt)}</td>
+                  <td style={{ fontWeight: 500 }}>
+                    {a.itemName}
+                    {a.itemCode && <div style={{ fontSize: 11, color: 'var(--text-muted)', fontFamily: 'monospace' }}>{a.itemCode}</div>}
+                  </td>
                   <td>{a.recordedQuantity}</td>
                   <td style={{ fontWeight: 600 }}>{a.physicalCount}</td>
                   <td style={{ fontWeight: 700, color: a.variance > 0 ? '#059669' : a.variance < 0 ? '#dc2626' : 'inherit' }}>
                     {a.variance > 0 ? '+' : ''}{a.variance}
                   </td>
-                  <td style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-muted)', fontSize: 12 }}>{a.reason}</td>
-                  <td>{a.requestedByFullName}</td>
-                  <td style={{ fontSize: 12 }}>
-                    {a.approvedByFullName ?? <span style={{ color: 'var(--text-muted)' }}>—</span>}
-                    {a.approverRemarks && <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>{a.approverRemarks}</div>}
+                  <td style={{ maxWidth: 260, color: 'var(--text-secondary)', fontSize: 12 }}>{a.reason}</td>
+                  <td>
+                    {a.requestedByFullName}
+                    {a.status !== 'Approved' && <div style={{ marginTop: 3 }}><StatusBadge status={a.status} /></div>}
+                    {a.approvedByFullName && a.approvedByUserId !== a.requestedByUserId && (
+                      <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>approved by {a.approvedByFullName}</div>
+                    )}
                   </td>
-                  <td><StatusBadge status={a.status} /></td>
-                  <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{new Date(a.requestedAt).toLocaleDateString('en-PH')}</td>
-                  {canApprove && (
+                  {canApprove && list.some(x => x.status === 'Pending') && (
                     <td>
                       {a.status === 'Pending' && (a.requestedByUserId === user?.userId ? (
                         <span style={{ fontSize: 11, color: 'var(--text-muted)' }} title="You filed this correction — another approver must review it">
@@ -204,15 +207,15 @@ export default function StockAdjustments() {
               </span>
               <button className="btn btn-secondary" onClick={() => setCountModal(false)}>Cancel</button>
               <button className="btn btn-primary" onClick={submitCount} disabled={saving || countedLines.length === 0}>
-                {saving ? 'Submitting…' : `Submit ${varianceLines.length} Adjustment(s)`}
+                {saving ? 'Saving…' : `Apply ${varianceLines.length} Correction(s)`}
               </button>
             </>
           }
         >
           <div className="alert alert-info" style={{ fontSize: 12 }}>
             Enter the physically counted quantity for each item you checked — leave the rest blank.
-            Items matching the recorded quantity are noted but create no adjustment; every variance
-            becomes a pending adjustment for approval.
+            Items matching the recorded quantity are left as they are; every difference is corrected
+            immediately and recorded here with the reason below.
           </div>
 
           <div style={{ display: 'flex', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
@@ -221,7 +224,7 @@ export default function StockAdjustments() {
               <input className="form-control" placeholder="Filter items…" value={countSearch} onChange={e => setCountSearch(e.target.value)} style={{ paddingLeft: 32 }} />
             </div>
             <div className="form-group" style={{ margin: 0, flex: 2, minWidth: 260 }}>
-              <input className="form-control" value={countReason} onChange={e => setCountReason(e.target.value)} maxLength={500} placeholder="Count reason (applies to all adjustments) *" />
+              <input className="form-control" value={countReason} onChange={e => setCountReason(e.target.value)} maxLength={500} placeholder="Count reason (applies to all corrections) *" />
             </div>
           </div>
 
@@ -269,56 +272,39 @@ export default function StockAdjustments() {
         </Modal>
       )}
 
-      {createModal && (
+      {pickModal && (
         <Modal
-          title="Submit Stock Adjustment"
-          onClose={() => setCreateModal(false)}
+          title="Adjust an Item"
+          onClose={() => setPickModal(false)}
           footer={
             <>
-              <button className="btn btn-secondary" onClick={() => setCreateModal(false)}>Cancel</button>
-              <button className="btn btn-primary" onClick={save} disabled={saving}>{saving ? 'Submitting…' : 'Submit for Approval'}</button>
+              <button className="btn btn-secondary" onClick={() => setPickModal(false)}>Cancel</button>
+              <button className="btn btn-primary" onClick={startAdjust} disabled={!pickId}>Next</button>
             </>
           }
         >
           <div className="form-group">
             <label className="form-label">Inventory Item *</label>
             <SearchSelect
-              value={form.inventoryItemId}
-              onChange={set('inventoryItemId')}
+              value={pickId}
+              onChange={e => setPickId(e.target.value)}
               placeholder="Search items…"
-              options={items.map(i => ({ value: i.id, label: i.name, sublabel: `${i.itemCode ? `${i.itemCode} · ` : ''}Current: ${i.quantityOnHand} ${i.unit}` }))}
+              options={items.filter(i => i.isActive !== false).map(i => ({ value: i.id, label: i.name, sublabel: `${i.itemCode ? `${i.itemCode} · ` : ''}Current: ${i.quantityOnHand} ${i.unit}` }))}
             />
-            {selectedItem && (
-              <div style={{ marginTop: 8, padding: '8px 12px', borderRadius: 8, background: 'var(--green-50)', border: '1px solid var(--green-200)', fontSize: 13, display: 'flex', gap: 20 }}>
-                <div><span style={{ color: 'var(--text-muted)' }}>Recorded Qty:</span> <strong>{selectedItem.quantityOnHand} {selectedItem.unit}</strong></div>
-                {variance !== null && (
-                  <div>
-                    <span style={{ color: 'var(--text-muted)' }}>Variance:</span>{' '}
-                    <strong style={{ color: variance === 0 ? 'inherit' : variance > 0 ? '#059669' : '#dc2626' }}>
-                      {variance > 0 ? '+' : ''}{variance} {selectedItem.unit}
-                    </strong>
-                  </div>
-                )}
-              </div>
-            )}
           </div>
-          <div className="form-group">
-            <label className="form-label">Physical Count *</label>
-            <input className="form-control" type="number" min="0" step="0.01" value={form.physicalCount} onChange={set('physicalCount')} required />
-          </div>
-          <div className="form-group">
-            <label className="form-label">Reason for Adjustment *</label>
-            <textarea className="form-control" value={form.reason} onChange={set('reason')} rows={3} placeholder="Explain the reason for discrepancy…" required />
-          </div>
-          <div className="alert alert-warning">
-            Adjustment requires supervisory approval before stock is updated.
+          <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            Tip: you can also adjust straight from the <strong>Adjust</strong> button on the Stock Items list.
           </div>
         </Modal>
       )}
 
+      {adjustItem && (
+        <AdjustQuantityModal item={adjustItem} onClose={() => setAdjustItem(null)} onDone={() => { load(); loadItems(); }} />
+      )}
+
       {approveModal && (
         <Modal
-          title={`Approve Inventory Correction — ${approveModal.itemName}`}
+          title={`Review Old Adjustment Request — ${approveModal.itemName}`}
           onClose={() => setApproveModal(null)}
           footer={
             <>

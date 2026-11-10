@@ -24,6 +24,10 @@ public class ProcurementRequestDto
     public DateTime UpdatedAt { get; set; }
     public DateTime? SubmittedAt { get; set; }
     public DateTime? ReleasedAt { get; set; }
+    // Proof of receipt by the Department Head.
+    public DateTime? ReceivedAt { get; set; }
+    public string? ReceivedByFullName { get; set; }
+    public string? ReceiptRemarks { get; set; }
     public IEnumerable<ProcurementRequestItemDto> Items { get; set; } = [];
     public IEnumerable<ProcurementApprovalDto> Approvals { get; set; } = [];
     public int? PurchaseOrderId { get; set; }

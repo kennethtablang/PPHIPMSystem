@@ -54,23 +54,27 @@ public class ProcurementService : IProcurementService
 
     // Still moving through the cycle — not yet finished, refused or withdrawn.
     private static bool IsOpen(ProcurementStatus status) => status is not (ProcurementStatus.Released
-        or ProcurementStatus.Delivered or ProcurementStatus.Rejected or ProcurementStatus.Cancelled);
+        or ProcurementStatus.Received or ProcurementStatus.Delivered or ProcurementStatus.Rejected or ProcurementStatus.Cancelled);
 
     // Notification titles for urgent requests carry the flag so they stand out
     // in the bell and in email subjects.
     private static string Flag(ProcurementRequest r, string title) => r.IsUrgent ? $"URGENT: {title}" : title;
 
+    // Split query: requests carry two collections (lines and approvals), and a
+    // single JOIN multiplies them into a row explosion that slowed every list.
     private IQueryable<ProcurementRequest> BaseQuery() =>
         _db.ProcurementRequests
+            .AsSplitQuery()
             .Include(r => r.Department)
             .Include(r => r.RequestedByUser)
+            .Include(r => r.ReceivedByUser)
             .Include(r => r.Items).ThenInclude(i => i.InventoryItem).ThenInclude(ii => ii.Category)
             .Include(r => r.Approvals).ThenInclude(a => a.ApproverUser)
             .Include(r => r.PurchaseOrder);
 
     public async Task<IEnumerable<ProcurementRequestDto>> GetAllAsync(string? status, int? departmentId, RequestType? type = null)
     {
-        var query = BaseQuery().AsQueryable();
+        var query = BaseQuery().AsNoTracking();
         if (type.HasValue)
             query = query.Where(r => r.Type == type.Value);
         if (!string.IsNullOrWhiteSpace(status) && Enum.TryParse<ProcurementStatus>(status, out var s))
@@ -85,8 +89,46 @@ public class ProcurementService : IProcurementService
 
     public async Task<ProcurementRequestDto?> GetByIdAsync(int id)
     {
-        var item = await BaseQuery().FirstOrDefaultAsync(r => r.Id == id);
+        var item = await BaseQuery().AsNoTracking().FirstOrDefaultAsync(r => r.Id == id);
         return item is null ? null : _mapper.Map<ProcurementRequestDto>(item);
+    }
+
+    // Revision 2: the Department Head confirms the released supplies actually
+    // arrived. Records who confirmed and when — the proof of receipt — and
+    // closes the request. Stock already moved at release; nothing changes here.
+    public async Task<ProcurementRequestDto?> ConfirmReceivedAsync(int id, string? remarks, string userId)
+    {
+        var request = await BaseQuery().FirstOrDefaultAsync(r => r.Id == id);
+        if (request is null) return null;
+
+        if (request.Type != RequestType.DepartmentSupply)
+            throw new InvalidOperationException("Only department supply requests are confirmed as received.");
+        if (request.Status == ProcurementStatus.Received)
+            throw new InvalidOperationException(
+                $"Already confirmed as received{(request.ReceivedAt is { } at ? $" on {at.ToLocalTime():MMM d, yyyy h:mm tt}" : "")}.");
+        if (request.Status != ProcurementStatus.Released)
+            throw new InvalidOperationException("Supplies can only be confirmed once they have been released to the department.");
+
+        var user = await _db.Users.FindAsync(userId)
+            ?? throw new InvalidOperationException("User not found.");
+
+        request.Status = ProcurementStatus.Received;
+        request.ReceivedAt = DateTime.UtcNow;
+        request.ReceivedByUserId = userId;
+        request.ReceiptRemarks = string.IsNullOrWhiteSpace(remarks) ? null : remarks.Trim();
+        request.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+
+        var who = $"{user.FirstName} {user.LastName}".Trim();
+        await _audit.LogAsync(userId, "ProcurementReceived", "ProcurementRequest", request.Id,
+            $"{request.RequestNumber} received by {who}" + (request.ReceiptRemarks is null ? "" : $": {request.ReceiptRemarks}"));
+        await _notifications.CreateForRoleAsync(UserRole.InventoryOfficer, NotificationType.General,
+            "Supplies Received",
+            $"{request.Department.Name} confirmed receipt of {request.RequestNumber} ({who})." +
+            (request.ReceiptRemarks is null ? "" : $" Remarks: {request.ReceiptRemarks}"),
+            request.Id, "ProcurementRequest");
+
+        return _mapper.Map<ProcurementRequestDto>(await BaseQuery().AsNoTracking().FirstAsync(r => r.Id == id));
     }
 
     // Validate department and item ids up front so a bad id is a 400, not an FK 500.
@@ -533,8 +575,21 @@ public class ProcurementService : IProcurementService
             await _audit.LogAsync(userId, "ProcurementReleased", "ProcurementRequest", request.Id, request.RequestNumber);
             await _notifications.CreateAsync(request.RequestedByUserId, NotificationType.ProcurementApproved,
                 "Supplies Released",
-                $"The items on {request.RequestNumber} were released and added to {request.Department.Name}'s stock.",
+                $"The items on {request.RequestNumber} were released and added to {request.Department.Name}'s stock. " +
+                "Please confirm once you have received them.",
                 request.Id, "ProcurementRequest");
+            // The requester may be a shared ward PC; the Department Head is
+            // the one who signs for the delivery.
+            var heads = await _db.Users
+                .Where(u => u.Role == UserRole.DepartmentHead && u.IsActive
+                            && u.DepartmentId == request.DepartmentId && u.Id != request.RequestedByUserId)
+                .Select(u => u.Id)
+                .ToListAsync();
+            foreach (var headId in heads)
+                await _notifications.CreateAsync(headId, NotificationType.ProcurementApproved,
+                    "Confirm Receipt of Supplies",
+                    $"{request.RequestNumber} was released to {request.Department.Name}. Confirm once the supplies arrive.",
+                    request.Id, "ProcurementRequest");
         }
         else if (notifyOnShortage)
         {

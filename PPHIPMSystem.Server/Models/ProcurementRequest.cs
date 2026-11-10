@@ -58,6 +58,20 @@ public class ProcurementRequest
     public DateTime? SubmittedAt { get; set; }
     public DateTime? ReleasedAt { get; set; }
 
+    // Proof of receipt: the Department Head confirms the released supplies
+    // physically arrived. Who confirmed and when are kept for the record.
+    public DateTime? ReceivedAt { get; set; }
+    public string? ReceivedByUserId { get; set; }
+    public ApplicationUser? ReceivedByUser { get; set; }
+
+    [MaxLength(500)]
+    public string? ReceiptRemarks { get; set; }
+
+    // Optimistic concurrency: two people approving / releasing the same
+    // request at once must not both succeed (that would issue stock twice).
+    [Timestamp]
+    public byte[]? RowVersion { get; set; }
+
     public ICollection<ProcurementRequestItem> Items { get; set; } = [];
     public ICollection<ProcurementApproval> Approvals { get; set; } = [];
     public PurchaseOrder? PurchaseOrder { get; set; }

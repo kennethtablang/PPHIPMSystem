@@ -679,7 +679,7 @@ namespace PPHIPMSystem.Server.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("UserId");
+                    b.HasIndex("UserId", "IsRead", "CreatedAt");
 
                     b.ToTable("Notifications");
                 });
@@ -751,6 +751,16 @@ namespace PPHIPMSystem.Server.Data.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
+                    b.Property<string>("ReceiptRemarks")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime?>("ReceivedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ReceivedByUserId")
+                        .HasColumnType("nvarchar(450)");
+
                     b.Property<DateTime?>("ReleasedAt")
                         .HasColumnType("datetime2");
 
@@ -769,6 +779,11 @@ namespace PPHIPMSystem.Server.Data.Migrations
                     b.Property<string>("RequestedByUserId")
                         .IsRequired()
                         .HasColumnType("nvarchar(450)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
 
                     b.Property<string>("Section")
                         .HasMaxLength(150)
@@ -794,10 +809,14 @@ namespace PPHIPMSystem.Server.Data.Migrations
 
                     b.HasIndex("DepartmentId");
 
+                    b.HasIndex("ReceivedByUserId");
+
                     b.HasIndex("RequestNumber")
                         .IsUnique();
 
                     b.HasIndex("RequestedByUserId");
+
+                    b.HasIndex("Type", "Status");
 
                     b.ToTable("ProcurementRequests");
                 });
@@ -1102,6 +1121,8 @@ namespace PPHIPMSystem.Server.Data.Migrations
 
                     b.HasIndex("InventoryItemId");
 
+                    b.HasIndex("RequestedAt");
+
                     b.HasIndex("RequestedByUserId");
 
                     b.ToTable("StockAdjustments");
@@ -1176,6 +1197,8 @@ namespace PPHIPMSystem.Server.Data.Migrations
                     b.HasIndex("InventoryItemId");
 
                     b.HasIndex("ItemBatchId");
+
+                    b.HasIndex("MovementDate");
 
                     b.HasIndex("PerformedByUserId");
 
@@ -1384,6 +1407,11 @@ namespace PPHIPMSystem.Server.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("PPHIPMSystem.Server.Models.ApplicationUser", "ReceivedByUser")
+                        .WithMany()
+                        .HasForeignKey("ReceivedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("PPHIPMSystem.Server.Models.ApplicationUser", "RequestedByUser")
                         .WithMany("ProcurementRequests")
                         .HasForeignKey("RequestedByUserId")
@@ -1391,6 +1419,8 @@ namespace PPHIPMSystem.Server.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Department");
+
+                    b.Navigation("ReceivedByUser");
 
                     b.Navigation("RequestedByUser");
                 });

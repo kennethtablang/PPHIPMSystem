@@ -8,6 +8,8 @@ import Modal from '../../components/common/Modal';
 import Pagination, { usePagination } from '../../components/common/Pagination';
 import { toast } from '../../components/common/Toast';
 import { useAuth } from '../../context/AuthContext';
+import { markSeen } from '../../api/notifications';
+import useOpenParam from '../../utils/useOpenParam';
 
 const peso = n => `₱${Number(n ?? 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 // Delivery dates are calendar days ("2026-08-18"), not instants — format them
@@ -121,9 +123,17 @@ export default function PurchaseOrders() {
   }, []);
 
   const openView = async id => {
-    const { data } = await getPurchaseOrder(id);
-    setViewModal(data);
+    try {
+      const { data } = await getPurchaseOrder(id);
+      setViewModal(data);
+      markSeen('PurchaseOrder', id);
+    } catch {
+      toast.error('That purchase order could not be opened.');
+    }
   };
+
+  // Notification deep link: /purchase-orders?open=<id>.
+  useOpenParam(id => { openView(id); });
 
   // Live PO total from the entered unit costs.
   const genTotal = genForm.itemCosts.reduce((s, c) => s + (c.quantityRequested * (c.unitCost || 0)), 0);

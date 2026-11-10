@@ -103,19 +103,37 @@ public class StockMovementService : IStockMovementService
 
         var before = item.QuantityOnHand;
         decimal after;
+        ItemBatch? receivedBatch = null;
 
         switch (dto.MovementType)
         {
             case StockMovementType.Receipt:
+                after = before + dto.Quantity;
+                // A manual receipt is a delivery like any other: it gets its own
+                // batch so Batches & Expiry and FEFO issuance see the stock, and
+                // a void takes it back off that same batch.
+                receivedBatch = new ItemBatch
+                {
+                    InventoryItemId = item.Id,
+                    Quantity = dto.Quantity,
+                    RemainingQuantity = dto.Quantity,
+                    PurchaseOrderId = dto.PurchaseOrderId,
+                    ReceivedDate = DateTime.UtcNow
+                };
+                _db.ItemBatches.Add(receivedBatch);
+                break;
             case StockMovementType.Return:
                 after = before + dto.Quantity;
+                // Returned units go back onto the batches they were issued from.
+                await BatchLedger.RestoreFefoAsync(_db, dto.InventoryItemId, dto.Quantity);
                 break;
             case StockMovementType.Issuance:
             case StockMovementType.Disposal:
                 if (dto.Quantity > before)
-                    throw new InvalidOperationException("Insufficient stock.");
+                    throw new InvalidOperationException(
+                        $"Insufficient stock: only {before:0.##} {item.Unit} of {item.Name} on hand.");
                 after = before - dto.Quantity;
-                await ConsumeBatchesFefoAsync(dto.InventoryItemId, dto.Quantity);
+                await BatchLedger.ConsumeFefoAsync(_db, dto.InventoryItemId, dto.Quantity);
                 break;
             default:
                 // Adjustments go through the stock-adjustment approval flow,
@@ -152,6 +170,7 @@ public class StockMovementService : IStockMovementService
             PerformedByUserId = userId,
             PurchaseOrderId = dto.PurchaseOrderId,
             DepartmentId = dto.DepartmentId,
+            ItemBatch = receivedBatch,
             MovementDate = DateTime.UtcNow
         };
         _db.StockMovements.Add(movement);
@@ -357,6 +376,11 @@ public class StockMovementService : IStockMovementService
                             "been issued or disposed. Void those movements first, or record a stock adjustment.");
                     batch.RemainingQuantity -= qty;
                 }
+                else if (original.MovementType == StockMovementType.Return)
+                {
+                    // The return put stock back on batches; take it back off.
+                    await BatchLedger.ConsumeFefoAsync(_db, original.InventoryItemId, qty);
+                }
                 after = before - qty;
                 break;
             case StockMovementType.Issuance:
@@ -366,7 +390,7 @@ public class StockMovementService : IStockMovementService
                 if (batch is not null)
                     batch.RemainingQuantity = Math.Min(batch.Quantity, batch.RemainingQuantity + qty);
                 else
-                    await RestoreBatchesFefoAsync(original.InventoryItemId, qty);
+                    await BatchLedger.RestoreFefoAsync(_db, original.InventoryItemId, qty);
                 break;
             case StockMovementType.DepartmentConsumption:
             case StockMovementType.DepartmentTransfer:
@@ -447,8 +471,12 @@ public class StockMovementService : IStockMovementService
     // row on first issuance and refusing to draw below zero.
     private async Task AdjustDepartmentStockAsync(Department department, InventoryItem item, decimal delta)
     {
-        var row = await _db.DepartmentStocks.FirstOrDefaultAsync(d =>
-            d.DepartmentId == department.Id && d.InventoryItemId == item.Id);
+        // Local first: a row added earlier in this same unit of work isn't in
+        // the database yet, and adding a second one would break the unique index.
+        var row = _db.DepartmentStocks.Local.FirstOrDefault(d =>
+                      d.DepartmentId == department.Id && d.InventoryItemId == item.Id)
+                  ?? await _db.DepartmentStocks.FirstOrDefaultAsync(d =>
+                      d.DepartmentId == department.Id && d.InventoryItemId == item.Id);
 
         if (row is null)
         {
@@ -470,51 +498,5 @@ public class StockMovementService : IStockMovementService
 
         row.Quantity += delta;
         row.UpdatedAt = DateTime.UtcNow;
-    }
-
-    // Reverse of ConsumeBatchesFefoAsync: put voided stock back onto the batches
-    // it was most likely drawn from — earliest-expiring first, never past a
-    // batch's original received quantity. Any surplus with no batch to hold it
-    // simply lifts QuantityOnHand (mirroring pre-batch stock on the way out).
-    private async Task RestoreBatchesFefoAsync(int inventoryItemId, decimal quantity)
-    {
-        var batches = await _db.ItemBatches
-            .Where(b => b.InventoryItemId == inventoryItemId && b.RemainingQuantity < b.Quantity)
-            .OrderBy(b => b.ExpirationDate == null)   // dated batches first
-            .ThenBy(b => b.ExpirationDate)
-            .ThenBy(b => b.ReceivedDate)
-            .ToListAsync();
-
-        var remaining = quantity;
-        foreach (var batch in batches)
-        {
-            if (remaining <= 0) break;
-            var restore = Math.Min(batch.Quantity - batch.RemainingQuantity, remaining);
-            batch.RemainingQuantity += restore;
-            remaining -= restore;
-        }
-    }
-
-    // FEFO (First-Expire-First-Out): consume issued/disposed stock from the
-    // batch expiring soonest so RemainingQuantity tracks the physical shelf.
-    // Stock that predates batch tracking simply has no batch to consume —
-    // any shortfall is ignored rather than blocking the movement.
-    private async Task ConsumeBatchesFefoAsync(int inventoryItemId, decimal quantity)
-    {
-        var batches = await _db.ItemBatches
-            .Where(b => b.InventoryItemId == inventoryItemId && b.RemainingQuantity > 0)
-            .OrderBy(b => b.ExpirationDate == null)   // dated batches first
-            .ThenBy(b => b.ExpirationDate)
-            .ThenBy(b => b.ReceivedDate)
-            .ToListAsync();
-
-        var remaining = quantity;
-        foreach (var batch in batches)
-        {
-            if (remaining <= 0) break;
-            var take = Math.Min(batch.RemainingQuantity, remaining);
-            batch.RemainingQuantity -= take;
-            remaining -= take;
-        }
     }
 }

@@ -170,6 +170,27 @@ public class ProcurementController : ControllerBase
         }
     }
 
+    // Revision 2: the Department Head signs for released supplies.
+    [HttpPatch("{id}/confirm-received")]
+    [Authorize(Roles = "DepartmentHead")]
+    public async Task<IActionResult> ConfirmReceived(int id, [FromBody] ConfirmReceivedDto? dto)
+    {
+        var existing = await _procurement.GetByIdAsync(id);
+        if (existing is null) return NotFound();
+        if (existing.DepartmentId != OwnDepartmentId) return Forbid();
+
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        try
+        {
+            var result = await _procurement.ConfirmReceivedAsync(id, dto?.Remarks, userId);
+            return result is null ? NotFound() : Ok(result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     [HttpPatch("{id}/approve")]
     [Authorize(Roles = "SuperAdmin,HospitalAdministrator,InventoryOfficer")]
     public async Task<IActionResult> Approve(int id, [FromBody] ApproveProcurementDto dto)

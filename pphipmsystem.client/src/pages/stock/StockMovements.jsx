@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { MdAdd, MdTrendingUp, MdUndo } from 'react-icons/md';
 import { getMovements, createMovement, voidMovement } from '../../api/stockMovements';
+import StockHistoryTabs from './StockHistoryTabs';
 import { getItems } from '../../api/inventory';
 import { getDepartments } from '../../api/departments';
 import Modal from '../../components/common/Modal';
@@ -132,8 +133,8 @@ export default function StockMovements() {
     <div>
       <div className="page-header">
         <div>
-          <h1 className="page-title">Stock Movements</h1>
-          <p className="page-subtitle">Record and view all stock receipts, issuances, returns and disposals</p>
+          <h1 className="page-title">Stock History</h1>
+          <p className="page-subtitle">Every receipt, issuance, return and disposal — where each quantity came from and where it went</p>
         </div>
         {canCreate && (
           <button className="btn btn-primary" onClick={() => { setForm(BLANK); setModal(true); }}>
@@ -141,6 +142,8 @@ export default function StockMovements() {
           </button>
         )}
       </div>
+
+      <StockHistoryTabs />
 
       {/* Quick stats */}
       <div className="grid-stat" style={{ marginBottom: 20 }}>

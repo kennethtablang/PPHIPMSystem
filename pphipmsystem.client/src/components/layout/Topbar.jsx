@@ -1,25 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate, useLocation, Link } from 'react-router-dom';
-import { MdNotifications, MdRefresh, MdLogout, MdPerson } from 'react-icons/md';
-import { getUnreadCount } from '../../api/notifications';
-import { signalRService } from '../../api/signalrService';
+import { useLocation, Link } from 'react-router-dom';
+import { MdRefresh, MdLogout, MdPerson } from 'react-icons/md';
 import { useAuth } from '../../context/AuthContext';
 import GlobalSearch from './GlobalSearch';
-import { toast } from '../common/Toast';
-import { getAppPrefs } from '../../utils/appPrefs';
-import { playNotificationSound } from '../../utils/sound';
-import { NOTIFICATIONS_CHANGED } from '../../api/notifications';
+import NotificationBell from './NotificationBell';
 
 const TITLES = {
   '/dashboard': 'Dashboard',
   '/inventory': 'Inventory Items',
-  '/materials': 'Materials List',
+  '/materials': 'Available Supplies',
   '/batches': 'Batches & Expiry',
   '/department-stock': 'Department Stock',
-  '/stock-movements': 'Stock Movements',
-  '/stock-adjustments': 'Stock Adjustments',
-  '/procurement': 'Procurement Requests',
-  '/department-requests': 'Department Requests',
+  '/stock-movements': 'Stock History',
+  '/stock-adjustments': 'Stock History',
+  '/procurement': 'Supply & Purchase Requests',
+  '/department-requests': 'My Requests',
   '/purchase-orders': 'Purchase Orders',
   '/forecast': 'Demand Forecasting',
   '/reports': 'Reports',
@@ -35,50 +30,11 @@ const TITLES = {
 export default function Topbar() {
   const { user, logout } = useAuth();
   const location = useLocation();
-  const navigate = useNavigate();
-  const [unread, setUnread] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
   const [confirmOut, setConfirmOut] = useState(false);
   const menuRef = useRef(null);
 
   const title = TITLES[location.pathname] ?? 'IPMS';
-
-  // The badge only counts up from SignalR, so re-sync with the server whenever
-  // notifications are marked read (NotificationsPage fires NOTIFICATIONS_CHANGED).
-  useEffect(() => {
-    const refresh = () => getUnreadCount().then(r => setUnread(r.data.count)).catch(() => {});
-    window.addEventListener(NOTIFICATIONS_CHANGED, refresh);
-    return () => window.removeEventListener(NOTIFICATIONS_CHANGED, refresh);
-  }, []);
-
-  useEffect(() => {
-    getUnreadCount().then(r => setUnread(r.data.count)).catch(() => {});
-
-    signalRService.startNotificationConnection();
-
-    const handleNotification = (notif) => {
-      setUnread(u => u + 1);
-
-      const prefs = getAppPrefs();
-      if (prefs.notificationSound) playNotificationSound();
-
-      // Respect the user's "notification pop-ups" preference; the badge still updates.
-      if (!prefs.notificationToasts) return;
-
-      const type = notif.type;
-      const message = `${notif.title}: ${notif.message}`;
-
-      if (type.includes('Warning') || type.includes('Rejected')) toast.warning(message);
-      else if (type.includes('Expired')) toast.error(message);
-      else toast.info(message);
-    };
-
-    signalRService.onNotificationReceived(handleNotification);
-
-    return () => {
-      signalRService.offNotificationReceived(handleNotification);
-    };
-  }, []);
 
   useEffect(() => {
     const handler = e => {
@@ -120,26 +76,7 @@ export default function Topbar() {
           >
             <MdRefresh size={18} />
           </button>
-          <button
-            className="btn btn-ghost btn-icon"
-            style={{ position: 'relative' }}
-            onClick={() => navigate('/notifications')}
-            title="Notifications"
-          >
-            <MdNotifications size={20} />
-            {unread > 0 && (
-              <span style={{
-                position: 'absolute', top: 2, right: 2,
-                width: 16, height: 16, borderRadius: '50%',
-                background: '#ef4444', color: '#fff',
-                fontSize: 9, fontWeight: 700,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                border: '2px solid #fff',
-              }}>
-                {unread > 9 ? '9+' : unread}
-              </span>
-            )}
-          </button>
+          <NotificationBell />
 
           {/* User chip — clickable */}
           <div ref={menuRef} style={{ position: 'relative' }}>

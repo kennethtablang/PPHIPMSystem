@@ -8,6 +8,8 @@ import Modal from '../../components/common/Modal';
 import SearchSelect from '../../components/common/SearchSelect';
 import { toast } from '../../components/common/Toast';
 import { useAuth } from '../../context/AuthContext';
+import { markSeen } from '../../api/notifications';
+import useOpenParam from '../../utils/useOpenParam';
 
 const BLANK = { inventoryItemId: '', lotNumber: '', quantity: '', expirationDate: '', unitCost: '' };
 const DISPOSE_REASONS = [
@@ -38,6 +40,14 @@ export default function ItemBatches() {
   const [editForm, setEditForm] = useState({ lotNumber: '', expirationDate: '' });
   // QR label sheet for the batches currently shown.
   const [labelModal, setLabelModal] = useState(false);
+  // Batch highlighted after a notification deep link (/batches?open=<id>).
+  const [focusId, setFocusId] = useState(null);
+  useOpenParam(id => {
+    setView('all');
+    setFocusId(id);
+    markSeen('ItemBatch', id);
+    setTimeout(() => document.getElementById(`batch-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 600);
+  });
   // Bulk write-off of everything past expiry + certificate download.
   const [bulkModal, setBulkModal] = useState(false);
   const [bulkReason, setBulkReason] = useState('Expired — past expiration date');
@@ -201,7 +211,7 @@ export default function ItemBatches() {
                   {view === 'all' ? 'No active batches found.' : `No batches expiring within ${warningDays} days.`}
                 </td></tr>
               ) : batches.map(b => (
-                <tr key={b.id}>
+                <tr key={b.id} id={`batch-${b.id}`} className={focusId === b.id ? 'row-selected' : undefined}>
                   <td style={{ fontWeight: 500 }}>{b.itemName}</td>
                   <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{b.lotNumber ?? '—'}</td>
                   <td>{b.quantity}</td>

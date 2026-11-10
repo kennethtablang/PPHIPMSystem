@@ -3,7 +3,9 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { QRCodeSVG } from 'qrcode.react';
 import { MdAdd, MdVisibility, MdSchedule, MdFileDownload, MdQrCode2, MdBalance, MdOutbox, MdWarning, MdEdit, MdCancel, MdSend, MdLocalShipping } from 'react-icons/md';
 import { exportRisForm, exportPurchaseRequestForm } from '../../api/reports';
-import { getRequests, approveRequest, submitRequest, releaseRequest, getAllocation, cancelRequest } from '../../api/procurement';
+import { getRequests, getRequest, approveRequest, submitRequest, releaseRequest, getAllocation, cancelRequest } from '../../api/procurement';
+import { markSeen } from '../../api/notifications';
+import useOpenParam from '../../utils/useOpenParam';
 import { getItems } from '../../api/inventory';
 import AttachmentsPanel from '../../components/common/AttachmentsPanel';
 import LabelPrintModal from '../../components/common/LabelPrintModal';
@@ -60,6 +62,9 @@ export default function ProcurementList() {
   // endpoint) and the officer's per-line allocation for this request.
   const [allocInfo, setAllocInfo] = useState({});
   const [lineAlloc, setLineAlloc] = useState({});
+  // True while the stock check for the open review is loading — the amounts
+  // must not be shown (or approved) before they exist.
+  const [allocLoading, setAllocLoading] = useState(false);
   const [boardOpen, setBoardOpen] = useState(false);
   const [shortCount, setShortCount] = useState(0);
   const [saving, setSaving] = useState(false);
@@ -111,12 +116,29 @@ export default function ProcurementList() {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: reload only when these inputs change
   }, [location.state]);
 
+  // Opening a request counts as seeing its notifications (clears the badge).
+  const openView = r => { setViewModal(r); markSeen('ProcurementRequest', r.id); };
+
+  // Notification deep link: /procurement?open=<id> switches to the right tab
+  // and opens the request.
+  useOpenParam(id => {
+    getRequest(id)
+      .then(res => {
+        if (res.data.type !== tab) { setTab(res.data.type); setStatusFilter(''); }
+        openView(res.data);
+      })
+      .catch(() => toast.error('That request could not be opened — it may have been removed.'));
+  });
+
   const openApprove = r => {
+    setViewModal(null);
+    markSeen('ProcurementRequest', r.id);
     setApproveModal(r);
     setApproveForm({ action: 'Approve', remarks: '' });
     setAllocInfo({});
     setLineAlloc({});
     if (r.type !== 'Replenishment' && INVENTORY_STAGE.includes(r.status)) {
+      setAllocLoading(true);
       getAllocation().then(res => {
         const byItem = Object.fromEntries(res.data.map(i => [i.inventoryItemId, i]));
         setAllocInfo(byItem);
@@ -130,7 +152,8 @@ export default function ProcurementList() {
         setLineAlloc(init);
       }).catch(() => {
         setLineAlloc(Object.fromEntries(r.items.map(l => [l.id, String(l.quantityApproved ?? l.quantityRequested)])));
-      });
+        toast.warning("Could not load other departments' requests — amounts default to the full request.");
+      }).finally(() => setAllocLoading(false));
     }
   };
 
@@ -142,7 +165,9 @@ export default function ProcurementList() {
     const others = info ? info.totalRequested - line.quantityRequested : 0;
     return { info, mine, others };
   };
-  const applyToAll = pick => setLineAlloc(Object.fromEntries(approveModal.items.map(l => [l.id, String(pick(l))])));
+  // Back to the system's suggestion: the full request when stock covers
+  // everyone, otherwise each department's fair share of what is available.
+  const resetToSuggested = () => setLineAlloc(Object.fromEntries(approveModal.items.map(l => [l.id, String(lineContext(l).mine?.fairShare ?? l.quantityRequested)])));
 
   const handleRelease = async r => {
     setSaving(true);
@@ -158,13 +183,14 @@ export default function ProcurementList() {
     }
   };
 
-  const submitApproval = async () => {
-    if (approveForm.action !== 'Approve' && !approveForm.remarks.trim()) {
-      toast.error('Remarks are required when rejecting or returning a request.');
+  const submitApproval = async action => {
+    if (action !== 'Approve' && !approveForm.remarks.trim()) {
+      toast.error(`Add remarks so the department knows why you ${action === 'Reject' ? 'rejected' : 'returned'} it.`);
       return;
     }
+    setApproveForm(p => ({ ...p, action }));
     let allocations;
-    if (isInventoryReview && approveForm.action === 'Approve') {
+    if (isInventoryReview && action === 'Approve') {
       allocations = approveModal.items.map(l => ({ procurementRequestItemId: l.id, quantityApproved: +lineAlloc[l.id] }));
       const bad = approveModal.items.find(l => !(+lineAlloc[l.id] >= 0) || +lineAlloc[l.id] > l.quantityRequested);
       if (bad) { toast.error(`${bad.itemName}: allocation must be between 0 and ${bad.quantityRequested}.`); return; }
@@ -172,12 +198,12 @@ export default function ProcurementList() {
     }
     setSaving(true);
     try {
-      const res = await approveRequest(approveModal.id, { action: approveForm.action, remarks: approveForm.remarks, allocations });
+      const res = await approveRequest(approveModal.id, { action, remarks: approveForm.remarks, allocations });
       const pastTense = { Approve: 'Approved', Reject: 'Rejected', Return: 'Returned' };
       if (res.data.status === 'Released') toast.success(`Approved and released — stock moved to ${res.data.departmentName}.`);
       else if (isPrReview && res.data.status === 'FullyApproved') toast.success('Purchase Request approved — Procurement can now generate the purchase order.');
       else if (res.data.status === 'FullyApproved') toast.warning('Approved, but stock is short — Procurement has been notified to replenish.');
-      else toast.success(`Request ${pastTense[approveForm.action] ?? approveForm.action + 'd'}.`);
+      else toast.success(`Request ${pastTense[action] ?? action + 'd'}.`);
       setApproveModal(null);
       refresh();
     } catch (e) { toast.error(e.response?.data?.message ?? 'Failed.'); }
@@ -233,6 +259,7 @@ export default function ProcurementList() {
     { value: 'ApprovedByInventoryOfficer', label: 'Admin Approval' },
     { value: 'FullyApproved', label: 'Awaiting Stock' },
     { value: 'Released', label: 'Released' },
+    { value: 'Received', label: 'Received' },
     { value: 'ReturnedForRevision', label: 'Returned' },
     { value: 'Rejected', label: 'Rejected' },
     { value: 'Cancelled', label: 'Cancelled' },
@@ -345,7 +372,7 @@ export default function ProcurementList() {
                   <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{new Date(r.requestedAt).toLocaleDateString('en-PH')}</td>
                   <td>
                     <div style={{ display: 'flex', gap: 4 }}>
-                      <button className="btn btn-ghost btn-sm" onClick={() => setViewModal(r)}>
+                      <button className="btn btn-ghost btn-sm" onClick={() => openView(r)}>
                         <MdVisibility size={14} /> View
                       </button>
                       {r.type === 'Replenishment' ? (
@@ -452,12 +479,34 @@ export default function ProcurementList() {
               >
                 <MdFileDownload size={15} /> PR Form
               </button>
-              {canInventory && viewModal.status === 'FullyApproved' && viewModal.type !== 'Replenishment' && (
-                <button className="btn btn-primary" onClick={() => handleRelease(viewModal)} disabled={saving} style={{ marginLeft: 'auto' }}>
-                  <MdOutbox size={15} /> Release
-                </button>
+              <button className="btn btn-secondary" onClick={() => setViewModal(null)} style={{ marginLeft: 'auto' }}>Close</button>
+              {/* The one next step for this user, so a notification is one click from acting. */}
+              {viewModal.type === 'Replenishment' ? (
+                <>
+                  {isAdmin && INVENTORY_STAGE.includes(viewModal.status) && (
+                    <button className="btn btn-primary" onClick={() => openApprove(viewModal)}>Chief Approval</button>
+                  )}
+                  {viewModal.status === 'FullyApproved' && ['SuperAdmin', 'HospitalAdministrator', 'ProcurementStaff'].includes(user?.role) && (
+                    <button className="btn btn-primary" onClick={() => navigate('/purchase-orders', { state: { generateFor: viewModal.id } })}>
+                      <MdLocalShipping size={15} /> Create PO
+                    </button>
+                  )}
+                </>
+              ) : (
+                <>
+                  {canInventory && INVENTORY_STAGE.includes(viewModal.status) && (
+                    <button className="btn btn-primary" onClick={() => openApprove(viewModal)}>Review &amp; Allocate</button>
+                  )}
+                  {isAdmin && viewModal.status === 'ApprovedByInventoryOfficer' && (
+                    <button className="btn btn-primary" onClick={() => openApprove(viewModal)}>Final Approve</button>
+                  )}
+                  {canInventory && viewModal.status === 'FullyApproved' && (
+                    <button className="btn btn-primary" onClick={() => handleRelease(viewModal)} disabled={saving}>
+                      <MdOutbox size={15} /> Release
+                    </button>
+                  )}
+                </>
               )}
-              <button className="btn btn-secondary" onClick={() => setViewModal(null)} style={viewModal.status === 'FullyApproved' && canInventory && viewModal.type !== 'Replenishment' ? undefined : { marginLeft: 'auto' }}>Close</button>
             </>
           }
         >
@@ -520,16 +569,22 @@ export default function ProcurementList() {
       {/* Approve Modal */}
       {approveModal && (
         <Modal
-          title={`${isPrReview ? 'Chief Approval — Purchase Request' : isInventoryReview ? 'Inventory Review' : 'Final Approval'}: ${approveModal.requestNumber} — ${approveModal.departmentName}`}
+          title={`${isPrReview ? 'Chief Approval' : isInventoryReview ? 'Review Request' : 'Final Approval'}: ${approveModal.requestNumber} — ${approveModal.departmentName}`}
           onClose={() => setApproveModal(null)}
-          size={isInventoryReview || isPrReview || approveModal.status === 'ApprovedByInventoryOfficer' ? 'modal-xl' : ''}
+          size={isPrReview || approveModal.status === 'ApprovedByInventoryOfficer' ? 'modal-xl' : isInventoryReview ? 'modal-lg' : ''}
           footer={
             <>
-              <button className="btn btn-secondary" onClick={() => setApproveModal(null)}>Cancel</button>
-              <button
-                className={`btn ${approveForm.action === 'Approve' ? 'btn-primary' : 'btn-danger'}`}
-                onClick={submitApproval} disabled={saving}
-              >{saving ? 'Processing…' : approveForm.action}</button>
+              <button className="btn btn-secondary" onClick={() => setApproveModal(null)} disabled={saving}>Cancel</button>
+              <span style={{ flex: 1 }} />
+              <button className="btn btn-secondary" onClick={() => submitApproval('Return')} disabled={saving} title="Send back to the requester to revise">
+                {saving && approveForm.action === 'Return' ? 'Returning…' : 'Return for Revision'}
+              </button>
+              <button className="btn btn-danger" onClick={() => submitApproval('Reject')} disabled={saving}>
+                {saving && approveForm.action === 'Reject' ? 'Rejecting…' : 'Reject'}
+              </button>
+              <button className="btn btn-primary" onClick={() => submitApproval('Approve')} disabled={saving || (isInventoryReview && allocLoading)}>
+                {saving && approveForm.action === 'Approve' ? 'Approving…' : 'Approve'}
+              </button>
             </>
           }
         >
@@ -539,80 +594,91 @@ export default function ProcurementList() {
               <div style={{ fontSize: 11, marginTop: 4 }}>If the urgency is not justified, return the request with your remarks.</div>
             </div>
           )}
-          {isInventoryReview && (
-            <div style={{ marginBottom: 14 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                <label className="form-label" style={{ margin: 0, flex: 1 }}>Stock Check &amp; Allocation</label>
-                <button className="btn btn-secondary btn-sm" onClick={() => applyToAll(l => lineContext(l).mine?.fairShare ?? l.quantityRequested)}>
-                  <MdBalance size={14} /> Fair Share
-                </button>
-                <button className="btn btn-secondary btn-sm" onClick={() => applyToAll(l => l.quantityRequested)}>Full Request</button>
-              </div>
-              {approveModal.items.some(l => lineContext(l).info?.isShort) && (
-                <div className="alert alert-warning" style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 12 }}>
-                  <MdWarning size={16} style={{ flexShrink: 0, marginTop: 1 }} />
-                  <span>
-                    Other departments are also waiting on some of these items and there isn't enough for everyone.
-                    Fair share gives each request a proportional cut of what's available; use <strong>Stock Allocation</strong> to balance all departments at once.
-                  </span>
+          {isInventoryReview && allocLoading && (
+            <div className="loading-center" style={{ padding: '28px 0' }}>
+              <div className="spinner" />
+              <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>Checking stock and other departments' requests…</span>
+            </div>
+          )}
+
+          {isInventoryReview && !allocLoading && (() => {
+            // Per line: how much to give and a plain-language note on why.
+            const rows = approveModal.items.map(l => {
+              const { info, mine, others } = lineContext(l);
+              const live = itemMap[String(l.inventoryItemId)];
+              const available = info?.available ?? live?.quantityOnHand ?? 0;
+              const give = +lineAlloc[l.id] || 0;
+              const suggested = mine?.fairShare ?? l.quantityRequested;
+              return { l, info, others, available, give, suggested, toBuy: Math.max(0, give - available) };
+            });
+            const shared = rows.some(r => r.info?.isShort && r.others > 0);
+            const changed = rows.some(r => r.give !== r.suggested);
+            const full = rows.filter(r => r.give >= r.l.quantityRequested).length;
+            return (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <label className="form-label" style={{ margin: 0, flex: 1 }}>How much to give</label>
+                  {changed && <button className="btn btn-ghost btn-sm" onClick={resetToSuggested}>Reset to suggested</button>}
                 </div>
-              )}
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Item</th>
-                      <th>Requested</th>
-                      <th>Available</th>
-                      <th>Other Requests</th>
-                      <th>Fair Share</th>
-                      <th style={{ width: 110 }}>Allocate</th>
-                      <th>Remaining Stock</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {approveModal.items.map(l => {
-                      const { info, mine, others } = lineContext(l);
-                      const live = itemMap[String(l.inventoryItemId)];
-                      const available = info?.available ?? live?.quantityOnHand ?? 0;
-                      const allocated = +lineAlloc[l.id] || 0;
-                      const remaining = available - allocated;
-                      return (
+                {shared && (
+                  <div className="alert alert-warning" style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12.5 }}>
+                    <MdWarning size={16} style={{ flexShrink: 0 }} />
+                    <span>Not enough stock for every department, so the amounts below are split fairly. You can change them.</span>
+                  </div>
+                )}
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Item</th>
+                        <th>Requested</th>
+                        <th title="On hand, minus stock already promised to approved requests that haven't been released">Available</th>
+                        <th style={{ width: 230 }}>Give</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {rows.map(({ l, info, others, available, give, suggested, toBuy }) => (
                         <tr key={l.id}>
                           <td>
                             <strong>{l.itemName}</strong> <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>({l.unit})</span>
-                            {info?.isShort && <div><span className="badge badge-amber">Short</span></div>}
                           </td>
                           <td style={{ fontWeight: 600 }}>{qty(l.quantityRequested)}</td>
-                          <td title={info?.reserved ? `${qty(info.quantityOnHand)} on hand − ${qty(info.reserved)} reserved for approved requests` : undefined}>
-                            {qty(available)}{info?.reserved > 0 && <span style={{ fontSize: 10, color: 'var(--text-muted)' }}> *</span>}
-                          </td>
-                          <td style={{ color: others > 0 ? 'var(--amber-600)' : 'var(--text-muted)' }}>
-                            {others > 0 ? `${qty(others)} (${info.lines.length - 1} dept)` : '—'}
-                          </td>
-                          <td style={{ color: 'var(--text-muted)' }}>{mine ? qty(mine.fairShare) : '—'}</td>
+                          <td>{qty(available)}</td>
                           <td>
-                            <input
-                              className="form-control" type="number" min="0" max={l.quantityRequested} step="1"
-                              value={lineAlloc[l.id] ?? ''}
-                              onChange={e => setLineAlloc(p => ({ ...p, [l.id]: e.target.value }))}
-                              style={{ padding: '6px 8px', borderColor: allocated < l.quantityRequested ? 'var(--amber-500)' : undefined }}
-                            />
-                          </td>
-                          <td style={{ fontWeight: 600, color: remaining < 0 ? 'var(--red-500)' : undefined }}>
-                            {qty(remaining)}{remaining < 0 && <div style={{ fontSize: 10 }}>must be procured</div>}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <input
+                                className="form-control" type="number" min="0" max={l.quantityRequested} step="1"
+                                value={lineAlloc[l.id] ?? ''}
+                                onChange={e => setLineAlloc(p => ({ ...p, [l.id]: e.target.value }))}
+                                style={{ padding: '6px 8px', width: 90 }}
+                              />
+                              <span className={`badge ${give >= l.quantityRequested ? 'badge-green' : give > 0 ? 'badge-amber' : 'badge-red'}`}>
+                                {give >= l.quantityRequested ? 'Full' : give > 0 ? 'Partial' : 'None'}
+                              </span>
+                            </div>
+                            <div style={{ fontSize: 11, marginTop: 4, color: toBuy > 0 ? 'var(--red-500)' : 'var(--text-muted)' }}>
+                              {toBuy > 0
+                                ? `${qty(toBuy)} more must be bought — release waits for stock`
+                                : info?.isShort && others > 0
+                                  ? `Shared with ${info.lines.length - 1} other dept · fair share ${qty(suggested)}`
+                                  : give < l.quantityRequested && available < l.quantityRequested
+                                    ? `Only ${qty(available)} available`
+                                    : 'Enough stock'}
+                            </div>
                           </td>
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 8 }}>
+                  {full === rows.length
+                    ? 'Every item will be given in full.'
+                    : `${full} of ${rows.length} item(s) in full — the department is told which quantities were reduced.`}
+                </div>
               </div>
-              <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 6 }}>
-                Available excludes stock already allocated to approved requests that haven't been released (*). The department is told when a quantity is reduced.
-              </div>
-            </div>
-          )}
+            );
+          })()}
 
           {isPrReview && (
             <div style={{ marginBottom: 14 }}>
@@ -640,18 +706,8 @@ export default function ProcurementList() {
           })()}
 
           <div className="form-group">
-            <label className="form-label">Action</label>
-            <div style={{ display: 'flex', gap: 10 }}>
-              {['Approve', 'Reject', 'Return'].map(a => (
-                <label key={a} style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13 }}>
-                  <input type="radio" checked={approveForm.action === a} onChange={() => setApproveForm(p => ({ ...p, action: a }))} /> {a}
-                </label>
-              ))}
-            </div>
-          </div>
-          <div className="form-group">
-            <label className="form-label">Remarks {approveForm.action !== 'Approve' && '*'}</label>
-            <textarea className="form-control" value={approveForm.remarks} onChange={e => setApproveForm(p => ({ ...p, remarks: e.target.value }))} rows={3} placeholder="Provide remarks…" />
+            <label className="form-label">Remarks <span style={{ textTransform: 'none', fontWeight: 500, color: 'var(--text-muted)' }}>(required to reject or return)</span></label>
+            <textarea className="form-control" value={approveForm.remarks} onChange={e => setApproveForm(p => ({ ...p, remarks: e.target.value }))} rows={2} placeholder="Optional when approving" />
           </div>
         </Modal>
       )}

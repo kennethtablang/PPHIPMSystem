@@ -15,26 +15,23 @@ public class NotificationService : INotificationService
     private readonly ApplicationDbContext _db;
     private readonly IMapper _mapper;
     private readonly IHubContext<NotificationHub> _hubContext;
-    private readonly IEmailService _emailService;
-    private readonly Microsoft.AspNetCore.Identity.UserManager<ApplicationUser> _userManager;
+    private readonly IEmailQueue _emailQueue;
 
     public NotificationService(
-        ApplicationDbContext db, 
-        IMapper mapper, 
+        ApplicationDbContext db,
+        IMapper mapper,
         IHubContext<NotificationHub> hubContext,
-        IEmailService emailService,
-        Microsoft.AspNetCore.Identity.UserManager<ApplicationUser> userManager)
+        IEmailQueue emailQueue)
     {
         _db = db;
         _mapper = mapper;
         _hubContext = hubContext;
-        _emailService = emailService;
-        _userManager = userManager;
+        _emailQueue = emailQueue;
     }
 
     public async Task<IEnumerable<NotificationDto>> GetForUserAsync(string userId, bool? unreadOnly)
     {
-        var query = _db.Notifications.Where(n => n.UserId == userId).AsQueryable();
+        var query = _db.Notifications.AsNoTracking().Where(n => n.UserId == userId);
         if (unreadOnly == true) query = query.Where(n => !n.IsRead);
         var items = await query.OrderByDescending(n => n.CreatedAt).Take(100).ToListAsync();
         return _mapper.Map<IEnumerable<NotificationDto>>(items);
@@ -43,20 +40,43 @@ public class NotificationService : INotificationService
     public async Task<int> GetUnreadCountAsync(string userId) =>
         await _db.Notifications.CountAsync(n => n.UserId == userId && !n.IsRead);
 
+    // Unread notifications per kind of record they point at, so the sidebar
+    // can badge the page where the user has something new ("Requests 3 New").
+    public async Task<NotificationSummaryDto> GetSummaryAsync(string userId)
+    {
+        var groups = await _db.Notifications
+            .Where(n => n.UserId == userId && !n.IsRead)
+            .GroupBy(n => n.ReferenceType ?? "")
+            .Select(g => new { g.Key, Count = g.Count() })
+            .ToListAsync();
+        return new NotificationSummaryDto
+        {
+            Total = groups.Sum(g => g.Count),
+            ByReferenceType = groups.Where(g => g.Key != "").ToDictionary(g => g.Key, g => g.Count),
+        };
+    }
+
     public async Task MarkAsReadAsync(int notificationId, string userId)
     {
-        var n = await _db.Notifications.FirstOrDefaultAsync(x => x.Id == notificationId && x.UserId == userId);
-        if (n is null) return;
-        n.IsRead = true;
-        n.ReadAt = DateTime.UtcNow;
-        await _db.SaveChangesAsync();
+        await _db.Notifications
+            .Where(x => x.Id == notificationId && x.UserId == userId && !x.IsRead)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.IsRead, true).SetProperty(x => x.ReadAt, DateTime.UtcNow));
     }
 
     public async Task MarkAllAsReadAsync(string userId)
     {
-        var unread = await _db.Notifications.Where(n => n.UserId == userId && !n.IsRead).ToListAsync();
-        foreach (var n in unread) { n.IsRead = true; n.ReadAt = DateTime.UtcNow; }
-        await _db.SaveChangesAsync();
+        await _db.Notifications
+            .Where(n => n.UserId == userId && !n.IsRead)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.IsRead, true).SetProperty(x => x.ReadAt, DateTime.UtcNow));
+    }
+
+    // Opening a record counts as seeing every notice about it, so the badge
+    // for that page clears without hunting each one down in the list.
+    public async Task MarkReferenceAsReadAsync(string userId, string referenceType, int referenceId)
+    {
+        await _db.Notifications
+            .Where(n => n.UserId == userId && !n.IsRead && n.ReferenceType == referenceType && n.ReferenceId == referenceId)
+            .ExecuteUpdateAsync(s => s.SetProperty(x => x.IsRead, true).SetProperty(x => x.ReadAt, DateTime.UtcNow));
     }
 
     public Task BroadcastStockChangedAsync()
@@ -66,116 +86,84 @@ public class NotificationService : INotificationService
     // names) can outgrow the columns; clip instead of failing the save.
     private static string Clip(string text, int max) => text.Length <= max ? text : text[..(max - 1)] + "…";
 
+    private record Recipient(string Id, string? Email, bool EmailEnabled, bool Inventory, bool Procurement, bool Adjustments);
+
     public async Task CreateAsync(string userId, NotificationType type, string title, string message, int? referenceId = null, string? referenceType = null)
     {
-        var notification = new Notification
-        {
-            UserId = userId,
-            Type = type,
-            Title = Clip(title, 200),
-            Message = Clip(message, 1000),
-            ReferenceId = referenceId,
-            ReferenceType = referenceType
-        };
-        _db.Notifications.Add(notification);
-        await _db.SaveChangesAsync();
-
-        var dto = new NotificationDto
-        {
-            Id = notification.Id,
-            Type = notification.Type,
-            Title = notification.Title,
-            Message = notification.Message,
-            IsRead = notification.IsRead,
-            ReferenceId = notification.ReferenceId,
-            ReferenceType = notification.ReferenceType,
-            CreatedAt = notification.CreatedAt
-        };
-        await _hubContext.Clients.User(userId).SendAsync("ReceiveNotification", dto);
-
-        var user = await _userManager.FindByIdAsync(userId);
-        if (user != null && !string.IsNullOrEmpty(user.Email) && ShouldEmail(user, type))
-        {
-            var emailBody = $@"
-                <div style='font-family: Arial, sans-serif; padding: 20px; border: 1px solid #e0e0e0; border-radius: 5px; max-width: 600px; margin: 0 auto;'>
-                    <h2 style='color: #1a6a36;'>PPH IPMS - New Notification</h2>
-                    <h3>{title}</h3>
-                    <p style='color: #444; line-height: 1.5;'>{message}</p>
-                    <hr style='border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;' />
-                    <p style='font-size: 12px; color: #888;'>This is an automated system notification. Please do not reply.</p>
-                </div>";
-            await _emailService.SendEmailAsync(user.Email, $"Notification: {title}", emailBody);
-        }
+        var recipients = await _db.Users
+            .Where(u => u.Id == userId)
+            .Select(u => new Recipient(u.Id, u.Email, u.EmailNotificationsEnabled,
+                u.EmailNotifyInventory, u.EmailNotifyProcurement, u.EmailNotifyAdjustments))
+            .ToListAsync();
+        if (recipients.Count == 0) return;
+        await DeliverAsync(recipients, type, title, message, referenceId, referenceType);
     }
 
     public async Task CreateForRoleAsync(UserRole role, NotificationType type, string title, string message, int? referenceId = null, string? referenceType = null)
     {
-        var usersData = await _db.Users
+        var recipients = await _db.Users
             .Where(u => u.Role == role && u.IsActive)
-            .Select(u => new
-            {
-                u.Id, u.Email,
-                u.EmailNotificationsEnabled, u.EmailNotifyInventory,
-                u.EmailNotifyProcurement, u.EmailNotifyAdjustments
-            })
+            .Select(u => new Recipient(u.Id, u.Email, u.EmailNotificationsEnabled,
+                u.EmailNotifyInventory, u.EmailNotifyProcurement, u.EmailNotifyAdjustments))
             .ToListAsync();
+        if (recipients.Count == 0) return;
+        await DeliverAsync(recipients, type, title, message, referenceId, referenceType);
+    }
 
-        var notifications = new List<Notification>();
-        foreach (var u in usersData)
+    // One insert for every recipient, then the live push (pop-up + badge) and
+    // a queued email. Nothing here waits on the mail server.
+    private async Task DeliverAsync(List<Recipient> recipients, NotificationType type, string title, string message,
+        int? referenceId, string? referenceType)
+    {
+        title = Clip(title, 200);
+        message = Clip(message, 1000);
+
+        var rows = recipients.Select(r => new Notification
         {
-            var notification = new Notification
-            {
-                UserId = u.Id,
-                Type = type,
-                Title = Clip(title, 200),
-                Message = Clip(message, 1000),
-                ReferenceId = referenceId,
-                ReferenceType = referenceType
-            };
-            _db.Notifications.Add(notification);
-            notifications.Add(notification);
-        }
+            UserId = r.Id,
+            Type = type,
+            Title = title,
+            Message = message,
+            ReferenceId = referenceId,
+            ReferenceType = referenceType
+        }).ToList();
+        _db.Notifications.AddRange(rows);
         await _db.SaveChangesAsync();
 
-        foreach (var n in notifications)
+        await Task.WhenAll(rows.Select(n => _hubContext.Clients.User(n.UserId).SendAsync("ReceiveNotification", new NotificationDto
         {
-            var dto = new NotificationDto
-            {
-                Id = n.Id,
-                Type = n.Type,
-                Title = n.Title,
-                Message = n.Message,
-                IsRead = n.IsRead,
-                ReferenceId = n.ReferenceId,
-                ReferenceType = n.ReferenceType,
-                CreatedAt = n.CreatedAt
-            };
-            await _hubContext.Clients.User(n.UserId).SendAsync("ReceiveNotification", dto);
-            
-            var recipient = usersData.FirstOrDefault(u => u.Id == n.UserId);
-            var userEmail = recipient?.Email;
-            var allowEmail = recipient != null && recipient.EmailNotificationsEnabled && CategoryAllowed(
-                type, recipient.EmailNotifyInventory, recipient.EmailNotifyProcurement, recipient.EmailNotifyAdjustments);
-            if (!string.IsNullOrEmpty(userEmail) && allowEmail)
-            {
-                var emailBody = $@"
-                    <div style='font-family: Arial, sans-serif; padding: 20px; border: 1px solid #e0e0e0; border-radius: 5px; max-width: 600px; margin: 0 auto;'>
-                        <h2 style='color: #1a6a36;'>PPH IPMS - New Notification</h2>
-                        <h3>{title}</h3>
-                        <p style='color: #444; line-height: 1.5;'>{message}</p>
-                        <hr style='border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;' />
-                        <p style='font-size: 12px; color: #888;'>This is an automated system notification. Please do not reply.</p>
-                    </div>";
-                await _emailService.SendEmailAsync(userEmail, $"Notification: {title}", emailBody);
-            }
+            Id = n.Id,
+            Type = n.Type,
+            Title = n.Title,
+            Message = n.Message,
+            IsRead = n.IsRead,
+            ReferenceId = n.ReferenceId,
+            ReferenceType = n.ReferenceType,
+            CreatedAt = n.CreatedAt
+        })));
+
+        foreach (var r in recipients)
+        {
+            if (string.IsNullOrEmpty(r.Email) || !r.EmailEnabled
+                || !CategoryAllowed(type, r.Inventory, r.Procurement, r.Adjustments))
+                continue;
+            _emailQueue.Enqueue(new QueuedEmail(r.Email, $"Notification: {title}", EmailBody(title, message)));
         }
     }
 
-    // Whether an email should be sent to this user for the given notification type,
-    // honoring their master switch and per-category preferences.
-    private static bool ShouldEmail(ApplicationUser user, NotificationType type) =>
-        user.EmailNotificationsEnabled && CategoryAllowed(
-            type, user.EmailNotifyInventory, user.EmailNotifyProcurement, user.EmailNotifyAdjustments);
+    private static string EmailBody(string title, string message)
+    {
+        var t = System.Net.WebUtility.HtmlEncode(title);
+        var m = System.Net.WebUtility.HtmlEncode(message);
+        return $@"
+            <div style='font-family: Arial, sans-serif; padding: 20px; border: 1px solid #e0e0e0; border-radius: 5px; max-width: 600px; margin: 0 auto;'>
+                <h2 style='color: #1a6a36;'>PPH IPMS - New Notification</h2>
+                <h3>{t}</h3>
+                <p style='color: #444; line-height: 1.5;'>{m}</p>
+                <hr style='border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;' />
+                <p style='font-size: 12px; color: #888;'>This is an automated system notification. Please do not reply.</p>
+            </div>";
+    }
 
     private static bool CategoryAllowed(NotificationType type, bool inventory, bool procurement, bool adjustments) => type switch
     {

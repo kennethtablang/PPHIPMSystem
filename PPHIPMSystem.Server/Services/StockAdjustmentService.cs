@@ -48,38 +48,36 @@ public class StockAdjustmentService : IStockAdjustmentService
         return item is null ? null : _mapper.Map<StockAdjustmentDto>(item);
     }
 
+    // Direct correction from the Items list (Revision 4): the Inventory Officer
+    // types the correct quantity and a reason, and it applies at once — no
+    // separate request or approval wait. The adjustment row keeps the full
+    // record: original quantity (RecordedQuantity), adjusted quantity
+    // (PhysicalCount), reason, who made it and when.
     public async Task<StockAdjustmentDto> CreateAsync(CreateStockAdjustmentDto dto, string userId)
     {
         var item = await _db.InventoryItems.FindAsync(dto.InventoryItemId)
             ?? throw new InvalidOperationException("Item not found.");
+        if (!item.IsActive)
+            throw new InvalidOperationException("This item is inactive.");
+        if (dto.PhysicalCount == item.QuantityOnHand)
+            throw new InvalidOperationException(
+                $"{item.Name} is already at {item.QuantityOnHand:0.##} {item.Unit} — nothing to adjust.");
 
-        var adjustment = new StockAdjustment
-        {
-            InventoryItemId = dto.InventoryItemId,
-            RecordedQuantity = item.QuantityOnHand,
-            PhysicalCount = dto.PhysicalCount,
-            Reason = dto.Reason,
-            RequestedByUserId = userId,
-            Status = AdjustmentStatus.Pending
-        };
-        _db.StockAdjustments.Add(adjustment);
+        var adjustment = await ApplyAsync(item, dto.PhysicalCount, dto.Reason.Trim(), userId);
         await _db.SaveChangesAsync();
 
-        await _notifications.CreateForRoleAsync(
-            UserRole.HospitalAdministrator,
-            NotificationType.StockAdjustmentRequested,
-            "Stock Adjustment Requested",
-            $"A stock correction for {item.Name} (recorded {item.QuantityOnHand:0.##}, counted {dto.PhysicalCount:0.##}) needs your approval as Head of Property & Supply.",
-            adjustment.Id, "StockAdjustment");
-
-        await _audit.LogAsync(userId, "AdjustmentRequested", "StockAdjustment", adjustment.Id,
-            $"Item: {item.Name}, Recorded: {item.QuantityOnHand}, Physical: {dto.PhysicalCount}");
+        await _audit.LogAsync(userId, "StockAdjusted", "StockAdjustment", adjustment.Id,
+            $"Item: {item.Name}, {adjustment.RecordedQuantity:0.##} → {adjustment.PhysicalCount:0.##} {item.Unit}. Reason: {adjustment.Reason}");
+        await AfterStockChangeAsync([item]);
 
         await _db.Entry(adjustment).Reference(a => a.InventoryItem).LoadAsync();
         await _db.Entry(adjustment).Reference(a => a.RequestedByUser).LoadAsync();
+        await _db.Entry(adjustment).Reference(a => a.ApprovedByUser).LoadAsync();
         return _mapper.Map<StockAdjustmentDto>(adjustment);
     }
 
+    // Physical count of many items at once: every line that differs from the
+    // system is corrected immediately, the same as a single adjustment.
     public async Task<CycleCountResultDto> SubmitCycleCountAsync(CycleCountDto dto, string userId)
     {
         var ids = dto.Lines.Select(l => l.InventoryItemId).Distinct().ToList();
@@ -88,6 +86,7 @@ public class StockAdjustmentService : IStockAdjustmentService
             .ToDictionaryAsync(i => i.Id);
 
         var result = new CycleCountResultDto();
+        var changed = new List<InventoryItem>();
         // Last count wins if the same item appears twice in the worksheet.
         foreach (var line in dto.Lines.GroupBy(l => l.InventoryItemId).Select(g => g.Last()))
         {
@@ -100,35 +99,89 @@ public class StockAdjustmentService : IStockAdjustmentService
                 continue;
             }
 
-            _db.StockAdjustments.Add(new StockAdjustment
-            {
-                InventoryItemId = item.Id,
-                RecordedQuantity = item.QuantityOnHand,
-                PhysicalCount = line.PhysicalCount,
-                Reason = dto.Reason,
-                RequestedByUserId = userId,
-                Status = AdjustmentStatus.Pending
-            });
+            await ApplyAsync(item, line.PhysicalCount, dto.Reason.Trim(), userId);
+            changed.Add(item);
             result.AdjustmentsCreated++;
         }
 
         if (result.AdjustmentsCreated > 0)
         {
             await _db.SaveChangesAsync();
-
-            // One notification for the whole count, not one per line.
-            await _notifications.CreateForRoleAsync(
-                UserRole.HospitalAdministrator,
-                NotificationType.StockAdjustmentRequested,
-                "Cycle Count Submitted",
-                $"A physical count generated {result.AdjustmentsCreated} stock adjustment(s) awaiting approval.",
-                null, "StockAdjustment");
-
-            await _audit.LogAsync(userId, "CycleCountSubmitted", "StockAdjustment", null,
-                $"{result.AdjustmentsCreated} adjustment(s) created, {result.UnchangedItems} item(s) matched. Reason: {dto.Reason}");
+            await _audit.LogAsync(userId, "CycleCountApplied", "StockAdjustment", null,
+                $"{result.AdjustmentsCreated} item(s) corrected, {result.UnchangedItems} item(s) matched. Reason: {dto.Reason}");
+            await AfterStockChangeAsync(changed);
         }
 
         return result;
+    }
+
+    // Sets an item to the counted quantity and records it: the adjustment
+    // row, an Adjustment movement in the ledger, and the batches brought in
+    // line so Batches & Expiry agrees with the Items list. Not saved here.
+    private async Task<StockAdjustment> ApplyAsync(InventoryItem item, decimal newQuantity, string reason, string userId)
+    {
+        if (newQuantity < 0)
+            throw new InvalidOperationException("The adjusted quantity cannot be negative.");
+
+        var now = DateTime.UtcNow;
+        var adjustment = new StockAdjustment
+        {
+            InventoryItemId = item.Id,
+            RecordedQuantity = item.QuantityOnHand,
+            PhysicalCount = newQuantity,
+            Reason = reason,
+            RequestedByUserId = userId,
+            RequestedAt = now,
+            // Applied directly by the officer who made it.
+            Status = AdjustmentStatus.Approved,
+            ApprovedByUserId = userId,
+            ApprovedAt = now
+        };
+        _db.StockAdjustments.Add(adjustment);
+
+        await ApplyVarianceAsync(item, newQuantity - item.QuantityOnHand, reason, userId);
+        return adjustment;
+    }
+
+    private async Task ApplyVarianceAsync(InventoryItem item, decimal variance, string reason, string userId)
+    {
+        var before = item.QuantityOnHand;
+        var after = before + variance;
+        item.QuantityOnHand = after;
+        item.UpdatedAt = DateTime.UtcNow;
+
+        if (variance < 0)
+            await BatchLedger.ConsumeFefoAsync(_db, item.Id, -variance);
+        else
+            await BatchLedger.RestoreFefoAsync(_db, item.Id, variance);
+        await BatchLedger.AlignToOnHandAsync(_db, item.Id, after);
+
+        var sign = variance >= 0 ? "+" : "-";
+        _db.StockMovements.Add(new StockMovement
+        {
+            InventoryItemId = item.Id,
+            MovementType = StockMovementType.Adjustment,
+            Quantity = Math.Abs(variance),
+            QuantityBeforeMovement = before,
+            QuantityAfterMovement = after,
+            Remarks = Clip($"Stock adjustment ({sign}{Math.Abs(variance):0.##}): {reason}"),
+            PerformedByUserId = userId,
+            MovementDate = DateTime.UtcNow
+        });
+    }
+
+    private static string Clip(string text) => text.Length <= 500 ? text : text[..499] + "…";
+
+    // Low-stock alert for anything the correction pushed under its reorder
+    // level, and a live refresh for open pages.
+    private async Task AfterStockChangeAsync(List<InventoryItem> items)
+    {
+        foreach (var item in items.Where(i => i.QuantityOnHand <= i.ReorderThreshold))
+            foreach (var role in new[] { UserRole.InventoryOfficer, UserRole.ProcurementStaff })
+                await _notifications.CreateForRoleAsync(role, NotificationType.LowStock, "Low Stock Alert",
+                    $"{item.Name} is at {item.QuantityOnHand:0.##} {item.Unit}, below reorder threshold of {item.ReorderThreshold:0.##}.",
+                    item.Id, "InventoryItem");
+        await _notifications.BroadcastStockChangedAsync();
     }
 
     public async Task<StockAdjustmentDto?> ProcessApprovalAsync(int id, ApproveAdjustmentDto dto, string approverId)
@@ -153,31 +206,16 @@ public class StockAdjustmentService : IStockAdjustmentService
 
         if (dto.Approved)
         {
-            // Apply the counted variance to today's balance rather than overwriting
-            // it with the count: receipts or issuances recorded between the count
-            // and this approval would otherwise be silently erased.
+            // Legacy request filed before direct adjustments: apply the counted
+            // variance to today's balance rather than overwriting it, so
+            // movements recorded since the count are not erased.
             var item = adjustment.InventoryItem;
             var variance = adjustment.PhysicalCount - adjustment.RecordedQuantity;
-            var before = item.QuantityOnHand;
-            var after = before + variance;
-            if (after < 0)
+            if (item.QuantityOnHand + variance < 0)
                 throw new InvalidOperationException(
-                    $"Stock of {item.Name} has changed since the count ({before} on hand now); applying the " +
+                    $"Stock of {item.Name} has changed since the count ({item.QuantityOnHand} on hand now); applying the " +
                     $"variance of {variance} would go below zero. Reject this adjustment and recount.");
-
-            item.QuantityOnHand = after;
-            item.UpdatedAt = DateTime.UtcNow;
-
-            _db.StockMovements.Add(new StockMovement
-            {
-                InventoryItemId = item.Id,
-                MovementType = StockMovementType.Adjustment,
-                Quantity = Math.Abs(variance),
-                QuantityBeforeMovement = before,
-                QuantityAfterMovement = after,
-                Remarks = $"Adjustment #{id}: {adjustment.Reason}",
-                PerformedByUserId = approverId
-            });
+            await ApplyVarianceAsync(item, variance, $"Adjustment #{id}: {adjustment.Reason}", approverId);
         }
 
         await _db.SaveChangesAsync();

@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { MdAdd, MdEdit, MdDelete, MdSearch, MdWarning, MdFileDownload, MdShoppingCart, MdUploadFile, MdQrCode2, MdInventory2, MdClose, MdContentCopy } from 'react-icons/md';
-import { getItems, createItem, updateItem, deleteItem, importPreview, importItems, downloadImportTemplate, getSimilarItems } from '../../api/inventory';
+import { MdAdd, MdEdit, MdDelete, MdSearch, MdWarning, MdFileDownload, MdShoppingCart, MdUploadFile, MdQrCode2, MdInventory2, MdClose, MdContentCopy, MdTune } from 'react-icons/md';
+import { getItem, getItems, createItem, updateItem, deleteItem, importPreview, importItems, downloadImportTemplate, getSimilarItems } from '../../api/inventory';
 import DuplicateReviewModal from './DuplicateReviewModal';
 import { getCategories } from '../../api/categories';
 import { getSystemSettings } from '../../api/systemSettings';
 import { exportInventorySnapshot } from '../../api/reports';
 import LabelPrintModal from '../../components/common/LabelPrintModal';
 import ReplenishModal from '../../components/common/ReplenishModal';
+import AdjustQuantityModal from '../../components/common/AdjustQuantityModal';
+import { markSeen } from '../../api/notifications';
+import useOpenParam from '../../utils/useOpenParam';
 import Modal from '../../components/common/Modal';
 import { toast } from '../../components/common/Toast';
 import Pagination, { usePagination } from '../../components/common/Pagination';
@@ -53,6 +56,10 @@ export default function InventoryList() {
   const [selectedIds, setSelectedIds] = useState(() => new Set());
   // Items being restocked (lot + expiry captured per item); null = modal closed.
   const [replenishItems, setReplenishItems] = useState(null);
+  // Revision 4: direct quantity correction on the item row.
+  const [adjustItem, setAdjustItem] = useState(null);
+  // Row to highlight after a notification deep link.
+  const [focusId, setFocusId] = useState(null);
   // Bulk import: pick file → preview validation results → import valid rows.
   const [importModal, setImportModal] = useState(false);
   const [importFile, setImportFile] = useState(null);
@@ -153,6 +160,20 @@ export default function InventoryList() {
       toast.error(e.response?.data?.message ?? 'Import failed.');
     } finally { setImporting(false); }
   };
+  // Notification deep link (/inventory?open=<id>): narrow the list to that
+  // item and highlight it.
+  useOpenParam(id => {
+    getItem(id)
+      .then(res => {
+        setCatFilter('');
+        setLowStockOnly(false);
+        setSearch(res.data.itemCode || res.data.name);
+        setFocusId(id);
+        markSeen('InventoryItem', id);
+      })
+      .catch(() => toast.error('That item could not be found.'));
+  });
+
   const openEdit = item => {
     setForm({
       name: item.name, brand: item.brand ?? '', itemCode: item.itemCode ?? '', description: item.description ?? '',
@@ -327,7 +348,7 @@ export default function InventoryList() {
               {items.length === 0 ? (
                 <tr><td colSpan={canSelect ? 11 : 10} style={{ textAlign: 'center', padding: 40, color: 'var(--text-muted)' }}>No items found.</td></tr>
               ) : pager.pageItems.map(item => (
-                <tr key={item.id} className={selectedIds.has(item.id) ? 'row-selected' : undefined}>
+                <tr key={item.id} className={selectedIds.has(item.id) || focusId === item.id ? 'row-selected' : undefined}>
                   {canSelect && (
                     <td>
                       <input
@@ -384,6 +405,14 @@ export default function InventoryList() {
                           <>
                             <button
                               className="btn btn-secondary btn-sm"
+                              onClick={() => setAdjustItem(item)}
+                              title="Correct the quantity on record — applied immediately with a reason"
+                              style={{ fontSize: 11 }}
+                            >
+                              <MdTune size={13} /> Adjust
+                            </button>
+                            <button
+                              className="btn btn-secondary btn-sm"
                               onClick={() => setReplenishItems([item])}
                               title="Receive stock for this item, recording lot and expiration date"
                               style={{ fontSize: 11 }}
@@ -417,6 +446,10 @@ export default function InventoryList() {
             meta: i.unit,
           }))}
         />
+      )}
+
+      {adjustItem && (
+        <AdjustQuantityModal item={adjustItem} onClose={() => setAdjustItem(null)} onDone={load} />
       )}
 
       {replenishItems && (

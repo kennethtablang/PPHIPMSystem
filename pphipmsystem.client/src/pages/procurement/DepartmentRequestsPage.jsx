@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
-import { MdAdd, MdVisibility, MdSend, MdSchedule, MdEdit, MdCancel } from 'react-icons/md';
-import { getRequests, submitRequest, cancelRequest } from '../../api/procurement';
+import { MdAdd, MdVisibility, MdSend, MdSchedule, MdEdit, MdCancel, MdTaskAlt, MdInventory2 } from 'react-icons/md';
+import { getRequests, getRequest, submitRequest, cancelRequest, confirmReceived } from '../../api/procurement';
+import { markSeen } from '../../api/notifications';
+import useOpenParam from '../../utils/useOpenParam';
 import { getItems } from '../../api/inventory';
 import { getDepartments } from '../../api/departments';
 import AttachmentsPanel from '../../components/common/AttachmentsPanel';
@@ -29,7 +31,8 @@ const STATUSES = [
   { value: 'SubmittedToProcurement', label: 'Inventory Review' },
   { value: 'ApprovedByInventoryOfficer', label: 'Admin Approval' },
   { value: 'FullyApproved', label: 'Awaiting Stock' },
-  { value: 'Released', label: 'Released' },
+  { value: 'Released', label: 'To Confirm' },
+  { value: 'Received', label: 'Received' },
   { value: 'ReturnedForRevision', label: 'Returned' },
   { value: 'Rejected', label: 'Rejected' },
   { value: 'Cancelled', label: 'Cancelled' },
@@ -51,6 +54,10 @@ export default function DepartmentRequestsPage() {
   const [cancelModal, setCancelModal] = useState(null);
   const [cancelReason, setCancelReason] = useState('');
   const [saving, setSaving] = useState(false);
+  // Revision 2: the Department Head signs for released supplies.
+  const isHead = user?.role === 'DepartmentHead';
+  const [receiveModal, setReceiveModal] = useState(null);
+  const [receiptRemarks, setReceiptRemarks] = useState('');
   const pager = usePagination(requests);
 
   const load = () => {
@@ -110,6 +117,30 @@ export default function DepartmentRequestsPage() {
     }
   };
 
+  const openView = r => { setViewModal(r); markSeen('ProcurementRequest', r.id); };
+
+  // Notification deep link: /department-requests?open=<id>.
+  useOpenParam(id => {
+    getRequest(id)
+      .then(res => openView(res.data))
+      .catch(() => toast.error('That request could not be opened.'));
+  });
+
+  const openReceive = r => { setReceiptRemarks(''); setReceiveModal(r); };
+  const submitReceived = async () => {
+    setSaving(true);
+    try {
+      const res = await confirmReceived(receiveModal.id, receiptRemarks.trim() || null);
+      toast.success(`${receiveModal.requestNumber} confirmed as received.`);
+      setReceiveModal(null);
+      afterChange(res.data);
+    } catch (e) {
+      toast.error(e.response?.data?.message ?? 'Failed to confirm receipt.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const openEdit = r => { setViewModal(null); setFormModal({ request: r }); };
   const openCancel = r => { setCancelReason(''); setCancelModal(r); };
 
@@ -150,6 +181,16 @@ export default function DepartmentRequestsPage() {
           </button>
         ))}
       </div>
+
+      {isHead && !loading && statusFilter !== 'Released' && requests.some(r => r.status === 'Released') && (
+        <div className="alert alert-info" style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+          <MdInventory2 size={18} />
+          <span style={{ flex: 1 }}>
+            <strong>{requests.filter(r => r.status === 'Released').length}</strong> released request(s) are waiting for you to confirm the supplies were received.
+          </span>
+          <button className="btn btn-sm btn-primary" onClick={() => setStatusFilter('Released')}>Show them</button>
+        </div>
+      )}
 
       {loading ? (
         <div className="loading-center"><div className="spinner" /></div>
@@ -197,9 +238,14 @@ export default function DepartmentRequestsPage() {
                   <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{new Date(r.requestedAt).toLocaleDateString('en-PH')}</td>
                   <td>
                     <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                      <button className="btn btn-ghost btn-sm" onClick={() => setViewModal(r)}>
+                      <button className="btn btn-ghost btn-sm" onClick={() => openView(r)}>
                         <MdVisibility size={14} /> View
                       </button>
+                      {isHead && r.status === 'Released' && (
+                        <button className="btn btn-success btn-sm" onClick={() => openReceive(r)} title="Confirm the supplies arrived">
+                          <MdTaskAlt size={14} /> Confirm Received
+                        </button>
+                      )}
                       {EDITABLE.includes(r.status) && (
                         <button className="btn btn-ghost btn-sm" onClick={() => openEdit(r)} title="Change quantities, add or remove items">
                           <MdEdit size={14} /> Edit
@@ -246,6 +292,11 @@ export default function DepartmentRequestsPage() {
                 </>
               )}
               <button className="btn btn-secondary" onClick={() => setViewModal(null)} style={{ marginLeft: 'auto' }}>Close</button>
+              {isHead && viewModal.status === 'Released' && (
+                <button className="btn btn-primary" onClick={() => openReceive(viewModal)}>
+                  <MdTaskAlt size={15} /> Confirm Received
+                </button>
+              )}
             </>
           }
         >
@@ -266,6 +317,12 @@ export default function DepartmentRequestsPage() {
             </div>
           </div>
           <RequestProgress status={viewModal.status} />
+          {viewModal.receivedAt && (
+            <div className="alert alert-success" style={{ fontSize: 13, display: 'block' }}>
+              <strong>Received</strong> — confirmed by {viewModal.receivedByFullName ?? '—'} on {fmtDateTime(viewModal.receivedAt)}
+              {viewModal.receiptRemarks && <div style={{ marginTop: 4 }}>Remarks: {viewModal.receiptRemarks}</div>}
+            </div>
+          )}
           {viewModal.isUrgent && (
             <div className="alert alert-danger" style={{ fontSize: 13 }}>
               <strong>URGENT / EMERGENCY:</strong>&nbsp;{viewModal.urgentReason}
@@ -278,6 +335,31 @@ export default function DepartmentRequestsPage() {
           </div>
           <AttachmentsPanel requestId={viewModal.id} />
           <RequestTimeline request={viewModal} />
+        </Modal>
+      )}
+
+      {/* Confirm received (proof of receipt) */}
+      {receiveModal && (
+        <Modal title={`Confirm Received: ${receiveModal.requestNumber}`} onClose={() => setReceiveModal(null)} size="modal-lg"
+          footer={
+            <>
+              <button className="btn btn-secondary" onClick={() => setReceiveModal(null)}>Not Yet</button>
+              <button className="btn btn-primary" onClick={submitReceived} disabled={saving}>
+                <MdTaskAlt size={15} /> {saving ? 'Confirming…' : 'Confirm Received'}
+              </button>
+            </>
+          }
+        >
+          <p style={{ fontSize: 13, marginTop: 0 }}>
+            Check the supplies against the list below. Confirming records that <strong>{user?.fullName}</strong> received
+            them today — this is the department's proof of receipt.
+          </p>
+          <RequestLinesTable request={receiveModal} />
+          <div className="form-group" style={{ marginTop: 12 }}>
+            <label className="form-label">Remarks (optional)</label>
+            <textarea className="form-control" rows={2} value={receiptRemarks} onChange={e => setReceiptRemarks(e.target.value)}
+              placeholder="e.g. Complete and in good condition / 2 boxes arrived dented" maxLength={500} />
+          </div>
         </Modal>
       )}
 

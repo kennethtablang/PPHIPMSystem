@@ -28,6 +28,24 @@ public class NotificationsController : ControllerBase
         return Ok(new { count = await _notifications.GetUnreadCountAsync(userId) });
     }
 
+    // Unread counts per record type, for the sidebar "N New" badges.
+    [HttpGet("summary")]
+    public async Task<IActionResult> GetSummary()
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        return Ok(await _notifications.GetSummaryAsync(userId));
+    }
+
+    // Marks every unread notice about one record read (the user opened it).
+    [HttpPatch("read-reference")]
+    public async Task<IActionResult> MarkReferenceRead([FromQuery] string type, [FromQuery] int id)
+    {
+        if (string.IsNullOrWhiteSpace(type)) return BadRequest(new { message = "type is required." });
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier)!;
+        await _notifications.MarkReferenceAsReadAsync(userId, type, id);
+        return NoContent();
+    }
+
     [HttpPatch("{id}/read")]
     public async Task<IActionResult> MarkRead(int id)
     {

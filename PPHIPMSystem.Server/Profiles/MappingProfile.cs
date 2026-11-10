@@ -86,6 +86,7 @@ public class MappingProfile : Profile
         CreateMap<ProcurementRequest, ProcurementRequestDto>()
             .ForMember(d => d.DepartmentName, o => o.MapFrom(s => s.Department.Name))
             .ForMember(d => d.RequestedByFullName, o => o.MapFrom(s => $"{s.RequestedByUser.FirstName} {s.RequestedByUser.LastName}"))
+            .ForMember(d => d.ReceivedByFullName, o => o.MapFrom(s => s.ReceivedByUser != null ? $"{s.ReceivedByUser.FirstName} {s.ReceivedByUser.LastName}" : null))
             .ForMember(d => d.PurchaseOrderId, o => o.MapFrom(s => s.PurchaseOrder != null ? s.PurchaseOrder.Id : (int?)null))
             .ForMember(d => d.PONumber, o => o.MapFrom(s => s.PurchaseOrder != null ? s.PurchaseOrder.PONumber : null))
             .ForMember(d => d.POGeneratedAt, o => o.MapFrom(s => s.PurchaseOrder != null ? s.PurchaseOrder.GeneratedAt : (DateTime?)null))

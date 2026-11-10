@@ -23,10 +23,11 @@ public class InventoryService : IInventoryService
     public async Task<IEnumerable<InventoryItemDto>> GetAllAsync(string? search, int? categoryId, bool? lowStock)
     {
         var query = _db.InventoryItems
+            .AsNoTracking()
+            .AsSplitQuery()
             .Include(i => i.Category)
             .Include(i => i.Batches)
-            .Where(i => i.IsActive)
-            .AsQueryable();
+            .Where(i => i.IsActive);
 
         if (!string.IsNullOrWhiteSpace(search))
             query = query.Where(i => i.Name.Contains(search) || (i.ItemCode != null && i.ItemCode.Contains(search)) || (i.Brand != null && i.Brand.Contains(search)));
@@ -146,10 +147,16 @@ public class InventoryService : IInventoryService
         var now = DateTime.UtcNow;
 
         var items = await _db.InventoryItems
+            .AsNoTracking()
+            .AsSplitQuery()
             .Include(i => i.Batches)
             .Include(i => i.Category)
             .Where(i => i.IsActive)
             .ToListAsync();
+
+        // No-tracking load: look names up by id rather than relying on the
+        // batch → item back-reference being filled in.
+        var itemNames = items.ToDictionary(i => i.Id, i => i.Name);
 
         var lowStockItems = items.Where(i => i.QuantityOnHand <= i.ReorderThreshold).ToList();
 
@@ -181,6 +188,7 @@ public class InventoryService : IInventoryService
         var unread = await _db.Notifications.CountAsync(n => n.UserId == userId && !n.IsRead);
 
         var recentMovements = await _db.StockMovements
+            .AsNoTracking()
             .Include(m => m.PerformedByUser)
             .Include(m => m.InventoryItem)
             .OrderByDescending(m => m.MovementDate)
@@ -258,7 +266,7 @@ public class InventoryService : IInventoryService
             {
                 BatchId = b.Id,
                 ItemId = b.InventoryItemId,
-                ItemName = b.InventoryItem?.Name ?? "",
+                ItemName = itemNames.GetValueOrDefault(b.InventoryItemId, ""),
                 LotNumber = b.LotNumber,
                 RemainingQuantity = b.RemainingQuantity,
                 ExpirationDate = b.ExpirationDate!.Value,

@@ -46,7 +46,10 @@ class SignalRService {
             .catch(err => console.error('Error starting Forecast SignalR connection:', err));
     }
 
+    // Subscribing starts the connection if nobody has yet, so components can
+    // listen regardless of mount order (sidebar badges mount before the topbar).
     onNotificationReceived(callback) {
+        this.startNotificationConnection();
         if (this.notificationConnection) {
             this.notificationConnection.on('ReceiveNotification', callback);
         }
@@ -55,6 +58,7 @@ class SignalRService {
     // Fired whenever any stock-changing action completes (movement, batch
     // receipt, PO delivery) so live views can refresh.
     onStockChanged(callback) {
+        this.startNotificationConnection();
         if (this.notificationConnection) {
             this.notificationConnection.on('StockChanged', callback);
         }

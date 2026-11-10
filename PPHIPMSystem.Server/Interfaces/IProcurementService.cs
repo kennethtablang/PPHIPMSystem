@@ -6,6 +6,7 @@ public interface IProcurementService
 {
     Task<IEnumerable<ProcurementRequestDto>> GetAllAsync(string? status, int? departmentId, Models.Enums.RequestType? type = null);
     Task<ProcurementRequestDto?> GetByIdAsync(int id);
+    Task<ProcurementRequestDto?> ConfirmReceivedAsync(int id, string? remarks, string userId);
     Task<ProcurementRequestDto> CreateAsync(CreateProcurementRequestDto dto, string userId, int departmentId);
     Task<ProcurementRequestDto?> UpdateAsync(int id, UpdateProcurementRequestDto dto, string userId, int departmentId);
     Task<ProcurementRequestDto?> CancelAsync(int id, string? reason, string userId);

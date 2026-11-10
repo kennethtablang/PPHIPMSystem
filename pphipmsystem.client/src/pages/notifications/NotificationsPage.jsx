@@ -1,52 +1,23 @@
 import { useEffect, useState } from 'react';
-import {
-  MdNotifications, MdDoneAll, MdWarning, MdError, MdInfo,
-  MdCheckCircle, MdShoppingCart, MdLocalShipping,
-  MdTune, MdDeleteForever, MdCircle, MdReportProblem,
-} from 'react-icons/md';
+import { useNavigate } from 'react-router-dom';
+import { MdNotifications, MdDoneAll, MdCircle, MdChevronRight } from 'react-icons/md';
 import { getNotifications, markRead, markAllRead, notifyNotificationsChanged } from '../../api/notifications';
 import { signalRService } from '../../api/signalrService';
 import { toast } from '../../components/common/Toast';
+import { useAuth } from '../../context/AuthContext';
 import { fmtDateTime } from '../../utils/format';
-
-// Keys must match `NotificationType` on the server exactly — an unmapped type
-// falls back to a grey generic row and drops out of the group filters entirely.
-const TYPE_META = {
-  LowStock:                    { icon: MdWarning,      color: '#f59e0b', label: 'Low Stock Alert',          group: 'inventory' },
-  ExpirationWarning:           { icon: MdWarning,      color: '#f59e0b', label: 'Expiration Warning',        group: 'inventory' },
-  StockAdjustmentRequested:    { icon: MdTune,         color: '#3b82f6', label: 'Adjustment Requested',      group: 'adjustments' },
-  StockAdjustmentApproved:     { icon: MdCheckCircle,  color: '#059669', label: 'Adjustment Approved',       group: 'adjustments' },
-  StockAdjustmentRejected:     { icon: MdDeleteForever,color: '#dc2626', label: 'Adjustment Rejected',       group: 'adjustments' },
-  ProcurementSubmitted:        { icon: MdShoppingCart, color: '#3b82f6', label: 'Request Submitted',         group: 'procurement' },
-  ProcurementApproved:         { icon: MdCheckCircle,  color: '#059669', label: 'Request Approved',          group: 'procurement' },
-  ProcurementRejected:         { icon: MdError,        color: '#dc2626', label: 'Request Rejected',          group: 'procurement' },
-  ProcurementReturnedForRevision: { icon: MdInfo,      color: '#f59e0b', label: 'Returned for Revision',     group: 'procurement' },
-  PurchaseOrderGenerated:      { icon: MdLocalShipping,color: '#059669', label: 'Purchase Order Generated',  group: 'procurement' },
-  DeliveryProblem:             { icon: MdReportProblem,color: '#dc2626', label: 'Delivery Problem',          group: 'procurement' },
-  General:                     { icon: MdInfo,         color: '#6b7280', label: 'Notice',                    group: 'other' },
-};
+import { TYPE_META, metaFor, notificationLink, timeAgo } from '../../utils/notificationLinks';
 
 const GROUPS = [
   { id: '',           label: 'All' },
   { id: 'inventory',  label: 'Inventory' },
   { id: 'procurement',label: 'Procurement' },
-  { id: 'adjustments',label: 'Adjustments' },
   { id: 'other',      label: 'Other' },
 ];
 
-function timeAgo(dateStr) {
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return 'Just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  if (days < 7) return `${days}d ago`;
-  return new Date(dateStr).toLocaleDateString('en-PH');
-}
-
 export default function NotificationsPage() {
+  const { user } = useAuth();
+  const navigate = useNavigate();
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [unreadOnly, setUnreadOnly] = useState(false);
@@ -83,6 +54,12 @@ export default function NotificationsPage() {
     } catch { toast.error('Failed to mark as read.'); }
   };
 
+  // Clicking a notification opens the request / PO / item it is about.
+  const openOne = n => {
+    if (!n.isRead) markOne(n.id);
+    navigate(notificationLink(n, user?.role));
+  };
+
   const markAll = async () => {
     try { await markAllRead(); toast.success('All notifications marked as read.'); notifyNotificationsChanged(); load(); }
     catch { toast.error('Failed to mark all as read.'); }
@@ -102,7 +79,7 @@ export default function NotificationsPage() {
       <div className="page-header">
         <div>
           <h1 className="page-title">Notifications</h1>
-          <p className="page-subtitle">System alerts for inventory, expiry warnings, adjustments, and procurement updates</p>
+          <p className="page-subtitle">Click a notification to open the request, purchase order or item it is about</p>
         </div>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           {unread > 0 && (
@@ -163,12 +140,18 @@ export default function NotificationsPage() {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {filtered.map(n => {
-            const meta = TYPE_META[n.type] ?? { icon: MdInfo, color: '#6b7280', label: n.type, group: 'other' };
+            const meta = metaFor(n.type);
             const Icon = meta.icon;
             return (
               <div
                 key={n.id}
+                role="button"
+                tabIndex={0}
+                onClick={() => openOne(n)}
+                onKeyDown={e => { if (e.key === 'Enter') openOne(n); }}
+                title="Open"
                 style={{
+                  cursor: 'pointer',
                   display: 'flex', alignItems: 'flex-start', gap: 14, padding: '14px 18px',
                   background: n.isRead ? 'var(--surface)' : 'var(--green-50)',
                   border: `1px solid ${n.isRead ? 'var(--border)' : 'var(--green-200)'}`,
@@ -205,7 +188,7 @@ export default function NotificationsPage() {
                     {!n.isRead && (
                       <button
                         className="btn btn-ghost btn-sm"
-                        onClick={() => markOne(n.id)}
+                        onClick={e => { e.stopPropagation(); markOne(n.id); }}
                         style={{ flexShrink: 0, fontSize: 11, padding: '2px 10px' }}
                       >
                         Mark read
@@ -230,6 +213,7 @@ export default function NotificationsPage() {
                     )}
                   </div>
                 </div>
+                <MdChevronRight size={20} style={{ color: 'var(--text-muted)', alignSelf: 'center', flexShrink: 0 }} />
               </div>
             );
           })}

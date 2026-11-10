@@ -9,6 +9,8 @@ public interface INotificationService
     Task<int> GetUnreadCountAsync(string userId);
     Task MarkAsReadAsync(int notificationId, string userId);
     Task MarkAllAsReadAsync(string userId);
+    Task<NotificationSummaryDto> GetSummaryAsync(string userId);
+    Task MarkReferenceAsReadAsync(string userId, string referenceType, int referenceId);
     Task CreateAsync(string userId, NotificationType type, string title, string message, int? referenceId = null, string? referenceType = null);
     Task CreateForRoleAsync(UserRole role, NotificationType type, string title, string message, int? referenceId = null, string? referenceType = null);
 

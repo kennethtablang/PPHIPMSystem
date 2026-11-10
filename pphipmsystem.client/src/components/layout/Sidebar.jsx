@@ -1,26 +1,19 @@
 import { useState, useEffect } from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { getDisplayPrefs } from '../../utils/displayPrefs';
+import { getNotificationSummary, NOTIFICATIONS_CHANGED } from '../../api/notifications';
+import { signalRService } from '../../api/signalrService';
+import { SECTION_BY_REFERENCE } from '../../utils/notificationLinks';
 import {
-  MdDashboard, MdInventory, MdWarehouse, MdSwapVert, MdTune,
-  MdShoppingCart, MdLocalShipping, MdBarChart,
-  MdPeople, MdBusiness, MdCategory, MdHistory, MdAnalytics,
-  MdNotifications, MdChevronLeft, MdChevronRight,
-  MdGridView, MdBackup,
+  MdDashboard, MdInventory, MdWarehouse, MdHistory,
+  MdShoppingCart, MdLocalShipping, MdBarChart, MdAssignment,
+  MdPeople, MdBusiness, MdCategory, MdManageSearch, MdAnalytics,
+  MdChevronLeft, MdChevronRight, MdGridView, MdBackup, MdChecklist,
 } from 'react-icons/md';
 
 const W_OPEN   = 252;
 const W_CLOSED = 64;
-
-const ROLE = {
-  SuperAdmin:  'SuperAdmin',
-  Admin:       'HospitalAdministrator',
-  Inventory:   'InventoryOfficer',
-  Procurement: 'ProcurementStaff',
-  DeptHead:    'DepartmentHead',
-  DeptStaff:   'DepartmentStaff',
-};
 
 const roleLabel = r => ({
   SuperAdmin:            'Super Admin',
@@ -31,12 +24,96 @@ const roleLabel = r => ({
   DepartmentStaff:       'Department (Shared PC)',
 }[r] ?? r);
 
+const ADMIN = ['SuperAdmin', 'HospitalAdministrator'];
+const INV   = 'InventoryOfficer';
+const PROC  = 'ProcurementStaff';
+const HEAD  = 'DepartmentHead';
+const STAFF = 'DepartmentStaff';
+
+// Navigation is organised around the system's two jobs — Inventory
+// Management and Procurement Management — and each role only sees the pages
+// it actually works in. `section` ties an entry to the notification badge.
+const NAV = [
+  {
+    label: 'Inventory Management',
+    items: [
+      { to: '/inventory',        Icon: MdInventory,  label: 'Stock Items',        roles: [...ADMIN, INV, PROC], section: 'items',
+        hint: 'Check stock, adjust quantities, replenish' },
+      { to: '/materials',        Icon: MdChecklist,  label: 'Available Supplies', roles: [HEAD], section: 'items',
+        hint: 'What the storeroom has in stock' },
+      { to: '/batches',          Icon: MdGridView,   label: 'Batches & Expiry',   roles: [...ADMIN, INV, PROC], section: 'batches',
+        hint: 'Lots, expiry dates and disposal' },
+      { to: '/department-stock', Icon: MdWarehouse,  label: 'Department Stock',   roles: [...ADMIN, INV, PROC, HEAD, STAFF],
+        hint: 'Stock held by each ward' },
+      { to: '/stock-movements',  Icon: MdHistory,    label: 'Stock History',      roles: [...ADMIN, INV], section: 'stock-history',
+        match: ['/stock-movements', '/stock-adjustments'], hint: 'Every receipt, issue and adjustment' },
+    ],
+  },
+  {
+    label: 'Procurement Management',
+    items: [
+      { to: '/procurement',         Icon: MdShoppingCart,  label: 'Requests',        roles: [...ADMIN, INV, PROC], section: 'requests',
+        hint: 'Review, approve and release requests' },
+      { to: '/department-requests', Icon: MdAssignment,    label: 'My Requests',     roles: [HEAD, STAFF], section: 'requests',
+        hint: 'Request supplies and confirm receipt' },
+      { to: '/purchase-orders',     Icon: MdLocalShipping, label: 'Purchase Orders', roles: [...ADMIN, INV, PROC], section: 'purchase-orders',
+        hint: 'Orders and supplier deliveries' },
+    ],
+  },
+  {
+    label: 'Reports',
+    items: [
+      { to: '/reports',  Icon: MdBarChart,  label: 'Reports',         roles: [...ADMIN, INV, PROC] },
+      { to: '/forecast', Icon: MdAnalytics, label: 'Demand Forecast', roles: [...ADMIN, INV, PROC] },
+    ],
+  },
+  {
+    label: 'Administration',
+    items: [
+      { to: '/users',       Icon: MdPeople,       label: 'Users',       roles: ADMIN },
+      { to: '/departments', Icon: MdBusiness,     label: 'Departments', roles: ADMIN },
+      { to: '/categories',  Icon: MdCategory,     label: 'Categories',  roles: ADMIN },
+      { to: '/backups',     Icon: MdBackup,       label: 'Backups',     roles: ADMIN },
+      { to: '/audit-logs',  Icon: MdManageSearch, label: 'Audit Logs',  roles: ADMIN },
+    ],
+  },
+];
+
+// Unread notifications per sidebar section, kept live from SignalR.
+function useSectionBadges() {
+  const [badges, setBadges] = useState({});
+  useEffect(() => {
+    const load = () => getNotificationSummary()
+      .then(r => {
+        const next = {};
+        Object.entries(r.data.byReferenceType ?? {}).forEach(([type, n]) => {
+          const key = SECTION_BY_REFERENCE[type];
+          if (key) next[key] = (next[key] ?? 0) + n;
+        });
+        setBadges(next);
+      })
+      .catch(() => {});
+    load();
+    const onNew = n => {
+      const key = SECTION_BY_REFERENCE[n?.referenceType];
+      if (key) setBadges(b => ({ ...b, [key]: (b[key] ?? 0) + 1 }));
+    };
+    window.addEventListener(NOTIFICATIONS_CHANGED, load);
+    signalRService.onNotificationReceived(onNew);
+    return () => {
+      window.removeEventListener(NOTIFICATIONS_CHANGED, load);
+      signalRService.offNotificationReceived(onNew);
+    };
+  }, []);
+  return badges;
+}
+
 export default function Sidebar() {
   const { user } = useAuth();
   const role = user?.role;
   // Start collapsed if the user prefers it, or auto-collapse on narrow viewports; users can still expand manually.
   const [collapsed, setCollapsed] = useState(() => getDisplayPrefs().sidebarCollapsed || window.matchMedia('(max-width: 900px)').matches);
-  const is = (...roles) => roles.includes(role);
+  const badges = useSectionBadges();
 
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 900px)');
@@ -51,6 +128,10 @@ export default function Sidebar() {
       collapsed ? `${W_CLOSED}px` : `${W_OPEN}px`
     );
   }, [collapsed]);
+
+  const groups = NAV
+    .map(g => ({ ...g, items: g.items.filter(i => i.roles.includes(role)) }))
+    .filter(g => g.items.length > 0);
 
   return (
     <>
@@ -95,64 +176,15 @@ export default function Sidebar() {
 
         {/* ── Nav ── */}
         <nav className="sb-nav">
+          <Item to="/dashboard" Icon={MdDashboard} label="Dashboard" collapsed={collapsed} />
 
-          <Group label="Main" collapsed={collapsed}>
-            <Item to="/dashboard"     Icon={MdDashboard}    label="Dashboard"     collapsed={collapsed} />
-            <Item to="/notifications" Icon={MdNotifications} label="Notifications" collapsed={collapsed} />
-          </Group>
-
-          {is(ROLE.SuperAdmin, ROLE.Admin, ROLE.Inventory, ROLE.Procurement, ROLE.DeptHead, ROLE.DeptStaff) && (
-            <Group label="Inventory" collapsed={collapsed}>
-              {/* A shared department PC only sees its own ward's stock. */}
-              {!is(ROLE.DeptStaff) && (
-                <>
-                  <Item to="/inventory"         Icon={MdInventory} label="Items"            collapsed={collapsed} />
-                  <Item to="/materials"         Icon={MdInventory} label="Materials List"   collapsed={collapsed} />
-                  <Item to="/batches"           Icon={MdGridView}  label="Batches & Expiry" collapsed={collapsed} />
-                </>
-              )}
-              {is(ROLE.SuperAdmin, ROLE.Admin, ROLE.Inventory) && (
-                <>
-                  <Item to="/stock-movements"   Icon={MdSwapVert} label="Stock Movements"  collapsed={collapsed} />
-                  <Item to="/stock-adjustments" Icon={MdTune}     label="Adjustments"      collapsed={collapsed} />
-                </>
-              )}
-              <Item to="/department-stock" Icon={MdWarehouse} label="Department Stock" collapsed={collapsed} />
+          {groups.map(g => (
+            <Group key={g.label} label={g.label} collapsed={collapsed}>
+              {g.items.map(i => (
+                <Item key={i.to} {...i} collapsed={collapsed} badge={i.section ? badges[i.section] : 0} />
+              ))}
             </Group>
-          )}
-
-          {is(ROLE.SuperAdmin, ROLE.Admin, ROLE.Procurement, ROLE.Inventory, ROLE.DeptHead, ROLE.DeptStaff) && (
-            <Group label="Procurement" collapsed={collapsed}>
-              {is(ROLE.SuperAdmin, ROLE.Admin, ROLE.Procurement, ROLE.Inventory) && (
-                <Item to="/procurement" Icon={MdShoppingCart} label="Requests" collapsed={collapsed} />
-              )}
-              {is(ROLE.SuperAdmin, ROLE.Admin, ROLE.DeptHead, ROLE.DeptStaff) && (
-                <Item to="/department-requests" Icon={MdShoppingCart} label="Dept. Requests" collapsed={collapsed} />
-              )}
-              {/* Inventory officers confirm deliveries on the Purchase Orders page. */}
-              {is(ROLE.SuperAdmin, ROLE.Admin, ROLE.Procurement, ROLE.Inventory) && (
-                <Item to="/purchase-orders" Icon={MdLocalShipping} label="Purchase Orders" collapsed={collapsed} />
-              )}
-            </Group>
-          )}
-
-          {is(ROLE.SuperAdmin, ROLE.Admin, ROLE.Inventory, ROLE.Procurement) && (
-            <Group label="Analytics" collapsed={collapsed}>
-              <Item to="/forecast" Icon={MdAnalytics} label="Demand Forecast" collapsed={collapsed} />
-              <Item to="/reports"  Icon={MdBarChart}  label="Reports"         collapsed={collapsed} />
-            </Group>
-          )}
-
-          {is(ROLE.SuperAdmin, ROLE.Admin) && (
-            <Group label="Administration" collapsed={collapsed}>
-              <Item to="/users"       Icon={MdPeople}   label="Users"       collapsed={collapsed} />
-              <Item to="/departments" Icon={MdBusiness} label="Departments" collapsed={collapsed} />
-              <Item to="/categories"  Icon={MdCategory} label="Categories"  collapsed={collapsed} />
-              <Item to="/backups"     Icon={MdBackup}   label="Backups"     collapsed={collapsed} />
-              <Item to="/audit-logs"  Icon={MdHistory}  label="Audit Logs"  collapsed={collapsed} />
-            </Group>
-          )}
-
+          ))}
         </nav>
 
       </aside>
@@ -169,7 +201,6 @@ function Group({ label, collapsed, children }) {
         ? <div className="sb-group-dot" />
         : (
           <div className="sb-group-label">
-            <span className="sb-group-line" />
             <span className="sb-group-text">{label}</span>
             <span className="sb-group-line" />
           </div>
@@ -180,26 +211,22 @@ function Group({ label, collapsed, children }) {
   );
 }
 
-function Item({ to, Icon, label, collapsed }) {
-  const [hov, setHov] = useState(false);
+function Item({ to, Icon, label, hint, collapsed, badge = 0, match }) {
+  const { pathname } = useLocation();
+  const extraActive = match && match.some(m => pathname.startsWith(m));
   return (
     <NavLink
       to={to}
-      title={collapsed ? label : undefined}
-      onMouseEnter={() => setHov(true)}
-      onMouseLeave={() => setHov(false)}
-      className={({ isActive }) => `sb-item${isActive ? ' sb-item--active' : ''}${hov && !window.location.pathname.startsWith(to) ? ' sb-item--hov' : ''}`}
+      title={collapsed ? (badge ? `${label} — ${badge} new` : label) : hint}
+      className={({ isActive }) => `sb-item${isActive || extraActive ? ' sb-item--active' : ''}`}
       style={{ justifyContent: collapsed ? 'center' : 'flex-start' }}
     >
-      {({ isActive }) => (
-        <>
-          <span className={`sb-icon${isActive ? ' sb-icon--active' : hov ? ' sb-icon--hov' : ''}`}>
-            <Icon size={15} />
-          </span>
-          {!collapsed && <span className="sb-label">{label}</span>}
-          {!collapsed && isActive && <span className="sb-active-pip" />}
-        </>
-      )}
+      <span className="sb-icon">
+        <Icon size={15} />
+        {collapsed && badge > 0 && <span className="sb-dot-badge" />}
+      </span>
+      {!collapsed && <span className="sb-label">{label}</span>}
+      {!collapsed && badge > 0 && <span className="sb-badge">{badge > 99 ? '99+' : badge} New</span>}
     </NavLink>
   );
 }
@@ -319,7 +346,7 @@ const CSS = `
   .sb-nav::-webkit-scrollbar { width: 0; }
 
   /* ── Group ── */
-  .sb-group { margin-bottom: 4px; }
+  .sb-group { margin-bottom: 4px; margin-top: 4px; }
 
   .sb-group-label {
     display: flex; align-items: center; gap: 8px;
@@ -331,7 +358,7 @@ const CSS = `
     display: block;
   }
   .sb-group-text {
-    color: rgba(255,255,255,.24); font-size: 9px;
+    color: rgba(255,255,255,.42); font-size: 9px;
     font-weight: 700; letter-spacing: .12em;
     text-transform: uppercase; white-space: nowrap;
     flex-shrink: 0;
@@ -354,7 +381,7 @@ const CSS = `
     border: 1px solid transparent;
     font-family: 'Montserrat', sans-serif;
   }
-  .sb-item--hov {
+  .sb-item:hover:not(.sb-item--active) {
     background: rgba(255,255,255,.06);
     color: rgba(255,255,255,.82);
     border-color: rgba(255,255,255,.07);
@@ -376,12 +403,12 @@ const CSS = `
     color: rgba(255,255,255,.48);
     transition: all .15s;
   }
-  .sb-icon--hov {
+  .sb-item:hover:not(.sb-item--active) .sb-icon {
     background: rgba(255,255,255,.12);
     color: rgba(255,255,255,.82);
     border-color: rgba(255,255,255,.14);
   }
-  .sb-icon--active {
+  .sb-item--active .sb-icon {
     background: linear-gradient(135deg, rgba(37,152,78,.5), rgba(79,208,122,.25));
     border-color: rgba(79,208,122,.45);
     color: #4fd07a;
@@ -390,11 +417,20 @@ const CSS = `
 
   .sb-label { overflow: hidden; text-overflow: ellipsis; flex: 1; }
 
-  /* Active right pip */
-  .sb-active-pip {
-    width: 6px; height: 6px; border-radius: 50%;
-    background: #4fd07a; flex-shrink: 0; margin-left: auto;
-    box-shadow: 0 0 8px rgba(79,208,122,.8);
+  .sb-icon { position: relative; }
+
+  /* "N New" badge — unread notifications about records on that page */
+  .sb-badge {
+    margin-left: auto; flex-shrink: 0;
+    background: #ef4444; color: #fff;
+    font-size: 10px; font-weight: 700; letter-spacing: .02em;
+    padding: 3px 9px; border-radius: 99px;
+    box-shadow: 0 0 12px rgba(239,68,68,.55);
+  }
+  .sb-dot-badge {
+    position: absolute; top: -2px; right: -2px;
+    width: 10px; height: 10px; border-radius: 50%;
+    background: #ef4444; border: 2px solid #080e0a;
   }
 
 `;

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
 import AnnouncementBanner from './AnnouncementBanner';
+import NotificationPopups from './NotificationPopups';
 import { Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { getAppPrefs, rememberLastPath } from '../../utils/appPrefs';
@@ -85,6 +86,8 @@ export default function Layout() {
           </div>
         </main>
       </div>
+
+      <NotificationPopups />
 
       {warning && (
         <div style={{

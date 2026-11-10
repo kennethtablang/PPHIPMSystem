@@ -5,8 +5,9 @@ import { fmtDateTime } from '../../utils/format';
 
 // Where a department request is in the PPH cycle:
 // Department request → Inventory review (stock check + allocation)
-// → Administrator approval → Released to the department's stock.
-const STEPS = ['Draft', 'Inventory Review', 'Admin Approval', 'Released'];
+// → Administrator approval → Released to the department's stock → the
+// Department Head confirms receipt.
+const STEPS = ['Draft', 'Inventory Review', 'Admin Approval', 'Released', 'Received'];
 
 const STEP_OF = {
   SubmittedByDepartment: 0,
@@ -18,9 +19,11 @@ const STEP_OF = {
   PurchaseOrderGenerated: 3,
   Delivered: 3,
   Released: 4,
+  Received: 5,
 };
 
 const NOTE = {
+  Released: { tone: 'blue', text: "Released to the department's stock — waiting for the Department Head to confirm the supplies were received." },
   ReturnedForRevision: { tone: 'amber', text: 'Returned for revision — edit the request and submit it again.' },
   Rejected: { tone: 'red', text: 'This request was rejected.' },
   Cancelled: { tone: 'gray', text: 'This request was cancelled.' },
@@ -86,7 +89,8 @@ const STAGE = {
   FullyApproved: { phase: 'Ongoing', holder: 'Procurement / Inventory', text: 'Approved — waiting for stock; Procurement is replenishing and Inventory releases it once it arrives.' },
   PurchaseOrderGenerated: { phase: 'Ongoing', holder: 'Supplier', text: 'Ongoing — purchase order raised, waiting on the supplier delivery.' },
   Delivered: { phase: 'Completed', holder: null, text: 'Delivered against its purchase order.' },
-  Released: { phase: 'Completed', holder: null, text: "Completed — released to the department's stock." },
+  Released: { phase: 'For Receipt', holder: 'Department Head', text: "Released to the department's stock — waiting for the Department Head to confirm receipt." },
+  Received: { phase: 'Completed', holder: null, text: 'Completed — the department confirmed the supplies were received.' },
   Rejected: { phase: 'Rejected', holder: null, text: 'Rejected — see the remarks in the timeline.' },
   Cancelled: { phase: 'Cancelled', holder: null, text: 'Cancelled by the requester.' },
 };
@@ -99,7 +103,7 @@ const PR_STAGE = {
 };
 const PHASE_TONE = {
   Draft: 'gray', Returned: 'amber', Pending: 'amber', Forwarded: 'purple', Approved: 'green',
-  Ongoing: 'blue', Completed: 'green', Rejected: 'red', Cancelled: 'gray',
+  Ongoing: 'blue', 'For Receipt': 'blue', Completed: 'green', Rejected: 'red', Cancelled: 'gray',
 };
 
 function requestStage(r) {
@@ -156,6 +160,7 @@ export function RequestTimeline({ request: r }) {
     r.poGeneratedAt && { at: r.poGeneratedAt, title: `Purchase order ${r.poNumber} raised`, tone: 'blue' },
     r.poDeliveredAt && { at: r.poDeliveredAt, title: 'Fully delivered by the supplier', tone: 'green' },
     r.releasedAt && { at: r.releasedAt, title: `Released to ${r.departmentName}`, tone: 'green' },
+    r.receivedAt && { at: r.receivedAt, title: 'Received — confirmed by the department', who: r.receivedByFullName, note: r.receiptRemarks, tone: 'green' },
     r.status === 'Cancelled' && { at: r.updatedAt, title: 'Cancelled', tone: 'gray' },
   ].filter(Boolean).sort((a, b) => new Date(a.at) - new Date(b.at));
   const days = daysSince(r.updatedAt ?? r.requestedAt);

@@ -172,7 +172,10 @@ export default function Dashboard() {
         <StatCard label="Low Stock Alerts" value={data?.lowStockCount ?? 0} icon={MdWarning} color="amber" onClick={() => navigate('/inventory?lowStock=true')} />
         <StatCard label="Expiring Batches" value={data?.expiringItemCount ?? 0} icon={MdEvent} color="red" onClick={() => navigate('/batches')} />
         <StatCard label="Pending Requests" value={data?.pendingProcurementRequests ?? 0} icon={MdShoppingCart} color="blue" onClick={() => navigate('/procurement')} />
-        <StatCard label="Pending Adjustments" value={data?.pendingStockAdjustments ?? 0} icon={MdTune} color="purple" onClick={() => navigate('/stock-adjustments')} />
+        {/* Adjustments now apply directly; only old requests can still be pending. */}
+        {(data?.pendingStockAdjustments ?? 0) > 0 && (
+          <StatCard label="Old Adjustments to Review" value={data.pendingStockAdjustments} icon={MdTune} color="purple" onClick={() => navigate('/stock-adjustments')} />
+        )}
         <StatCard label="Unread Notifications" value={data?.unreadNotifications ?? 0} icon={MdNotifications} color="teal" onClick={() => navigate('/notifications')} />
       </div>
 

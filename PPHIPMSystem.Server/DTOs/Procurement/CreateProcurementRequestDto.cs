@@ -105,3 +105,11 @@ public class POItemCostDto
     [Range(0, 1_000_000_000)]
     public decimal UnitCost { get; set; }
 }
+
+// Department Head's proof of receipt; remarks are optional (e.g. "2 boxes
+// arrived dented").
+public class ConfirmReceivedDto
+{
+    [MaxLength(500)]
+    public string? Remarks { get; set; }
+}

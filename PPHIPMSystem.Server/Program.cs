@@ -120,6 +120,8 @@ namespace PPHIPMSystem.Server
             builder.Services.AddScoped<IAuditLogService, AuditLogService>();
             builder.Services.AddScoped<INotificationService, NotificationService>();
             builder.Services.AddScoped<IEmailService, EmailService>();
+            builder.Services.AddSingleton<IEmailQueue, EmailQueue>();
+            builder.Services.AddHostedService<EmailDispatchService>();
             builder.Services.AddScoped<IAuthService, AuthService>();
             builder.Services.AddScoped<IUserService, UserService>();
             builder.Services.AddScoped<IDepartmentService, DepartmentService>();
@@ -239,6 +241,27 @@ namespace PPHIPMSystem.Server
                     await context.Response.WriteAsJsonAsync(new { message = "An unexpected error occurred." });
                 }));
             }
+
+            // Two people saving over the same stock row (or double-clicking an
+            // approve / release) hit the RowVersion check: answer with a clear
+            // 409 instead of a 500, in every environment, so nothing is applied
+            // twice and the user knows to reload and retry.
+            app.Use(async (context, next) =>
+            {
+                try
+                {
+                    await next(context);
+                }
+                catch (Microsoft.EntityFrameworkCore.DbUpdateConcurrencyException) when (!context.Response.HasStarted)
+                {
+                    context.Response.Clear();
+                    context.Response.StatusCode = StatusCodes.Status409Conflict;
+                    await context.Response.WriteAsJsonAsync(new
+                    {
+                        message = "This record was changed by someone else at the same time, so your action was not applied. Reload the page and try again."
+                    });
+                }
+            });
 
             app.UseHttpsRedirection();
             app.UseCors("AllowFrontend");

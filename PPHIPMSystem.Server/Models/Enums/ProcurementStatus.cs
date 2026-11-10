@@ -17,6 +17,10 @@ public enum ProcurementStatus
     // Final approval found enough central stock, so the approved quantities
     // were issued straight into the requesting department's stock. Appended
     // last: values are stored as ints, so existing rows keep their meaning.
-    Released
+    Released,
+
+    // The Department Head confirmed the released supplies were received —
+    // the request is complete. Appended last for the same reason as Released.
+    Received
 }
 

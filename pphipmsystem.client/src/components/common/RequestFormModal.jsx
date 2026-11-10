@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import { MdAdd, MdCheck, MdClose, MdSearch, MdExpandMore, MdChevronRight, MdPriorityHigh, MdWarning } from 'react-icons/md';
+import { MdAdd, MdCheck, MdClose, MdSearch, MdExpandMore, MdChevronRight, MdChevronLeft, MdPriorityHigh, MdWarning, MdEdit } from 'react-icons/md';
 import { createRequest, updateRequest, submitRequest } from '../../api/procurement';
 import { getItems } from '../../api/inventory';
 import { getDepartments } from '../../api/departments';
@@ -7,9 +7,16 @@ import { getDepartmentStock } from '../../api/departmentStock';
 import { getSystemSettings } from '../../api/systemSettings';
 import { formUnit, groupPrLines, peso } from '../../utils/purchaseRequest';
 import Modal from './Modal';
+import { RequestLinesTable } from './RequestProgress';
 import { toast } from './Toast';
 import { useAuth } from '../../context/AuthContext';
 
+// Revision 5: the form is split into steps so the request details and the
+// item picking are never on one crowded page —
+//   1. Request Details (department, requester, purpose, urgency / PR header)
+//   2. Select Items (catalogue + quantities)
+//   3. Review & Submit (everything read-only, then Save Draft / Submit).
+//
 // Supply request form laid out after the hospital's Requisition and Issue Slip:
 // requesting office, requester, purpose, then the item lines (stock no., unit,
 // description, quantity, stock available). Items are picked from a catalogue
@@ -67,6 +74,10 @@ export default function RequestFormModal({ request = null, prefill = null, reple
       estimatedUnitCost: i.estimatedUnitCost != null ? String(i.estimatedUnitCost) : '',
       remarks: i.remarks ?? '',
     })));
+
+  const [step, setStep] = useState(0);
+  // Set on the review step when lines with sufficient stock are confirmed.
+  const [stockAck, setStockAck] = useState(false);
 
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('');
@@ -151,16 +162,32 @@ export default function RequestFormModal({ request = null, prefill = null, reple
   const setLine = (idx, k) => e => setLines(p => p.map((l, j) => (j === idx ? { ...l, [k]: e.target.value } : l)));
   const removeLine = idx => setLines(p => p.filter((_, j) => j !== idx));
 
-  const save = async ({ submit = false, stockConfirmed = false } = {}) => {
-    if (!departmentId) { toast.error('Choose the requesting department.'); return; }
-    if (isSharedPc && !requestedByName.trim()) { toast.error('Enter your name — this PC is shared by the department.'); return; }
-    if (!purpose.trim()) { toast.error('Purpose is required.'); return; }
-    if (isUrgent && urgentReason.trim().length < 10) { toast.error('Explain why this request is urgent (at least 10 characters).'); return; }
-    if (lines.length === 0) { toast.error('Add at least one item.'); return; }
-    if (lines.some(l => !(+l.quantityRequested > 0))) { toast.error('Every item needs a quantity greater than zero.'); return; }
-    if (!stockConfirmed && sufficientLines.length > 0) {
+  // Each step checks only its own fields before moving on.
+  const detailsError = () => {
+    if (!departmentId) return 'Choose the requesting department.';
+    if (isSharedPc && !requestedByName.trim()) return 'Enter your name — this PC is shared by the department.';
+    if (!purpose.trim()) return 'Purpose is required.';
+    if (isUrgent && urgentReason.trim().length < 10) return 'Explain why this request is urgent (at least 10 characters).';
+    return null;
+  };
+  const itemsError = () => {
+    if (lines.length === 0) return 'Add at least one item.';
+    if (lines.some(l => !(+l.quantityRequested > 0))) return 'Every item needs a quantity greater than zero.';
+    return null;
+  };
+  const goTo = target => {
+    if (target > 0) { const err = detailsError(); if (err) { toast.error(err); setStep(0); return; } }
+    if (target > 1) { const err = itemsError(); if (err) { toast.error(err); setStep(1); return; } }
+    setStep(target);
+  };
+
+  const save = async ({ submit = false } = {}) => {
+    const err = detailsError() ?? itemsError();
+    if (err) { toast.error(err); return; }
+    if (sufficientLines.length > 0 && !stockAck) {
       setStockCheck({ submit });
       setTimeout(() => warnRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 0);
+      toast.warning('Confirm the items that are still in stock before saving.');
       return;
     }
     setStockCheck(null);
@@ -236,8 +263,8 @@ export default function RequestFormModal({ request = null, prefill = null, reple
     </div>
   );
 
-  const stockWarning = stockCheck && sufficientLines.length > 0 && (
-    <div ref={warnRef} className="alert alert-warning" style={{ marginTop: 12, fontSize: 12.5, display: 'block' }}>
+  const stockWarning = sufficientLines.length > 0 && (
+    <div ref={warnRef} className="alert alert-warning" style={{ marginTop: 12, fontSize: 12.5, display: 'block', outline: stockCheck && !stockAck ? '2px solid var(--amber-500)' : 'none' }}>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontWeight: 700, marginBottom: 6 }}>
         <MdWarning size={16} /> Stock is still sufficient for {sufficientLines.length} item{sufficientLines.length > 1 ? 's' : ''}
       </div>
@@ -246,13 +273,38 @@ export default function RequestFormModal({ request = null, prefill = null, reple
           <li key={l.inventoryItemId}><strong>{itemMap[l.inventoryItemId]?.name}</strong>: {note}</li>
         ))}
       </ul>
-      Requesting items that are still in stock can lead to excess inventory. Remove or reduce these lines, or choose
-      <strong> Proceed Anyway</strong> if they are really needed (say why in the purpose or line remarks).
+      Requesting items that are still in stock can lead to excess inventory. Go back to <strong>Select Items</strong> to
+      remove or reduce these lines, or confirm below if they are really needed (say why in the purpose or line remarks).
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, fontWeight: 700, cursor: 'pointer' }}>
+        <input type="checkbox" checked={stockAck} onChange={e => setStockAck(e.target.checked)} />
+        These items are really needed — proceed anyway
+      </label>
     </div>
   );
 
   const ownDept = departments.find(d => String(d.id) === String(user?.departmentId));
   const today = new Date().toLocaleDateString('en-PH');
+
+  // Review step: the lines as the reviewer will see them.
+  const reviewRequest = {
+    type: isPr ? 'Replenishment' : 'DepartmentSupply',
+    items: lines.map((l, idx) => {
+      const it = itemMap[l.inventoryItemId];
+      return {
+        id: `${l.inventoryItemId}-${idx}`,
+        inventoryItemId: +l.inventoryItemId,
+        itemName: it?.name ?? 'Unknown item',
+        itemCode: it?.itemCode,
+        categoryName: it?.categoryName,
+        unit: it?.unit ?? '',
+        quantityRequested: +l.quantityRequested || 0,
+        estimatedUnitCost: l.estimatedUnitCost !== '' ? +l.estimatedUnitCost : null,
+        remarks: l.remarks?.trim() || null,
+      };
+    }),
+  };
+  const deptName = departments.find(d => String(d.id) === String(departmentId))?.name ?? ownDept?.name ?? user?.departmentName ?? '—';
+  const STEPS = ['Request Details', isPr ? 'Items to Purchase' : 'Select Items', 'Review & Submit'];
 
   return (
     <Modal
@@ -264,20 +316,23 @@ export default function RequestFormModal({ request = null, prefill = null, reple
       footer={
         <>
           <button className="btn btn-secondary" onClick={onClose}>Cancel</button>
-          {stockCheck && sufficientLines.length > 0 ? (
-            <>
-              <button className="btn btn-secondary" onClick={() => setStockCheck(null)}>Review Items</button>
-              <button className="btn btn-primary" onClick={() => save({ submit: stockCheck.submit, stockConfirmed: true })} disabled={saving}>
-                {saving ? 'Saving…' : 'Proceed Anyway'}
-              </button>
-            </>
+          <span style={{ flex: 1 }} />
+          {step > 0 && (
+            <button className="btn btn-secondary" onClick={() => setStep(step - 1)} disabled={saving}>
+              <MdChevronLeft size={16} /> Back
+            </button>
+          )}
+          {step < 2 ? (
+            <button className="btn btn-primary" onClick={() => goTo(step + 1)}>
+              Next: {STEPS[step + 1]} <MdChevronRight size={16} />
+            </button>
           ) : editing ? (
             <button className="btn btn-primary" onClick={() => save()} disabled={saving}>{saving ? 'Saving…' : 'Save Changes'}</button>
           ) : (
             <>
               <button className="btn btn-secondary" onClick={() => save()} disabled={saving}>Save Draft</button>
               <button className="btn btn-primary" onClick={() => save({ submit: true })} disabled={saving}>
-                {saving ? 'Saving…' : 'Save & Submit'}
+                {saving ? 'Saving…' : isPr ? 'Submit to Chief' : 'Submit Request'}
               </button>
             </>
           )}
@@ -286,293 +341,372 @@ export default function RequestFormModal({ request = null, prefill = null, reple
     >
       <style>{CSS}</style>
 
-      {isPr ? (
-        // Appendix 47 header, row for row as on the paper form.
-        <div className="rf-pr-head">
-          <div className="rf-pr-title">PURCHASE REQUEST</div>
-          <div className="rf-pr-row" style={{ gridTemplateColumns: '2fr 1fr' }}>
-            <div className="form-group">
-              <label className="form-label">LGU</label>
-              <div className="form-control rf-readonly">{form.prLgu || '—'}</div>
+      {/* Step indicator — click a finished step to go back to it. */}
+      <div className="rf-steps">
+        {STEPS.map((label, i) => (
+          <button
+            key={label}
+            type="button"
+            className={`rf-step ${i === step ? 'now' : i < step ? 'done' : ''}`}
+            onClick={() => (i < step ? setStep(i) : goTo(i))}
+          >
+            <span className="rf-step-dot">{i < step ? <MdCheck size={14} /> : i + 1}</span>
+            <span className="rf-step-label">{label}</span>
+            {i === 1 && lines.length > 0 && <span className="rf-step-count">{lines.length}</span>}
+          </button>
+        ))}
+      </div>
+
+      {step === 0 && (
+        <div className="rf-pane">
+          {isPr ? (
+            // Appendix 47 header, row for row as on the paper form.
+            <div className="rf-pr-head">
+              <div className="rf-pr-title">PURCHASE REQUEST</div>
+              <div className="rf-pr-row" style={{ gridTemplateColumns: '2fr 1fr' }}>
+                <div className="form-group">
+                  <label className="form-label">LGU</label>
+                  <div className="form-control rf-readonly">{form.prLgu || '—'}</div>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Fund</label>
+                  <input className="form-control" value={prFields.fund} onChange={setPrField('fund')} placeholder="Leave blank to fill in by hand" maxLength={100} />
+                </div>
+              </div>
+              <div className="rf-pr-row">
+                <div className="form-group">
+                  <label className="form-label">Department</label>
+                  <div className="form-control rf-readonly">{form.prDepartment || '—'}</div>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">PR No.</label>
+                  <div className="form-control rf-readonly">{request?.requestNumber ?? 'Assigned on save'}</div>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Date</label>
+                  <div className="form-control rf-readonly">{request ? new Date(request.requestedAt).toLocaleDateString('en-PH') : today}</div>
+                </div>
+              </div>
+              <div className="rf-pr-row" style={{ gridTemplateColumns: '2fr 1fr' }}>
+                <div className="form-group">
+                  <label className="form-label">Section</label>
+                  <input className="form-control" value={prFields.section} onChange={setPrField('section')} placeholder="Optional" maxLength={150} />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">FPP</label>
+                  <input className="form-control" value={prFields.fpp} onChange={setPrField('fpp')} placeholder="Leave blank to fill in by hand" maxLength={100} />
+                </div>
+              </div>
+              <div className="rf-pr-row" style={{ gridTemplateColumns: '1fr 1fr' }}>
+                <div className="form-group">
+                  <label className="form-label">Requesting Office *</label>
+                  {canPickDept ? (
+                    <select className="form-control" value={departmentId} onChange={e => setDepartmentId(e.target.value)}>
+                      <option value="">Select department…</option>
+                      {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                    </select>
+                  ) : (
+                    <div className="form-control rf-readonly">{ownDept?.name ?? user?.departmentName ?? '—'}</div>
+                  )}
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Requested By {isSharedPc && '*'}</label>
+                  <input
+                    className="form-control"
+                    value={requestedByName}
+                    onChange={e => setRequestedByName(e.target.value)}
+                    placeholder={isSharedPc ? 'Your full name' : 'Name of requester'}
+                    maxLength={150}
+                  />
+                </div>
+              </div>
             </div>
-            <div className="form-group">
-              <label className="form-label">Fund</label>
-              <input className="form-control" value={prFields.fund} onChange={setPrField('fund')} placeholder="Leave blank to fill in by hand" maxLength={100} />
-            </div>
-          </div>
-          <div className="rf-pr-row">
-            <div className="form-group">
-              <label className="form-label">Department</label>
-              <div className="form-control rf-readonly">{form.prDepartment || '—'}</div>
-            </div>
-            <div className="form-group">
-              <label className="form-label">PR No.</label>
-              <div className="form-control rf-readonly">{request?.requestNumber ?? 'Assigned on save'}</div>
-            </div>
-            <div className="form-group">
-              <label className="form-label">Date</label>
-              <div className="form-control rf-readonly">{request ? new Date(request.requestedAt).toLocaleDateString('en-PH') : today}</div>
-            </div>
-          </div>
-          <div className="rf-pr-row" style={{ gridTemplateColumns: '2fr 1fr' }}>
-            <div className="form-group">
-              <label className="form-label">Section</label>
-              <input className="form-control" value={prFields.section} onChange={setPrField('section')} placeholder="Optional" maxLength={150} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">FPP</label>
-              <input className="form-control" value={prFields.fpp} onChange={setPrField('fpp')} placeholder="Leave blank to fill in by hand" maxLength={100} />
-            </div>
-          </div>
-          <div className="rf-pr-row" style={{ gridTemplateColumns: '1fr 1fr' }}>
-            <div className="form-group">
-              <label className="form-label">Requesting Office *</label>
-              {canPickDept ? (
-                <select className="form-control" value={departmentId} onChange={e => setDepartmentId(e.target.value)}>
-                  <option value="">Select department…</option>
-                  {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                </select>
-              ) : (
-                <div className="form-control rf-readonly">{ownDept?.name ?? user?.departmentName ?? '—'}</div>
-              )}
-            </div>
-            <div className="form-group">
-              <label className="form-label">Requested By {isSharedPc && '*'}</label>
-              <input
-                className="form-control"
-                value={requestedByName}
-                onChange={e => setRequestedByName(e.target.value)}
-                placeholder={isSharedPc ? 'Your full name' : 'Name of requester'}
-                maxLength={150}
-              />
-            </div>
-          </div>
+          ) : (
+            <>
+              {/* RIS header */}
+              <div className="rf-head">
+                <div className="form-group">
+                  <label className="form-label">Requesting Department *</label>
+                  {canPickDept ? (
+                    <select className="form-control" value={departmentId} onChange={e => setDepartmentId(e.target.value)}>
+                      <option value="">Select department…</option>
+                      {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                    </select>
+                  ) : (
+                    <div className="form-control rf-readonly">{ownDept?.name ?? user?.departmentName ?? '—'}</div>
+                  )}
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Requested By {isSharedPc && '*'}</label>
+                  <input
+                    className="form-control"
+                    value={requestedByName}
+                    onChange={e => setRequestedByName(e.target.value)}
+                    placeholder={isSharedPc ? 'Your full name' : 'Name of requester'}
+                    maxLength={150}
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">RIS No. / Date</label>
+                  <div className="form-control rf-readonly">{request?.requestNumber ?? 'Assigned on save'} · {today}</div>
+                </div>
+              </div>
+              {purposeField}
+              {urgentField}
+            </>
+          )}
+
+          {isPr && purposeField}
+          {isPr && urgentField}
         </div>
-      ) : (
-        <>
-          {/* RIS header */}
-          <div className="rf-head">
-            <div className="form-group">
-              <label className="form-label">Requesting Department *</label>
-              {canPickDept ? (
-                <select className="form-control" value={departmentId} onChange={e => setDepartmentId(e.target.value)}>
-                  <option value="">Select department…</option>
-                  {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-                </select>
-              ) : (
-                <div className="form-control rf-readonly">{ownDept?.name ?? user?.departmentName ?? '—'}</div>
-              )}
-            </div>
-            <div className="form-group">
-              <label className="form-label">Requested By {isSharedPc && '*'}</label>
-              <input
-                className="form-control"
-                value={requestedByName}
-                onChange={e => setRequestedByName(e.target.value)}
-                placeholder={isSharedPc ? 'Your full name' : 'Name of requester'}
-                maxLength={150}
-              />
-            </div>
-            <div className="form-group">
-              <label className="form-label">RIS No. / Date</label>
-              <div className="form-control rf-readonly">{request?.requestNumber ?? 'Assigned on save'} · {today}</div>
-            </div>
-          </div>
-          {purposeField}
-          {urgentField}
-        </>
       )}
 
-      <div className={`rf-body ${isPr ? 'rf-body-pr' : ''}`}>
-        {/* Catalogue */}
-        <div className="rf-catalog">
-          <div className="rf-search">
-            <MdSearch size={16} />
-            <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search item name, code…" autoFocus />
-            {query && <button onClick={() => setQuery('')} aria-label="Clear search"><MdClose size={14} /></button>}
-          </div>
-          <div className="rf-chips">
-            <button className={`rf-chip ${category === '' ? 'on' : ''}`} onClick={() => setCategory('')}>All <span>{items.length}</span></button>
-            {isPr && lowCount > 0 && (
-              <button className={`rf-chip rf-chip-low ${category === LOW ? 'on' : ''}`} onClick={() => setCategory(category === LOW ? '' : LOW)} title="Items at or below their reorder level">
-                Low stock <span>{lowCount}</span>
-              </button>
-            )}
-            {categories.map(([name, n]) => (
-              <button key={name} className={`rf-chip ${category === name ? 'on' : ''}`} onClick={() => setCategory(category === name ? '' : name)}>
-                {name} <span>{n}</span>
-              </button>
-            ))}
-          </div>
-          <div className="rf-list">
-            {loading ? (
-              <div className="loading-center"><div className="spinner" /></div>
-            ) : matchCount === 0 ? (
-              <div className="rf-empty">No items match.</div>
-            ) : groups.map(([name, list]) => {
-              // A search expands every group so matches are never hidden.
-              const isCollapsed = !query && collapsed[name];
-              return (
-                <div key={name}>
-                  <button className="rf-group" onClick={() => setCollapsed(p => ({ ...p, [name]: !p[name] }))}>
-                    {isCollapsed ? <MdChevronRight size={16} /> : <MdExpandMore size={16} />}
-                    {name} <span>{list.length}</span>
+      {step === 1 && (
+        <div className="rf-pane">
+          <div className={`rf-body ${isPr ? 'rf-body-pr' : ''}`}>
+            {/* Catalogue */}
+            <div className="rf-catalog">
+              <div className="rf-search">
+                <MdSearch size={16} />
+                <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search item name, code…" autoFocus />
+                {query && <button onClick={() => setQuery('')} aria-label="Clear search"><MdClose size={14} /></button>}
+              </div>
+              <div className="rf-chips">
+                <button className={`rf-chip ${category === '' ? 'on' : ''}`} onClick={() => setCategory('')}>All <span>{items.length}</span></button>
+                {isPr && lowCount > 0 && (
+                  <button className={`rf-chip rf-chip-low ${category === LOW ? 'on' : ''}`} onClick={() => setCategory(category === LOW ? '' : LOW)} title="Items at or below their reorder level">
+                    Low stock <span>{lowCount}</span>
                   </button>
-                  {!isCollapsed && list.map(it => {
-                    const on = picked.has(String(it.id));
-                    const out = it.quantityOnHand <= 0;
-                    return (
-                      <button key={it.id} className={`rf-item ${on ? 'on' : ''}`} onClick={() => toggleItem(it)}>
-                        <span className="rf-item-main">
-                          <strong>{it.name}</strong>
-                          <small>{it.itemCode ? `${it.itemCode} · ` : ''}{it.unit}</small>
-                        </span>
-                        <span className={`rf-stock ${out ? 'out' : it.isBelowReorder ? 'low' : ''}`}>
-                          {out ? 'Out of stock' : `${it.quantityOnHand} in stock`}
-                        </span>
-                        <span className="rf-add">{on ? <MdCheck size={15} /> : <MdAdd size={15} />}</span>
+                )}
+                {categories.map(([name, n]) => (
+                  <button key={name} className={`rf-chip ${category === name ? 'on' : ''}`} onClick={() => setCategory(category === name ? '' : name)}>
+                    {name} <span>{n}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="rf-list">
+                {loading ? (
+                  <div className="loading-center"><div className="spinner" /></div>
+                ) : matchCount === 0 ? (
+                  <div className="rf-empty">No items match.</div>
+                ) : groups.map(([name, list]) => {
+                  // A search expands every group so matches are never hidden.
+                  const isCollapsed = !query && collapsed[name];
+                  return (
+                    <div key={name}>
+                      <button className="rf-group" onClick={() => setCollapsed(p => ({ ...p, [name]: !p[name] }))}>
+                        {isCollapsed ? <MdChevronRight size={16} /> : <MdExpandMore size={16} />}
+                        {name} <span>{list.length}</span>
                       </button>
-                    );
-                  })}
-                </div>
-              );
-            })}
-          </div>
-        </div>
+                      {!isCollapsed && list.map(it => {
+                        const on = picked.has(String(it.id));
+                        const out = it.quantityOnHand <= 0;
+                        return (
+                          <button key={it.id} className={`rf-item ${on ? 'on' : ''}`} onClick={() => toggleItem(it)}>
+                            <span className="rf-item-main">
+                              <strong>{it.name}</strong>
+                              <small>{it.itemCode ? `${it.itemCode} · ` : ''}{it.unit}</small>
+                            </span>
+                            <span className={`rf-stock ${out ? 'out' : it.isBelowReorder ? 'low' : ''}`}>
+                              {out ? 'Out of stock' : `${it.quantityOnHand} in stock`}
+                            </span>
+                            <span className="rf-add">{on ? <MdCheck size={15} /> : <MdAdd size={15} />}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
 
-        {/* Requested lines */}
-        <div className="rf-lines">
-          <div className="form-label" style={{ marginBottom: 8 }}>Requested Items ({lines.length})</div>
-          {lines.length === 0 ? (
-            <div className="rf-empty">Pick items from the list to add them here.</div>
-          ) : isPr ? (
-            // Same columns and order as the printed Appendix 47 form.
-            <div className="table-wrap">
-              <table className="rf-pr-table">
-                <thead>
-                  <tr>
-                    <th>Item No.</th>
-                    <th>Unit</th>
-                    <th>Item Description</th>
-                    <th>Quantity</th>
-                    <th title="Optional — leave blank if the price is not yet known">Unit Cost <small>(optional)</small></th>
-                    <th>Total Cost</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {prGroups.map(g => (
-                    <Fragment key={g.category}>
-                      <tr className="rf-pr-cat"><td colSpan={6}>{g.category}</td></tr>
-                      {g.lines.map(({ line: l, itemNo }) => {
+            {/* Requested lines */}
+            <div className="rf-lines">
+              <div className="form-label" style={{ marginBottom: 8 }}>Requested Items ({lines.length})</div>
+              {lines.length === 0 ? (
+                <div className="rf-empty">Pick items from the list to add them here.</div>
+              ) : isPr ? (
+                // Same columns and order as the printed Appendix 47 form.
+                <div className="table-wrap">
+                  <table className="rf-pr-table">
+                    <thead>
+                      <tr>
+                        <th>Item No.</th>
+                        <th>Unit</th>
+                        <th>Item Description</th>
+                        <th>Quantity</th>
+                        <th title="Optional — leave blank if the price is not yet known">Unit Cost <small>(optional)</small></th>
+                        <th>Total Cost</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {prGroups.map(g => (
+                        <Fragment key={g.category}>
+                          <tr className="rf-pr-cat"><td colSpan={6}>{g.category}</td></tr>
+                          {g.lines.map(({ line: l, itemNo }) => {
+                            const it = itemMap[l.inventoryItemId];
+                            const total = (+l.quantityRequested || 0) * (+l.estimatedUnitCost || 0);
+                            return (
+                              <tr key={l.inventoryItemId}>
+                                <td style={{ textAlign: 'center' }}>{itemNo}</td>
+                                <td style={{ whiteSpace: 'nowrap' }}>{formUnit(it?.unit)}</td>
+                                <td>
+                                  <strong style={{ fontSize: 12.5 }}>{(it?.name ?? 'Unknown item').toUpperCase()}</strong>
+                                  {it && (
+                                    <div style={{ fontSize: 11, color: it.isBelowReorder ? 'var(--amber-600)' : 'var(--text-muted)' }}>
+                                      {it.itemCode && <span style={{ fontFamily: 'monospace' }}>{it.itemCode} · </span>}
+                                      {it.quantityOnHand} on hand · reorder at {it.reorderThreshold}
+                                    </div>
+                                  )}
+                                  {sufficientNote(l) && <div className="rf-sufficient"><MdWarning size={12} /> Stock still sufficient</div>}
+                                </td>
+                                <td>
+                                  <input className="form-control" type="number" min="1" step="1" value={l.quantityRequested} onChange={setLine(l.idx, 'quantityRequested')} placeholder="0" style={{ padding: '6px 8px', width: 76 }} />
+                                </td>
+                                <td>
+                                  <input className="form-control" type="number" min="0" step="0.01" value={l.estimatedUnitCost} onChange={setLine(l.idx, 'estimatedUnitCost')} placeholder="—" style={{ padding: '6px 8px', width: 90 }} />
+                                </td>
+                                <td>
+                                  <div className="rf-pr-totalcell">
+                                    <span>{total > 0 ? peso(total) : ''}</span>
+                                    <button className="btn btn-danger btn-icon btn-sm" onClick={() => removeLine(l.idx)} aria-label="Remove item" title="Remove item">×</button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </Fragment>
+                      ))}
+                      {prHasCost && (
+                        <tr className="rf-pr-total">
+                          <td colSpan={5} style={{ textAlign: 'right' }}>TOTAL</td>
+                          <td style={{ whiteSpace: 'nowrap' }}>₱{peso(prTotal)}</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Description</th>
+                        <th>Qty</th>
+                        <th title="Optional — leave blank if the price is not yet known">Est. Unit Cost <small>(optional)</small></th>
+                        <th>Stock Avail.</th>
+                        <th>Remarks</th>
+                        <th />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {lines.map((l, idx) => {
                         const it = itemMap[l.inventoryItemId];
-                        const total = (+l.quantityRequested || 0) * (+l.estimatedUnitCost || 0);
+                        const qty = +l.quantityRequested || 0;
+                        const enough = it && it.quantityOnHand >= qty && it.quantityOnHand > 0;
                         return (
                           <tr key={l.inventoryItemId}>
-                            <td style={{ textAlign: 'center' }}>{itemNo}</td>
-                            <td style={{ whiteSpace: 'nowrap' }}>{formUnit(it?.unit)}</td>
-                            <td>
-                              <strong style={{ fontSize: 12.5 }}>{(it?.name ?? 'Unknown item').toUpperCase()}</strong>
-                              {it && (
-                                <div style={{ fontSize: 11, color: it.isBelowReorder ? 'var(--amber-600)' : 'var(--text-muted)' }}>
-                                  {it.itemCode && <span style={{ fontFamily: 'monospace' }}>{it.itemCode} · </span>}
-                                  {it.quantityOnHand} on hand · reorder at {it.reorderThreshold}
+                            <td style={{ minWidth: 160 }}>
+                              <strong style={{ fontSize: 13 }}>{it?.name ?? 'Unknown item'}</strong>
+                              <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                                {it?.itemCode && <span style={{ fontFamily: 'monospace' }}>{it.itemCode} · </span>}{it?.unit}
+                              </div>
+                              {sufficientNote(l) && (
+                                <div className="rf-sufficient" title={sufficientNote(l)}>
+                                  <MdWarning size={12} /> Ward has {wardStock[l.inventoryItemId]} on hand
                                 </div>
                               )}
-                              {sufficientNote(l) && <div className="rf-sufficient"><MdWarning size={12} /> Stock still sufficient</div>}
                             </td>
                             <td>
-                              <input className="form-control" type="number" min="1" step="1" value={l.quantityRequested} onChange={setLine(l.idx, 'quantityRequested')} placeholder="0" style={{ padding: '6px 8px', width: 76 }} />
+                              <input className="form-control" type="number" min="1" step="1" value={l.quantityRequested} onChange={setLine(idx, 'quantityRequested')} placeholder="0" style={{ padding: '6px 8px', minWidth: 72 }} />
                             </td>
                             <td>
-                              <input className="form-control" type="number" min="0" step="0.01" value={l.estimatedUnitCost} onChange={setLine(l.idx, 'estimatedUnitCost')} placeholder="—" style={{ padding: '6px 8px', width: 90 }} />
+                              <input className="form-control" type="number" min="0" step="0.01" value={l.estimatedUnitCost} onChange={setLine(idx, 'estimatedUnitCost')} placeholder="Optional" style={{ padding: '6px 8px', minWidth: 88 }} />
                             </td>
                             <td>
-                              <div className="rf-pr-totalcell">
-                                <span>{total > 0 ? peso(total) : ''}</span>
-                                <button className="btn btn-danger btn-icon btn-sm" onClick={() => removeLine(l.idx)} aria-label="Remove item" title="Remove item">×</button>
-                              </div>
+                              {it && (
+                                <span className={`badge ${enough ? 'badge-green' : 'badge-amber'}`} title={`${it.quantityOnHand} ${it.unit} on hand`}>
+                                  {enough ? 'Yes' : it.quantityOnHand > 0 ? `Only ${it.quantityOnHand}` : 'No'}
+                                </span>
+                              )}
+                            </td>
+                            <td>
+                              <input className="form-control" value={l.remarks} onChange={setLine(idx, 'remarks')} placeholder="Optional" maxLength={300} style={{ padding: '6px 8px', minWidth: 90 }} />
+                            </td>
+                            <td>
+                              <button className="btn btn-danger btn-icon btn-sm" onClick={() => removeLine(idx)} aria-label="Remove item">×</button>
                             </td>
                           </tr>
                         );
                       })}
-                    </Fragment>
-                  ))}
-                  {prHasCost && (
-                    <tr className="rf-pr-total">
-                      <td colSpan={5} style={{ textAlign: 'right' }}>TOTAL</td>
-                      <td style={{ whiteSpace: 'nowrap' }}>₱{peso(prTotal)}</td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
-          ) : (
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Description</th>
-                    <th>Qty</th>
-                    <th title="Optional — leave blank if the price is not yet known">Est. Unit Cost <small>(optional)</small></th>
-                    <th>Stock Avail.</th>
-                    <th>Remarks</th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {lines.map((l, idx) => {
-                    const it = itemMap[l.inventoryItemId];
-                    const qty = +l.quantityRequested || 0;
-                    const enough = it && it.quantityOnHand >= qty && it.quantityOnHand > 0;
-                    return (
-                      <tr key={l.inventoryItemId}>
-                        <td style={{ minWidth: 160 }}>
-                          <strong style={{ fontSize: 13 }}>{it?.name ?? 'Unknown item'}</strong>
-                          <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>
-                            {it?.itemCode && <span style={{ fontFamily: 'monospace' }}>{it.itemCode} · </span>}{it?.unit}
-                          </div>
-                          {sufficientNote(l) && (
-                            <div className="rf-sufficient" title={sufficientNote(l)}>
-                              <MdWarning size={12} /> Ward has {wardStock[l.inventoryItemId]} on hand
-                            </div>
-                          )}
-                        </td>
-                        <td>
-                          <input className="form-control" type="number" min="1" step="1" value={l.quantityRequested} onChange={setLine(idx, 'quantityRequested')} placeholder="0" style={{ padding: '6px 8px', minWidth: 72 }} />
-                        </td>
-                        <td>
-                          <input className="form-control" type="number" min="0" step="0.01" value={l.estimatedUnitCost} onChange={setLine(idx, 'estimatedUnitCost')} placeholder="Optional" style={{ padding: '6px 8px', minWidth: 88 }} />
-                        </td>
-                        <td>
-                          {it && (
-                            <span className={`badge ${enough ? 'badge-green' : 'badge-amber'}`} title={`${it.quantityOnHand} ${it.unit} on hand`}>
-                              {enough ? 'Yes' : it.quantityOnHand > 0 ? `Only ${it.quantityOnHand}` : 'No'}
-                            </span>
-                          )}
-                        </td>
-                        <td>
-                          <input className="form-control" value={l.remarks} onChange={setLine(idx, 'remarks')} placeholder="Optional" maxLength={300} style={{ padding: '6px 8px', minWidth: 90 }} />
-                        </td>
-                        <td>
-                          <button className="btn btn-danger btn-icon btn-sm" onClick={() => removeLine(idx)} aria-label="Remove item">×</button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+          </div>
+        </div>
+      )}
+
+      {step === 2 && (
+        <div className="rf-pane">
+          <div className="rf-review-head">
+            <div className="rf-review-grid">
+              <div><span>{isPr ? 'Requesting Office' : 'Requesting Department'}</span><strong>{deptName}</strong></div>
+              <div><span>Requested By</span><strong>{requestedByName.trim() || '—'}</strong></div>
+              <div><span>{isPr ? 'PR No.' : 'RIS No.'}</span><strong>{request?.requestNumber ?? 'Assigned on save'}</strong></div>
+              {isPr && (prFields.fund || prFields.section || prFields.fpp) && (
+                <div><span>Fund / Section / FPP</span><strong>{[prFields.fund, prFields.section, prFields.fpp].map(v => v.trim() || '—').join(' / ')}</strong></div>
+              )}
+              <div style={{ gridColumn: '1 / -1' }}><span>Purpose</span><strong style={{ fontWeight: 500 }}>{purpose.trim()}</strong></div>
+            </div>
+            <button className="btn btn-ghost btn-sm" onClick={() => setStep(0)}><MdEdit size={14} /> Edit details</button>
+          </div>
+
+          {isUrgent && (
+            <div className="alert alert-danger" style={{ fontSize: 13, marginTop: 10 }}>
+              <strong>URGENT / EMERGENCY:</strong>&nbsp;{urgentReason.trim()}
             </div>
           )}
+
+          <div style={{ display: 'flex', alignItems: 'center', marginTop: 14 }}>
+            <label className="form-label" style={{ margin: 0, flex: 1 }}>
+              {isPr ? 'Items to Purchase' : 'Requested Items'} ({lines.length})
+            </label>
+            <button className="btn btn-ghost btn-sm" onClick={() => setStep(1)}><MdEdit size={14} /> Edit items</button>
+          </div>
+          <RequestLinesTable request={reviewRequest} itemMap={isPr ? undefined : itemMap} showCost />
+          {stockWarning}
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 10 }}>
+            {editing
+              ? 'Saving keeps the request at its current stage.'
+              : isPr
+                ? 'Save Draft keeps it with you; Submit sends it to the Chief of Hospital for approval.'
+                : 'Save Draft keeps it with you; Submit sends it to the Inventory Office for stock checking.'}
+          </div>
         </div>
-      </div>
-      {isPr && purposeField}
-      {isPr && urgentField}
-      {stockWarning}
+      )}
     </Modal>
   );
 }
 
 const CSS = `
+.rf-steps { display: flex; gap: 8px; margin: -4px 0 16px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+.rf-step { flex: 1; display: flex; align-items: center; gap: 8px; border: 1px solid var(--border); background: transparent; border-radius: 99px; padding: 6px 12px 6px 6px; font: inherit; font-size: 12.5px; font-weight: 600; color: var(--text-muted); cursor: pointer; min-width: 0; }
+.rf-step-dot { width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: var(--bg-muted); font-size: 12px; font-weight: 700; }
+.rf-step-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rf-step-count { margin-left: auto; background: var(--green-600); color: #fff; border-radius: 99px; padding: 1px 8px; font-size: 11px; }
+.rf-step.now { border-color: var(--green-500); color: var(--text-primary); background: var(--green-50); }
+.rf-step.now .rf-step-dot { background: var(--green-600); color: #fff; }
+.rf-step.done { color: var(--text-secondary); }
+.rf-step.done .rf-step-dot { background: var(--green-600); color: #fff; }
+.rf-pane { animation: rfIn .18s ease; }
+.rf-pane > .rf-body:first-child { margin-top: 0; }
+@keyframes rfIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.rf-review-head { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-md, 18px); background: var(--card-bg); }
+.rf-review-grid { flex: 1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px 16px; }
+.rf-review-grid span { display: block; font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--text-muted); }
+.rf-review-grid strong { font-size: 13px; color: var(--text-primary); word-break: break-word; }
 .rf-head { display: grid; grid-template-columns: 1.2fr 1.2fr 1fr; gap: 12px; }
 .rf-readonly { background: var(--bg-muted); color: var(--text-secondary); cursor: default; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rf-body { display: grid; grid-template-columns: minmax(260px, 5fr) 7fr; gap: 16px; margin-top: 14px; }
@@ -586,7 +720,7 @@ const CSS = `
 .rf-chip.on { background: var(--green-600); border-color: var(--green-600); color: #fff; }
 .rf-chip-low { border-color: var(--amber-500); color: var(--amber-600); }
 .rf-chip-low.on { background: var(--amber-500); border-color: var(--amber-500); color: #fff; }
-.rf-list { max-height: 360px; overflow-y: auto; margin: 0 -4px; padding: 0 4px; }
+.rf-list { max-height: 440px; overflow-y: auto; margin: 0 -4px; padding: 0 4px; }
 .rf-group { width: 100%; display: flex; align-items: center; gap: 4px; border: 0; background: none; color: var(--text-accent); font: inherit; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; padding: 8px 2px 4px; cursor: pointer; position: sticky; top: 0; backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
 .rf-group span { color: var(--text-muted); font-weight: 600; }
 .rf-item { width: 100%; display: flex; align-items: center; gap: 8px; border: 1px solid transparent; background: none; color: var(--text-primary); text-align: left; font: inherit; padding: 6px 8px; border-radius: var(--radius-sm); cursor: pointer; }
@@ -618,6 +752,8 @@ const CSS = `
 .rf-urgent.on .rf-urgent-toggle { color: var(--red-500); }
 .rf-empty { padding: 28px 12px; text-align: center; color: var(--text-muted); font-size: 13px; border: 1px dashed var(--border); border-radius: var(--radius-sm); }
 @media (max-width: 860px) {
-  .rf-head, .rf-body, .rf-pr-row { grid-template-columns: 1fr !important; }
+  .rf-head, .rf-body, .rf-pr-row, .rf-review-grid { grid-template-columns: 1fr !important; }
+  .rf-step-label { display: none; }
+  .rf-step { flex: 0 0 auto; padding-right: 6px; }
 }
 `;

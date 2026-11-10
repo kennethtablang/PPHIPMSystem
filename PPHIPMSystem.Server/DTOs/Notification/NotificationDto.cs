@@ -15,3 +15,11 @@ public class NotificationDto
     public DateTime CreatedAt { get; set; }
     public DateTime? ReadAt { get; set; }
 }
+
+// Unread notifications grouped by the kind of record they point at
+// (ProcurementRequest, PurchaseOrder, InventoryItem, ...), for sidebar badges.
+public class NotificationSummaryDto
+{
+    public int Total { get; set; }
+    public Dictionary<string, int> ByReferenceType { get; set; } = [];
+}

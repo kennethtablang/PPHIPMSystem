@@ -34,7 +34,7 @@ function StatCard({ label, value, icon: Icon, color, sub, onClick }) {
 }
 
 // Compact version of RequestProgress for table rows: the department's view of
-// the cycle is Draft → Inventory Review → Admin Approval → Released.
+// the cycle is Draft → Inventory Review → Admin Approval → Released → Received.
 const STATUS_STEP = {
   SubmittedByDepartment:      0,
   SubmittedToProcurement:     1,
@@ -44,8 +44,9 @@ const STATUS_STEP = {
   PurchaseOrderGenerated:     3,
   Delivered:                  3,
   Released:                   4,
+  Received:                   5,
 };
-const STEPS_LABELS = ['Draft', 'Inventory Review', 'Admin Approval', 'Released'];
+const STEPS_LABELS = ['Draft', 'Inventory Review', 'Admin Approval', 'Released', 'Received'];
 
 function RequestTimeline({ status }) {
   if (status === 'Cancelled' || status === 'Rejected' || status === 'ReturnedForRevision') {
@@ -58,7 +59,7 @@ function RequestTimeline({ status }) {
   }
   const step = STATUS_STEP[status] ?? 0;
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }} title={step === 3 ? 'Approved — waiting for stock' : STEPS_LABELS[Math.min(step, 3)]}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }} title={step === 3 ? 'Approved — waiting for stock' : step === 4 ? 'Released — confirm receipt' : STEPS_LABELS[Math.min(step, 4)]}>
       {STEPS_LABELS.map((label, i) => (
         <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <div style={{
@@ -115,7 +116,8 @@ export default function DepartmentHeadDashboard() {
     </div>
   );
 
-  const DONE = ['Released', 'Delivered'];
+  const DONE = ['Released', 'Received', 'Delivered'];
+  const toConfirm = requests.filter(r => r.status === 'Released').length;
   const drafts   = requests.filter(r => r.status === 'SubmittedByDepartment').length;
   const pending  = requests.filter(r => ['SubmittedToProcurement', 'ApprovedByInventoryOfficer', 'ApprovedByProcurement', 'FullyApproved', 'PurchaseOrderGenerated'].includes(r.status)).length;
   const returned = requests.filter(r => r.status === 'ReturnedForRevision').length;
@@ -197,7 +199,7 @@ export default function DepartmentHeadDashboard() {
       <div className="grid-4" style={{ marginBottom: 24 }}>
         <StatCard label="Total Requests" value={requests.length} icon={MdAssignment} color="green" sub="all time" onClick={() => navigate('/department-requests')} />
         <StatCard label="In Progress" value={pending} icon={MdAccessTime} color="blue" sub="inventory / admin / stock" onClick={() => navigate('/department-requests')} />
-        <StatCard label="Released" value={approved} icon={MdCheckCircle} color="teal" sub="in department stock" onClick={() => navigate('/department-requests')} />
+        <StatCard label="To Confirm Receipt" value={toConfirm} icon={MdCheckCircle} color={toConfirm > 0 ? 'amber' : 'teal'} sub={`${approved} released in total`} onClick={() => navigate('/department-requests')} />
         <StatCard label="Returned / Rejected" value={returned + rejected} icon={MdWarning} color={returned + rejected > 0 ? 'red' : 'amber'} sub="needs attention" onClick={() => navigate('/department-requests')} />
       </div>
 

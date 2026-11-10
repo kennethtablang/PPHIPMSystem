@@ -6,6 +6,8 @@ export const updateRequest = (id, d) => api.put(`/procurement/${id}`, d);
 export const cancelRequest = (id, reason) => api.patch(`/procurement/${id}/cancel`, { reason });
 export const submitRequest = id => api.patch(`/procurement/${id}/submit`);
 export const releaseRequest = id => api.patch(`/procurement/${id}/release`);
+// Department Head's proof of receipt for released supplies.
+export const confirmReceived = (id, remarks) => api.patch(`/procurement/${id}/confirm-received`, { remarks });
 // Inventory Officer's fair-share allocation board
 export const getAllocation = () => api.get('/procurement/allocation');
 export const saveAllocation = lines => api.put('/procurement/allocation', { lines });

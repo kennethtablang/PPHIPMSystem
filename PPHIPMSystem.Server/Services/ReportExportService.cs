@@ -463,7 +463,7 @@ public class ReportExportService : IReportExportService
         ws.Row(row + 1).Height = 17;
         row += 2;
 
-        var released = request.Status == Models.Enums.ProcurementStatus.Released;
+        var released = request.Status is Models.Enums.ProcurementStatus.Released or Models.Enums.ProcurementStatus.Received;
         for (var i = 0; i < RisLinesPerPage; i++)
         {
             ws.Range(row, 3, row, 5).Merge();

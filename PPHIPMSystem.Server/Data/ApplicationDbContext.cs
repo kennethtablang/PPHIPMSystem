@@ -217,11 +217,35 @@ public class ApplicationDbContext : IdentityDbContext<ApplicationUser>
         builder.Entity<ProcurementRequest>(e =>
         {
             e.HasIndex(r => r.RequestNumber).IsUnique();
+            // Review queues filter by type + status on every page load.
+            e.HasIndex(r => new { r.Type, r.Status });
+            e.HasOne(r => r.ReceivedByUser)
+             .WithMany()
+             .HasForeignKey(r => r.ReceivedByUserId)
+             .OnDelete(DeleteBehavior.Restrict);
         });
 
         builder.Entity<PurchaseOrder>(e =>
         {
             e.HasIndex(po => po.PONumber).IsUnique();
+        });
+
+        // The bell badge and sidebar counters ask "my unread notifications"
+        // on every page; without this it scans the whole table.
+        builder.Entity<Notification>(e =>
+        {
+            e.HasIndex(n => new { n.UserId, n.IsRead, n.CreatedAt });
+        });
+
+        // The ledger and dashboard trend always read newest-first / by date.
+        builder.Entity<StockMovement>(e =>
+        {
+            e.HasIndex(m => m.MovementDate);
+        });
+
+        builder.Entity<StockAdjustment>(e =>
+        {
+            e.HasIndex(a => a.RequestedAt);
         });
     }
 }
